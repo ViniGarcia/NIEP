@@ -1,0 +1,11 @@
+[{
+	"x": {
+		"function":"print.click",
+		"path":"FUNCTIONS/",
+		"tasks": {
+			"1":"start",
+			"2":"running",
+			"3":"stop"
+		}
+	}
+}]
