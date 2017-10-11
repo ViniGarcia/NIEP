@@ -1,0 +1,120 @@
+<domain id="2" type="kvm">
+  <name>y</name>
+  <uuid>2de9398d-5829-469d-becd-ea29e0f04fee</uuid>
+  <memory unit="KiB">307200</memory>
+  <currentMemory unit="KiB">307200</currentMemory>
+  <vcpu placement="static">1</vcpu>
+  <resource>
+    <partition>/machine</partition>
+  </resource>
+  <os>
+    <type arch="x86_64" machine="pc-i440fx-2.1">hvm</type>
+    <boot dev="hd" />
+  </os>
+  <features>
+    <acpi />
+    <apic />
+  </features>
+  <cpu match="exact" mode="custom">
+    <model fallback="allow">Penryn</model>
+  </cpu>
+  <clock offset="utc">
+    <timer name="rtc" tickpolicy="catchup" />
+    <timer name="pit" tickpolicy="delay" />
+    <timer name="hpet" present="no" />
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+  <pm>
+    <suspend-to-mem enabled="no" />
+    <suspend-to-disk enabled="no" />
+  </pm>
+  <devices>
+    <emulator>/usr/bin/kvm</emulator>
+    <disk device="disk" type="file">
+      <driver name="qemu" type="qcow2" />
+      <source file="/home/gtfende/NIEP/PyCOO/IMAGES/y/click-on-osv.qcow2" />
+      <backingStore />
+      <target bus="virtio" dev="vda" />
+      <alias name="virtio-disk0" />
+      <address bus="0x00" domain="0x0000" function="0x0" slot="0x08" type="pci" />
+    </disk>
+    <controller index="0" model="ich9-ehci1" type="usb">
+      <alias name="usb0" />
+      <address bus="0x00" domain="0x0000" function="0x7" slot="0x06" type="pci" />
+    </controller>
+    <controller index="0" model="ich9-uhci1" type="usb">
+      <alias name="usb0" />
+      <master startport="0" />
+      <address bus="0x00" domain="0x0000" function="0x0" multifunction="on" slot="0x06" type="pci" />
+    </controller>
+    <controller index="0" model="ich9-uhci2" type="usb">
+      <alias name="usb0" />
+      <master startport="2" />
+      <address bus="0x00" domain="0x0000" function="0x1" slot="0x06" type="pci" />
+    </controller>
+    <controller index="0" model="ich9-uhci3" type="usb">
+      <alias name="usb0" />
+      <master startport="4" />
+      <address bus="0x00" domain="0x0000" function="0x2" slot="0x06" type="pci" />
+    </controller>
+    <controller index="0" model="pci-root" type="pci">
+      <alias name="pci.0" />
+    </controller>
+    <controller index="0" type="virtio-serial">
+      <alias name="virtio-serial0" />
+      <address bus="0x00" domain="0x0000" function="0x0" slot="0x07" type="pci" />
+    </controller>
+    <interface type="network">
+      <mac address="52:54:01:6c:22:02" />
+      <source network="Mininet" />
+      <target dev="vnet0" />
+      <model type="virtio" />
+      <alias name="net0" />
+      <address bus="0x00" domain="0x0000" function="0x0" slot="0x03" type="pci" />
+    </interface>
+    <serial type="pty">
+      <source path="/dev/pts/0" />
+      <target port="0" />
+      <alias name="serial0" />
+    </serial>
+    <console tty="/dev/pts/0" type="pty">
+      <source path="/dev/pts/0" />
+      <target port="0" type="serial" />
+      <alias name="serial0" />
+    </console>
+    <channel type="spicevmc">
+      <target name="com.redhat.spice.0" type="virtio" />
+      <alias name="channel0" />
+      <address bus="0" controller="0" port="1" type="virtio-serial" />
+    </channel>
+    <input bus="usb" type="tablet">
+      <alias name="input0" />
+    </input>
+    <input bus="ps2" type="mouse" />
+    <input bus="ps2" type="keyboard" />
+    <graphics autoport="yes" listen="127.0.0.1" port="5900" type="spice">
+      <listen address="127.0.0.1" type="address" />
+    </graphics>
+    <sound model="ich6">
+      <alias name="sound0" />
+      <address bus="0x00" domain="0x0000" function="0x0" slot="0x05" type="pci" />
+    </sound>
+    <video>
+      <model heads="1" ram="65536" type="qxl" vram="65536" />
+      <alias name="video0" />
+      <address bus="0x00" domain="0x0000" function="0x0" slot="0x02" type="pci" />
+    </video>
+    <redirdev bus="usb" type="spicevmc">
+      <alias name="redir0" />
+    </redirdev>
+    <redirdev bus="usb" type="spicevmc">
+      <alias name="redir1" />
+    </redirdev>
+    <memballoon model="virtio">
+      <alias name="balloon0" />
+      <address bus="0x00" domain="0x0000" function="0x0" slot="0x09" type="pci" />
+    </memballoon>
+  <interface type="bridge"><mac address="52:54:00:6c:22:13" /><source bridge="br0" /><model type="virtio" /><address bus="0x00" domain="0x0000" function="0x0" slot="0x0a" type="pci" /></interface><interface type="bridge"><mac address="52:54:00:06:91:05" /><source bridge="br1" /><model type="virtio" /><address bus="0x00" domain="0x0000" function="0x0" slot="0x0b" type="pci" /></interface></devices>
+</domain>

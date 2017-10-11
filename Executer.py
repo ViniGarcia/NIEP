@@ -12,38 +12,39 @@ class Executer:
 
 #------------------------------------------------------------------
 
-    def VNFSPrepare(self):
+    def executerPrepare(self):
 
-        for VNFINSTANCE in self.CONFIGURATION.VNFS:
-            VNFINSTANCE.createVNF()
-
-#------------------------------------------------------------------
-
-    def mininetPrepare(self):
+	for VNFINSTANCE in self.CONFIGURATION.VNFS:
+		VNFINSTANCE.createVNF()
 
         self.NET = Mininet()
 
         for HOST in self.CONFIGURATION.MNHOSTS:
             HOST.ELEM = self.NET.addHost(HOST.ID)
-            HOST.ELEM.setIP(HOST.IP)
 
         for SWITCH in self.CONFIGURATION.MNSWITCHES:
             SWITCH.ELEM = self.NET.addSwitch(SWITCH.ID)
 
-        for CONTROLLER in self.CONFIGURATION.MNCONTROLLERS:
+        for CONTROLLER in self.CONFIGURATION.MNCONTROLLER:
             CONTROLLER.ELEM = self.NET.addController(CONTROLLER.ID)
 
-        for OVS in self.MNOVSES:
+        for OVS in self.CONFIGURATION.MNOVSES:
             OVS.ELEM = self.NET.addSwitch(OVS.ID)
 
 #------------------------------------------------------------------
 
     def connectionsPrepare(self):
-        print ("NOT IMPLEMENTED YET")
+        
+	if self.NET == None:
+		return -1
+
+	for LINK in self.CONFIGURATION.CONNECTIONS:
+		if not "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
+			self.NET.addLink(LINK["IN/OUT"], LINK["OUT/IN"])
 
 #------------------------------------------------------------------
 
-    def topologyStart(self):
+    def topologyUp(self):
 
         for VNFINSTANCE in self.CONFIGURATION.VNFS:
             VNFINSTANCE.upVNF()
@@ -53,4 +54,6 @@ class Executer:
 
 PSR = PlatformParser("Teste01.json")
 EXE = Executer(PSR)
-EXE.VNFSStart()
+EXE.executerPrepare()
+EXE.connectionsPrepare()
+EXE.topologyUp()
