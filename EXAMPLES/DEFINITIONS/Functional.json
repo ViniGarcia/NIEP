@@ -1,0 +1,31 @@
+{
+	"ID": "TESTE",
+	"VNFS":[],
+	"SFCS":["/home/gtfende/Documentos/NIEP/EXAMPLES/SFCS/sfc.json"],
+	"MININET":{
+		"HOSTS":[
+			{
+				"ID":"HOST01",
+				"IP":"192.168.122.01/24"
+			},
+			{
+				"ID":"HOST02",
+				"IP":"192.168.122.02/24"
+			}
+
+		],
+		"SWITCHES":["SWITCH01"],
+		"CONTROLLERS":[],
+		"OVSWITCHES":[]
+	},
+	"CONNECTIONS":[
+		{
+			"IN/OUT":"HOST01",
+			"OUT/IN":"SWITCH01"
+		},
+		{
+			"IN/OUT":"HOST02",
+			"OUT/IN":"SWITCH01"
+		}
+	]
+}
