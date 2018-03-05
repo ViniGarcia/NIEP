@@ -20,8 +20,17 @@ class Executer:
 
     def mininetPrepare(self):
 
-        #for VNFINSTANCE in self.CONFIGURATION.VNFS:
-        #    VNFINSTANCE.createVNF()
+        #if self.CONFIGURATION.VNFS:
+        #    VMCTRL = MNController('VMCTRL')
+        #    VMCTRL.ELEM = Controller('VMCTRL', inNamespace=False)
+        #    self.CONTROLLERS['VMCTRL'] = VMCTRL
+
+        #    VMACC = MNOVSES('VMACC', 'VMCTRL')
+        #    VMACC.ELEM = OVSSwitch(VMACC.ID, inNamespace=False)
+        #    self.OVSSWITCHES['VMACC'] = VMACC
+
+        #    for VNFINSTANCE in self.CONFIGURATION.VNFS:
+        #        VNFINSTANCE.createVNF()
 
         for HOST in self.CONFIGURATION.MNHOSTS:
             HOST.ELEM = Host(HOST.ID)
@@ -105,10 +114,11 @@ class Executer:
             self.SWITCHES[SWITCH].ELEM.stop()
 #------------------------------------------------------------------
 
-'''PSR = PlatformParser("/home/gtfende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json")
+PSR = PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json")
 EXE = Executer(PSR)
 EXE.mininetPrepare()
 EXE.topologyUp()
+raw_input('Enter your input:')
 print EXE.HOSTS["HOST01"].ELEM.IP()
-print EXE.HOSTS["HOST01"].ELEM.cmd( 'ping -c1', "192.168.122.02")
-EXE.topologyDown()'''
+print EXE.HOSTS["HOST01"].ELEM.cmd('ping -c1', "192.168.122.02")
+EXE.topologyDown()
