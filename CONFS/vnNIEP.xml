@@ -1,12 +1,18 @@
 <network>
   <name>vnNIEP</name>
-  <uuid>0b845385-b1da-4c33-8108-27cb3bcad126</uuid>
-  <bridge name='vbrNIEP' stp='on' delay='0'/>
-  <mac address='52:54:00:52:d6:8f'/>
+  <uuid>b6964b78-8225-4aa7-9e35-38f162ca5953</uuid>
+  <forward dev='vbrNIEP-nic' mode='nat'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+    <interface dev='vbrNIEP-nic'/>
+  </forward>
+  <bridge name='virbr1' stp='on' delay='0'/>
+  <mac address='52:54:00:a3:6b:f2'/>
   <domain name='vnNIEP'/>
   <ip address='192.168.100.1' netmask='255.255.255.0'>
     <dhcp>
-      <range start='192.168.100.2' end='192.168.100.254'/>
+      <range start='192.168.100.128' end='192.168.100.254'/>
     </dhcp>
   </ip>
 </network>

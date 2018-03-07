@@ -1,6 +1,6 @@
 <domain type="kvm">
   <name>x</name>
-  <uuid>c662be56-3786-419d-8cc1-5b17b4789725</uuid>
+  <uuid>95071120-6fa1-4a0f-a889-5d74784ad9bc</uuid>
   <memory unit="KiB">307200</memory>
   <currentMemory unit="KiB">307200</currentMemory>
   <vcpu placement="static">1</vcpu>

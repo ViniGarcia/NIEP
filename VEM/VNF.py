@@ -1,4 +1,5 @@
 import json
+import libvirt 
 from REST import REST
 from time import sleep
 from glob import glob
@@ -14,6 +15,8 @@ from xml.etree import ElementTree
 FNULL = open(devnull, 'w')
 #STDPATH: standard path - added to be used in NIEP
 STDPATH = '../VEM/'
+#VIRT_CONNECTION: used to manage the virtual machines creation and exclusion
+VIRT_CONNECTION = libvirt.open("qemu:///system")
 
 #VNFServer: class for Click-On-OSv VNFs management.
 #Assumptions:
@@ -38,6 +41,8 @@ class VNF:
 
     VNF_JSON = ''
     VNF_REST = None
+
+    VIRT_VM = None
 
 # __init__: redirects to the correct function to initialize the class, for file interfaces use set 'interface'
 #          as none.
@@ -120,7 +125,7 @@ class VNF:
 
         existingImages = glob(STDPATH + 'IMAGES/*')
         for images in existingImages:
-            if images[9:] == self.ID:
+            if images[14:] == self.ID:
                 self.VNF_EXIST = True
                 break
 
@@ -312,7 +317,7 @@ class VNF:
             ifacesCreate = copy(self.INTERFACES)
             for iface in self.INTERFACES:
                 for iface2 in ifacesData:
-                    if iface2.startswith(iface['ID']):
+                    if iface2.startswith(iface['ID']):    
                         ifacesCreate.remove(iface)
 
             for iface in ifacesCreate:
@@ -320,7 +325,11 @@ class VNF:
             for iface in self.INTERFACES:
                 call(['ifconfig', iface['ID'], 'up'])
 
-            call(['virsh', 'create', path.abspath(STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml')], stdout = FNULL)
+            with open(STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml', 'r') as domainFile:
+                domainXML = domainFile.read()
+            VIRT_CONNECTION.defineXML(domainXML)
+            self.VIRT_VM = VIRT_CONNECTION.lookupByName(self.ID)
+            self.VIRT_VM.create()
             self.VNF_UP = True
             return 0
         else:
@@ -339,7 +348,9 @@ class VNF:
             return -2
 
         if self.VNF_UP:
-            call(['virsh', 'destroy', self.ID], stdout = FNULL)
+            self.VIRT_VM.destroy()
+            self.VIRT_VM.undefine()
+            self.VIRT_VM = None
             self.VNF_UP = False
             self.VNF_REST = None
             return 0

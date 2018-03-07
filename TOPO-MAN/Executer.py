@@ -3,7 +3,7 @@ from mininet.node import Host
 from mininet.node import Switch
 from mininet.node import OVSSwitch
 from mininet.node import Controller
-from mininet.link import Link
+from mininet.link import Link, Intf
 
 class Executer:
     CONFIGURATION = None
@@ -20,17 +20,19 @@ class Executer:
 
     def mininetPrepare(self):
 
-        #if self.CONFIGURATION.VNFS:
-        #    VMCTRL = MNController('VMCTRL')
-        #    VMCTRL.ELEM = Controller('VMCTRL', inNamespace=False)
-        #    self.CONTROLLERS['VMCTRL'] = VMCTRL
+        if self.CONFIGURATION.VNFS:
 
-        #    VMACC = MNOVSES('VMACC', 'VMCTRL')
-        #    VMACC.ELEM = OVSSwitch(VMACC.ID, inNamespace=False)
-        #    self.OVSSWITCHES['VMACC'] = VMACC
+            for VNFINSTANCE in self.CONFIGURATION.VNFS:
+                VNFINSTANCE.createVNF()
 
-        #    for VNFINSTANCE in self.CONFIGURATION.VNFS:
-        #        VNFINSTANCE.createVNF()
+            VMCTRL = MNController('CONTROLLER00')
+            VMCTRL.ELEM = Controller('CONTROLLER00', inNamespace=False)
+            self.CONTROLLERS['CONTROLLER00'] = VMCTRL
+
+            VMACC = MNOVSSwitch('SWITCH00', 'CONTROLLER00')
+            VMACC.ELEM = OVSSwitch('SWITCH00', inNamespace=False)
+            self.OVSSWITCHES['SWITCH00'] = VMACC
+            Intf('vbrNIEP', node=VMACC.ELEM)
 
         for HOST in self.CONFIGURATION.MNHOSTS:
             HOST.ELEM = Host(HOST.ID)
@@ -85,8 +87,8 @@ class Executer:
 
     def topologyUp(self):
 
-        #for VNFINSTANCE in self.CONFIGURATION.VNFS:
-        #    VNFINSTANCE.upVNF()
+        for VNFINSTANCE in self.CONFIGURATION.VNFS:
+            VNFINSTANCE.upVNF()
 
         for CONTROLLER in self.CONTROLLERS:
             self.CONTROLLERS[CONTROLLER].ELEM.start()
@@ -101,8 +103,8 @@ class Executer:
 
     def topologyDown(self):
 
-        #for VNFINSTANCE in self.CONFIGURATION.VNFS:
-        #    VNFINSTANCE.downVNF()
+        for VNFINSTANCE in self.CONFIGURATION.VNFS:
+            VNFINSTANCE.downVNF()
 
         for OVS in self.OVSSWITCHES:
             self.OVSSWITCHES[OVS].ELEM.stop()
@@ -112,6 +114,7 @@ class Executer:
 
         for SWITCH in self.SWITCHES:
             self.SWITCHES[SWITCH].ELEM.stop()
+
 #------------------------------------------------------------------
 
 PSR = PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json")
@@ -119,6 +122,4 @@ EXE = Executer(PSR)
 EXE.mininetPrepare()
 EXE.topologyUp()
 raw_input('Enter your input:')
-print EXE.HOSTS["HOST01"].ELEM.IP()
-print EXE.HOSTS["HOST01"].ELEM.cmd('ping -c1', "192.168.122.02")
 EXE.topologyDown()
