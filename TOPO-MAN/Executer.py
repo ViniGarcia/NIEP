@@ -25,15 +25,6 @@ class Executer:
             for VNFINSTANCE in self.CONFIGURATION.VNFS:
                 VNFINSTANCE.createVNF()
 
-            VMCTRL = MNController('CONTROLLER00')
-            VMCTRL.ELEM = Controller('CONTROLLER00', inNamespace=False)
-            self.CONTROLLERS['CONTROLLER00'] = VMCTRL
-
-            VMACC = MNOVSSwitch('SWITCH00', 'CONTROLLER00')
-            VMACC.ELEM = OVSSwitch('SWITCH00', inNamespace=False)
-            self.OVSSWITCHES['SWITCH00'] = VMACC
-            Intf('vbrNIEP', node=VMACC.ELEM)
-
         for HOST in self.CONFIGURATION.MNHOSTS:
             HOST.ELEM = Host(HOST.ID)
             self.HOSTS[HOST.ID] = HOST
@@ -81,7 +72,6 @@ class Executer:
                     self.HOSTS[LINK["OUT/IN"]].ELEM.setIP(self.HOSTS[LINK["OUT/IN"]].IP)
             else:
                 print 'TO DO'
-
 
 #------------------------------------------------------------------
 

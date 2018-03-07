@@ -188,7 +188,7 @@ class PlatformParser:
             self.STATUS = -6
             return -6
 
-        IDLIST = ['UNICTRL', 'CONTROLLER00', 'SWITCH00']
+        IDLIST = ['UNICTRL']
         CONTROLLERLIST = []
         if "HOSTS" in MininetList:
             if isinstance(MininetList["HOSTS"], list):
