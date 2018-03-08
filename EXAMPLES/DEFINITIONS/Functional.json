@@ -30,6 +30,11 @@
 		{
 			"IN/OUT":"HOST02",
 			"OUT/IN":"SWITCH01"
+		},
+		{
+			"IN/OUT":"x",
+			"OUT/IN":"HOST03",
+			"IN/OUTIFACE":"52:54:00:6c:22:13"
 		}
 	]
 }

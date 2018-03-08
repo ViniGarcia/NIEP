@@ -23,7 +23,6 @@ class Executer:
     def __init__(self, CONFIGURATION):
 
         self.CONFIGURATION = CONFIGURATION
-        self.STATUS = 0
 
 #------------------------------------------------------------------
 
@@ -132,6 +131,7 @@ class Executer:
                     else:
                         self.STATUS = -3
                         return -3
+        return 0
 
 #------------------------------------------------------------------
 
@@ -158,15 +158,15 @@ class Executer:
         if not checked:
             call(['virsh', 'net-create', '../CONFS/vnNIEP.xml'], stdout=FNULL)
 
-
         if self.CONFIGURATION.VNFS:
             for VNFINSTANCE in self.CONFIGURATION.VNFS:
                 VNFINSTANCE.createVNF()
                 VNFINSTANCE.upVNF()
                 self.VNFS[VNFINSTANCE.ID] = VNFINSTANCE
 
-        self.mininetPrepare()
-
+        if self.mininetPrepare() != 0:
+            return
+        
         for CONTROLLER in self.CONTROLLERS:
             self.CONTROLLERS[CONTROLLER].ELEM.start()
 
@@ -176,9 +176,15 @@ class Executer:
         for SWITCH in self.SWITCHES:
             self.SWITCHES[SWITCH].ELEM.start([self.CONTROLLERS['UNICTRL'].ELEM])
 
+        self.STATUS = 0
+        return 0
+
 #------------------------------------------------------------------
 
     def topologyDown(self):
+
+        if self.STATUS != 0:
+            return
 
         for OVS in self.OVSSWITCHES:
             self.OVSSWITCHES[OVS].ELEM.stop()
@@ -198,9 +204,12 @@ class Executer:
 
 #------------------------------------------------------------------
 
-PSR = PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json")
-EXE = Executer(PSR)
+EXE = Executer(PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json"))
 EXE.topologyUp()
-print EXE.HOSTS["HOST01"].ELEM.cmd( 'ping -c1', '192.168.122.02' )
+print EXE.STATUS
+raw_input('Enter your input:')
+print EXE.HOSTS["HOST03"].ELEM.cmd('ifconfig')
+raw_input('Enter your input:')
+print EXE.HOSTS["HOST03"].ELEM.cmd('ping 10.10.10.10')
 raw_input('Enter your input:')
 EXE.topologyDown()
