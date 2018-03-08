@@ -1,9 +1,15 @@
 from Parser import *
+from subprocess import check_output
+from subprocess import call
+from os import devnull
 from mininet.node import Host
 from mininet.node import Switch
 from mininet.node import OVSSwitch
 from mininet.node import Controller
 from mininet.link import Link, Intf
+
+#FNULL: redirects the system call normal output
+FNULL = open(devnull, 'w')
 
 class Executer:
     CONFIGURATION = None
@@ -77,6 +83,27 @@ class Executer:
 
     def topologyUp(self):
 
+        checked = False
+        ifacesData = check_output(['brctl', 'show']).split('\n')
+        for iface in ifacesData:
+            if iface.startswith('vbrNIEP'):
+                checked = True
+                break
+        if not checked:
+            call(['brctl', 'addbr', 'vbrNIEP'], stdout=FNULL)
+        else:
+            checked = False
+
+        netData = check_output(['virsh', 'net-list']).split('\n')
+        for net in netData:
+            if net.startswith(' vnNIEP'):
+                checked = True
+                if not net.split('               ')[1].startswith('active'):
+                    call(['virsh', 'net-start', 'vnNIEP'], stdout=FNULL)
+                break
+        if not checked:
+            call(['virsh', 'net-create', '../CONFS/vnNIEP.xml'], stdout=FNULL)
+
         for VNFINSTANCE in self.CONFIGURATION.VNFS:
             VNFINSTANCE.upVNF()
 
@@ -92,6 +119,10 @@ class Executer:
 #------------------------------------------------------------------
 
     def topologyDown(self):
+
+        call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL)
+        call(['ifconfig', 'vbrNIEP', 'down'], stdout=FNULL)
+        call(['brctl', 'delbr', 'vbrNIEP'], stdout=FNULL)
 
         for VNFINSTANCE in self.CONFIGURATION.VNFS:
             VNFINSTANCE.downVNF()
