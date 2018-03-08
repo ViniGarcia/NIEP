@@ -353,6 +353,9 @@ class VNF:
             self.VIRT_VM = None
             self.VNF_UP = False
             self.VNF_REST = None
+            for iface in self.INTERFACES:
+                call(['ifconfig', iface['ID'], 'down'])
+                call(['brctl', 'delbr', iface['ID']])
             return 0
         else:
             return -1

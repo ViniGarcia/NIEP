@@ -17,19 +17,29 @@ class Executer:
     SWITCHES = {}
     OVSSWITCHES = {}
     CONTROLLERS = {}
+    VNFS = {}
+    STATUS = None
 
     def __init__(self, CONFIGURATION):
 
         self.CONFIGURATION = CONFIGURATION
+        self.STATUS = 0
+
+#------------------------------------------------------------------
+
+    def interfacesMaping(self):
+        ifacesDictionary = {}
+
+        ifacesData = check_output(['brctl', 'show']).split('\n')
+        for iface in ifacesData[1:-1]:
+            iface = iface.split('\t')
+            ifacesDictionary[iface[0]] = iface[5]
+
+        return ifacesDictionary
 
 #------------------------------------------------------------------
 
     def mininetPrepare(self):
-
-        if self.CONFIGURATION.VNFS:
-
-            for VNFINSTANCE in self.CONFIGURATION.VNFS:
-                VNFINSTANCE.createVNF()
 
         for HOST in self.CONFIGURATION.MNHOSTS:
             HOST.ELEM = Host(HOST.ID)
@@ -52,6 +62,7 @@ class Executer:
             OVS.ELEM = OVSSwitch(OVS.ID, inNamespace=False)
             self.OVSSWITCHES[OVS.ID] = OVS
 
+        ifacesData = self.interfacesMaping()
         for LINK in self.CONFIGURATION.CONNECTIONS:
             if not "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
                 if LINK["IN/OUT"] in self.HOSTS:
@@ -77,7 +88,50 @@ class Executer:
                 if LINK["OUT/IN"] in self.HOSTS:
                     self.HOSTS[LINK["OUT/IN"]].ELEM.setIP(self.HOSTS[LINK["OUT/IN"]].IP)
             else:
-                print 'TO DO'
+                if "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
+                    for iface in self.VNFS[LINK["IN/OUT"]].INTERFACES:
+                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
+                            if iface["ID"] in ifacesData:
+                                virtualIface = ifacesData[iface["ID"]]
+                                break
+                            else:
+                                self.STATUS = -1
+                                return -1
+                    if LINK["OUT/IN"] in self.HOSTS:
+                        Intf(virtualIface, node = self.HOSTS[LINK["OUT/IN"]].ELEM)
+                    else:
+                        if LINK["OUT/IN"] in self.SWITCHES:
+                            Intf(virtualIface, node = self.SWITCHES[LINK["OUT/IN"]].ELEM)
+                        else:
+                            if LINK["OUT/IN"] in self.OVSSWITCHES:
+                                Intf(virtualIface, node = self.OVSSWITCHES[LINK["OUT/IN"]].ELEM)
+                            else:
+                                self.STATUS = -2
+                                return -2
+                else:
+                    if "OUT/INIFACE" in LINK and not "IN/OUTIFACE" in LINK:
+                        for iface in self.VNFS[LINK["OUT/IN"]].INTERFACES:
+                            if iface["MAC"] == LINK["OUT/INIFACE"]:
+                                if iface["ID"] in ifacesData:
+                                    virtualIface = ifacesData[iface["ID"]]
+                                    break
+                                else:
+                                    self.STATUS = -1
+                                    return -1
+                        if LINK["IN/OUT"] in self.HOSTS:
+                            Intf(virtualIface, node = self.HOSTS[LINK["IN/OUT"]].ELEM)
+                        else:
+                            if LINK["IN/OUT"] in self.SWITCHES:
+                                Intf(virtualIface, node = self.SWITCHES[LINK["IN/OUT"]].ELEM)
+                            else:
+                                if LINK["IN/OUT"] in self.OVSSWITCHES:
+                                    Intf(virtualIface, node = self.OVSSWITCHES[LINK["IN/OUT"]].ELEM)
+                                else:
+                                    self.STATUS = -2
+                                    return -2
+                    else:
+                        self.STATUS = -3
+                        return -3
 
 #------------------------------------------------------------------
 
@@ -104,8 +158,14 @@ class Executer:
         if not checked:
             call(['virsh', 'net-create', '../CONFS/vnNIEP.xml'], stdout=FNULL)
 
-        for VNFINSTANCE in self.CONFIGURATION.VNFS:
-            VNFINSTANCE.upVNF()
+
+        if self.CONFIGURATION.VNFS:
+            for VNFINSTANCE in self.CONFIGURATION.VNFS:
+                VNFINSTANCE.createVNF()
+                VNFINSTANCE.upVNF()
+                self.VNFS[VNFINSTANCE.ID] = VNFINSTANCE
+
+        self.mininetPrepare()
 
         for CONTROLLER in self.CONTROLLERS:
             self.CONTROLLERS[CONTROLLER].ELEM.start()
@@ -120,13 +180,6 @@ class Executer:
 
     def topologyDown(self):
 
-        call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL)
-        call(['ifconfig', 'vbrNIEP', 'down'], stdout=FNULL)
-        call(['brctl', 'delbr', 'vbrNIEP'], stdout=FNULL)
-
-        for VNFINSTANCE in self.CONFIGURATION.VNFS:
-            VNFINSTANCE.downVNF()
-
         for OVS in self.OVSSWITCHES:
             self.OVSSWITCHES[OVS].ELEM.stop()
 
@@ -136,11 +189,18 @@ class Executer:
         for SWITCH in self.SWITCHES:
             self.SWITCHES[SWITCH].ELEM.stop()
 
+        call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL)
+        call(['ifconfig', 'vbrNIEP', 'down'], stdout=FNULL)
+        call(['brctl', 'delbr', 'vbrNIEP'], stdout=FNULL)
+
+        for VNFINSTANCE in self.CONFIGURATION.VNFS:
+            VNFINSTANCE.downVNF()
+
 #------------------------------------------------------------------
 
 PSR = PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json")
 EXE = Executer(PSR)
-EXE.mininetPrepare()
 EXE.topologyUp()
+print EXE.HOSTS["HOST01"].ELEM.cmd( 'ping -c1', '192.168.122.02' )
 raw_input('Enter your input:')
 EXE.topologyDown()
