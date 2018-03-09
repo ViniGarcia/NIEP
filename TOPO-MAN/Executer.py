@@ -2,11 +2,13 @@ from Parser import *
 from subprocess import check_output
 from subprocess import call
 from os import devnull
+from mininet.net import Mininet
 from mininet.node import Host
 from mininet.node import Switch
 from mininet.node import OVSSwitch
 from mininet.node import Controller
 from mininet.link import Link, Intf
+from mininet.cli import CLI
 
 #FNULL: redirects the system call normal output
 FNULL = open(devnull, 'w')
@@ -18,6 +20,7 @@ class Executer:
     OVSSWITCHES = {}
     CONTROLLERS = {}
     VNFS = {}
+    NET = None
     STATUS = None
 
     def __init__(self, CONFIGURATION):
@@ -40,25 +43,27 @@ class Executer:
 
     def mininetPrepare(self):
 
+        self.NET = Mininet(topo=None, build=False)
+
         for HOST in self.CONFIGURATION.MNHOSTS:
-            HOST.ELEM = Host(HOST.ID)
+            HOST.ELEM = self.NET.addHost(HOST.ID) 
             self.HOSTS[HOST.ID] = HOST
 
         for SWITCH in self.CONFIGURATION.MNSWITCHES:
-            SWITCH.ELEM = OVSSwitch(SWITCH.ID, inNamespace=False)
+            SWITCH.ELEM = self.NET.addSwitch(SWITCH.ID)
             self.SWITCHES[SWITCH.ID] = SWITCH
 
         if self.SWITCHES:
             UNICTRL = MNController('UNICTRL')
-            UNICTRL.ELEM = Controller('UNICTRL', inNamespace=False)
+            UNICTRL.ELEM = self.NET.addController('UNICTRL')
             self.CONTROLLERS['UNICTRL'] = UNICTRL
 
         for CONTROLLER in self.CONFIGURATION.MNCONTROLLER:
-            CONTROLLER.ELEM = Controller(CONTROLLER.ID, inNamespace=False)
+            CONTROLLER.ELEM = self.NET.addController(CONTROLLER.ID)
             self.CONTROLLERS[CONTROLLERS.ID] = CONTROLLER
 
         for OVS in self.CONFIGURATION.MNOVSES:
-            OVS.ELEM = OVSSwitch(OVS.ID, inNamespace=False)
+            OVS.ELEM = self.NET.addSwitch(OVS.ID)
             self.OVSSWITCHES[OVS.ID] = OVS
 
         ifacesData = self.interfacesMaping()
@@ -80,12 +85,7 @@ class Executer:
                     else:
                         Element02 = self.OVSSWITCHES[LINK["OUT/IN"]]
 
-                Link(Element01.ELEM, Element02.ELEM)
-
-                if LINK["IN/OUT"] in self.HOSTS:
-                    self.HOSTS[LINK["IN/OUT"]].ELEM.setIP(self.HOSTS[LINK["IN/OUT"]].IP)
-                if LINK["OUT/IN"] in self.HOSTS:
-                    self.HOSTS[LINK["OUT/IN"]].ELEM.setIP(self.HOSTS[LINK["OUT/IN"]].IP)
+                self.NET.addLink(Element01.ELEM, Element02.ELEM)
             else:
                 if "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
                     for iface in self.VNFS[LINK["IN/OUT"]].INTERFACES:
@@ -131,6 +131,12 @@ class Executer:
                     else:
                         self.STATUS = -3
                         return -3
+        
+        self.NET.build()
+        for HOST in self.HOSTS:
+            if not self.HOSTS[HOST].IP is None:
+                self.HOSTS[HOST].ELEM.setIP(self.HOSTS[HOST].IP)
+
         return 0
 
 #------------------------------------------------------------------
@@ -166,7 +172,7 @@ class Executer:
 
         if self.mininetPrepare() != 0:
             return
-        
+
         for CONTROLLER in self.CONTROLLERS:
             self.CONTROLLERS[CONTROLLER].ELEM.start()
 
@@ -206,10 +212,5 @@ class Executer:
 
 EXE = Executer(PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json"))
 EXE.topologyUp()
-print EXE.STATUS
-raw_input('Enter your input:')
-print EXE.HOSTS["HOST03"].ELEM.cmd('ifconfig')
-raw_input('Enter your input:')
-print EXE.HOSTS["HOST03"].ELEM.cmd('ping 10.10.10.10')
-raw_input('Enter your input:')
+CLI(EXE.NET)
 EXE.topologyDown()

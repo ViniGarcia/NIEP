@@ -7,7 +7,7 @@ from SFC import SFC
 
 class MNHost:
     ID = ""
-    IP = "127.0.0.1"
+    IP = None
     ELEM = None
 
     def __init__(self, ID, IP):
