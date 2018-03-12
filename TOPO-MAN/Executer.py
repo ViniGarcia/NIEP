@@ -25,7 +25,10 @@ class Executer:
 
     def __init__(self, CONFIGURATION):
 
-        self.CONFIGURATION = CONFIGURATION
+        if CONFIGURATION.STATUS == 0:
+            self.CONFIGURATION = CONFIGURATION
+        else:
+            self.STATUS = -4
 
 #------------------------------------------------------------------
 
@@ -208,9 +211,11 @@ class Executer:
         for VNFINSTANCE in self.CONFIGURATION.VNFS:
             VNFINSTANCE.downVNF()
 
+        self.STATUS = None
+
 #------------------------------------------------------------------
 
-EXE = Executer(PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json"))
-EXE.topologyUp()
-CLI(EXE.NET)
-EXE.topologyDown()
+# EXE = Executer(PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json"))
+# EXE.topologyUp()
+# CLI(EXE.NET)
+# EXE.topologyDown()
