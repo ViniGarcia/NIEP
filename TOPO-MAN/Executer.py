@@ -8,7 +8,6 @@ from mininet.node import Switch
 from mininet.node import OVSSwitch
 from mininet.node import Controller
 from mininet.link import Link, Intf
-from mininet.cli import CLI
 
 #FNULL: redirects the system call normal output
 FNULL = open(devnull, 'w')
