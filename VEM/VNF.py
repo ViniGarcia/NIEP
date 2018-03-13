@@ -9,6 +9,7 @@ from os import devnull
 from copy import copy
 from subprocess import call
 from subprocess import check_output
+from subprocess import STDOUT
 from xml.etree import ElementTree
 
 #FNULL: redirects the system call normal output
@@ -188,8 +189,8 @@ class VNF:
             return
 
         if not self.VNF_EXIST:
-            call(['mkdir', STDPATH + 'IMAGES/' + self.ID])
-            call(['cp', STDPATH + 'IMAGES/click-on-osv.qcow2', STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.qcow2'])
+            call(['mkdir', STDPATH + 'IMAGES/' + self.ID], stdout=FNULL, stderr=subprocess.STDOUT)
+            call(['cp', STDPATH + 'IMAGES/click-on-osv.qcow2', STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.qcow2'], stdout=FNULL, stderr=STDOUT)
             self.VNF_EXIST = True
             self.applyVNF()
             return 0
@@ -245,7 +246,7 @@ class VNF:
             return -2
 
         if self.VNF_EXIST:
-            call(['rm', '-r', './IMAGES/' + self.ID])
+            call(['rm', '-r', './IMAGES/' + self.ID], stdout=FNULL, stderr=STDOUT)
             self.VNF_EXIST = False
             self.VNF_STATUS = 0
             return 0
@@ -265,7 +266,7 @@ class VNF:
             return -2
 
         if not self.VNF_UP:
-            call(['cp', STDPATH + 'IMAGES/click-on-osv.xml', STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml'])
+            call(['cp', STDPATH + 'IMAGES/click-on-osv.xml', STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml'], stdout=FNULL, stderr=STDOUT)
 
             configurationXML = ElementTree.parse(STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml')
             configurationXML.find('name').text = self.ID
@@ -321,9 +322,9 @@ class VNF:
                         ifacesCreate.remove(iface)
 
             for iface in ifacesCreate:
-                call(['brctl', 'addbr', iface['ID']])
+                call(['brctl', 'addbr', iface['ID']], stdout=FNULL, stderr=STDOUT)
             for iface in self.INTERFACES:
-                call(['ifconfig', iface['ID'], 'up'])
+                call(['ifconfig', iface['ID'], 'up'], stdout=FNULL, stderr=STDOUT)
 
             with open(STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml', 'r') as domainFile:
                 domainXML = domainFile.read()
@@ -354,8 +355,8 @@ class VNF:
             self.VNF_UP = False
             self.VNF_REST = None
             for iface in self.INTERFACES:
-                call(['ifconfig', iface['ID'], 'down'])
-                call(['brctl', 'delbr', iface['ID']])
+                call(['ifconfig', iface['ID'], 'down'], stdout=FNULL, stderr=STDOUT)
+                call(['brctl', 'delbr', iface['ID']], stdout=FNULL, stderr=STDOUT)
             return 0
         else:
             return -1

@@ -170,7 +170,7 @@ class NIEPCLI(Cmd):
 ##################################################################################################################################
 # VNFS INTERFACE
 
-    def do_management(self, args):
+    def do_vnfmanagement(self, args):
         if self.prompt.startswith('vnf'):
             splited_args = args.split(' ')
             if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
@@ -232,7 +232,7 @@ class NIEPCLI(Cmd):
         else:
             print 'VNF PROMPT COMMAND'
 
-    def do_action(self, args):
+    def do_vnfaction(self, args):
         if self.prompt.startswith('vnf'):
             splited_args = args.split(' ')
             if len(splited_args) > 2 or len(splited_args) == 1 and len(splited_args[0]) == 0:
@@ -305,6 +305,12 @@ class NIEPCLI(Cmd):
 
 ##################################################################################################################################
 # SFCS INTERFACE
+    
+    def do_sfcmanagement(self, args):
+        if self.prompt.startswith('sfc'):
+            print 'TO DO'
+        else:
+            print 'SFC PROMPT COMMAND'
 
     def do_sfcup(self, args):
         if self.prompt.startswith('sfc'):
@@ -347,5 +353,6 @@ class NIEPCLI(Cmd):
 if __name__ == '__main__':
     NIEPCLI().cmdloop()
 
-# /home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json
+# /home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/VNFExample.json
+# /home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/SFCExample.json
 # /home/gt-fende/Documentos/NIEP/VNF-REPO/firewall.click

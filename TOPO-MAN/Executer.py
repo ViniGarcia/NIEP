@@ -1,6 +1,7 @@
 from Parser import *
 from subprocess import check_output
 from subprocess import call
+from subprocess import STDOUT
 from os import devnull
 from mininet.net import Mininet
 from mininet.node import Host
@@ -152,7 +153,7 @@ class Executer:
                 checked = True
                 break
         if not checked:
-            call(['brctl', 'addbr', 'vbrNIEP'], stdout=FNULL)
+            call(['brctl', 'addbr', 'vbrNIEP'], stdout=FNULL, stderr=STDOUT)
         else:
             checked = False
 
@@ -161,10 +162,10 @@ class Executer:
             if net.startswith(' vnNIEP'):
                 checked = True
                 if not net.split('               ')[1].startswith('active'):
-                    call(['virsh', 'net-start', 'vnNIEP'], stdout=FNULL)
+                    call(['virsh', 'net-start', 'vnNIEP'], stdout=FNULL, stderr=STDOUT)
                 break
         if not checked:
-            call(['virsh', 'net-create', '../CONFS/vnNIEP.xml'], stdout=FNULL)
+            call(['virsh', 'net-create', '../CONFS/vnNIEP.xml'], stdout=FNULL, stderr=STDOUT)
 
         if self.CONFIGURATION.VNFS:
             for VNFINSTANCE in self.CONFIGURATION.VNFS:
@@ -203,9 +204,9 @@ class Executer:
         for SWITCH in self.SWITCHES:
             self.SWITCHES[SWITCH].ELEM.stop()
 
-        call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL)
-        call(['ifconfig', 'vbrNIEP', 'down'], stdout=FNULL)
-        call(['brctl', 'delbr', 'vbrNIEP'], stdout=FNULL)
+        call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL, stderr=STDOUT)
+        call(['ifconfig', 'vbrNIEP', 'down'], stdout=FNULL, stderr=STDOUT)
+        call(['brctl', 'delbr', 'vbrNIEP'], stdout=FNULL, stderr=STDOUT)
 
         for VNFINSTANCE in self.CONFIGURATION.VNFS:
             VNFINSTANCE.downVNF()
