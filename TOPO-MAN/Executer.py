@@ -213,8 +213,3 @@ class Executer:
         self.STATUS = None
 
 #------------------------------------------------------------------
-
-# EXE = Executer(PlatformParser("/home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json"))
-# EXE.topologyUp()
-# CLI(EXE.NET)
-# EXE.topologyDown()

@@ -95,7 +95,7 @@ class REST:
 
 #postFunction: change the content of the click file according to the file path
 #              received as argument, it must be a click function.
-#              -1 - file does not exist
+#              -3 - file does not exist
 #              code - 200 if normal, other if error
     def postFunction(self, functionPath):
 
@@ -103,7 +103,7 @@ class REST:
             return
 
         if not path.isfile(functionPath):
-            return -1
+            return -3
 
         functionFile = open(functionPath)
         functionData = functionFile.read()

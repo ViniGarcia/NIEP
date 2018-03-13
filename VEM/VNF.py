@@ -360,6 +360,28 @@ class VNF:
         else:
             return -1
 
+#sleepVNF: down a started VNF but do not remove from hypervisor neither interfaces.
+#         -2 = VNF does not exist
+#         -1 = VNF already down
+#          0 = VNF downed successfully
+    def sleepVNF(self):
+
+        if self.VNF_STATUS < 0:
+            return
+
+        if not self.VNF_EXIST:
+            return -2
+
+        if self.VNF_UP:
+            self.VIRT_VM.destroy()
+            self.VIRT_VM = None
+            self.VNF_UP = False
+            self.VNF_REST = None
+            return 0
+        else:
+            return -1
+
+
 #managementVNF: get the management interface address by a arp request.
 #               -2 = arp did not respond
 #               -1 = VNF is not up

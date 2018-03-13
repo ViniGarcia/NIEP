@@ -6,10 +6,10 @@ path.insert(0, '../TOPO-MAN/')
 from Executer import Executer
 from Parser import PlatformParser
 
-#VAI FALTAR:
-# Criação assistida
-# Inteface Grafica
-# Scripts do PyCoo
+#MISSING TASKS:
+# Assisted creation for SFCs and VNFs
+# Graphical interface
+# PyCOO scripts
 
 class NIEPCLI(Cmd):
 
@@ -193,12 +193,12 @@ class NIEPCLI(Cmd):
             print 'VNF PROMPT COMMAND'
 
     def do_vnfup(self, args):
-        splited_args = args.split(' ')
-        if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
-            print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
-            return
-
         if self.prompt.startswith('vnf'):
+            splited_args = args.split(' ')
+            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+                print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
+                return
+
             upstatus = self.VNFEXEC.upVNF()
             if upstatus == None:
                 print 'INVALID VNF STATUS'
@@ -214,15 +214,89 @@ class NIEPCLI(Cmd):
 
     def do_vnfdown(self, args):
         if self.prompt.startswith('vnf'):
+            splited_args = args.split(' ')
             if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
                 print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
                 return
 
+            downstatus = self.VNFEXEC.sleepVNF()
+            if downstatus == None:
+                print 'INVALID VNF STATUS'
+                return
+            if downstatus == -2:
+                print 'VNF DOES NOT EXIST'
+                return
+            if downstatus == -1:
+                print 'VNF ALREADY DOWN'
+                return
         else:
             print 'VNF PROMPT COMMAND'
 
-    def do_vnfaction(self, args):
+    def do_action(self, args):
         if self.prompt.startswith('vnf'):
+            splited_args = args.split(' ')
+            if len(splited_args) > 2 or len(splited_args) == 1 and len(splited_args[0]) == 0:
+                print 'WRONG ARGUMENTS AMOUNT - 1 OR 2 ARGUMENTS EXPECTED'
+                return
+
+            actionstatus = None
+            if len(splited_args) == 1:
+                if args == 'list':
+                    print '############# ACTION LIST #############'
+                    print 'start -> START THE VNF FUNCTION'
+                    print 'stop -> STOP THE VNF FUNCTION' 
+                    print 'replace path -> REPLACE THE FUNCTION WITH THE FUNCTION IN PATH'
+                    print 'running -> CHECK IF VNF IS RUNNING'
+                    print 'data -> CHECK THE VNF FUNCTION'
+                    print 'id -> CHECK THE VNF ID'
+                    print 'metrics -> CHECK VNF METRICS'
+                    print 'log -> CHECK THE VNF LOG'
+                    print '#######################################'
+                    return
+                if args == 'start':
+                    actionstatus = self.VNFEXEC.controlVNF('function_start', [])
+                else:
+                    if args == 'stop':
+                        actionstatus = self.VNFEXEC.controlVNF('function_stop', [])
+                    else:
+                        if args == 'running':
+                            actionstatus = self.VNFEXEC.controlVNF('function_run', [])
+                        else:
+                            if args == 'data':
+                                actionstatus = self.VNFEXEC.controlVNF('function_data', [])
+                            else:
+                                if args == 'id':
+                                    actionstatus = self.VNFEXEC.controlVNF('function_id', [])
+                                else:
+                                    if args == 'metrics':
+                                        actionstatus = self.VNFEXEC.controlVNF('function_metrics', [])
+                                    else:
+                                        if args == 'log':
+                                            actionstatus = self.VNFEXEC.controlVNF('function_log', [])
+            if len(splited_args) == 2:
+                if splited_args[0] == 'replace':
+                    actionstatus = self.VNFEXEC.controlVNF('function_replace', [splited_args[1]])
+
+            if actionstatus == None:
+                print 'UNDEFINED ACTION'
+                return
+            if actionstatus == -1:
+                print 'VNF IS NOT UP'
+                return
+            if actionstatus == -2:
+                print 'VNF MANAGEMENT IS NOT ACCESIBLE'
+                return
+            if actionstatus == -3:
+                print 'FILE DOES NOT EXISTS'
+                return
+            if type(actionstatus) is list:
+                if actionstatus[0] == '200':
+                    print actionstatus[1]
+                else:
+                    print 'REST ERROR - ' + str(actionstatus[0])
+                return
+            if not actionstatus == 200:
+                print 'REST ERROR - ' + str(actionstatus)
 
         else:
             print 'VNF PROMPT COMMAND'
@@ -272,3 +346,6 @@ class NIEPCLI(Cmd):
 
 if __name__ == '__main__':
     NIEPCLI().cmdloop()
+
+# /home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/Functional.json
+# /home/gt-fende/Documentos/NIEP/VNF-REPO/firewall.click
