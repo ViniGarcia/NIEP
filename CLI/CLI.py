@@ -1,5 +1,8 @@
 from cmd import Cmd
 from sys import path
+from subprocess import call
+from subprocess import STDOUT
+from os import devnull
 from os.path import isfile
 from mininet.cli import CLI
 path.insert(0, '../TOPO-MAN/')
@@ -10,6 +13,10 @@ from Parser import PlatformParser
 # Assisted creation for SFCs and VNFs
 # Graphical interface
 # PyCOO scripts
+# See SFC structure
+
+#FNULL: redirects the system call normal output
+FNULL = open(devnull, 'w')
 
 class NIEPCLI(Cmd):
 
@@ -79,13 +86,41 @@ class NIEPCLI(Cmd):
 
     def do_topoclean(self, args):
         if self.prompt == 'niep > ':
-            if not self.NIEPEXE == None: 
-                print 'TO DO'
+            splited_args = args.split(' ')
+            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+                print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
+                return
 
+            if not self.NIEPEXE == None: 
+                if self.NIEPEXE.STATUS == 0:
+                    self.NIEPEXE.topologyDown()
+                self.VNFEXEC = None
+                self.SFCEXEC = None
+                del self.NIEPEXE
             else:
                 print 'NO TOPOLOGY DEFINED'
         else:
             print 'NIEP PROMPT COMMAND' 
+
+    def do_topodestroy(self, args):
+        if self.prompt == 'niep > ':
+            splited_args = args.split(' ')
+            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+                print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
+                return
+
+            if not self.NIEPEXE == None:
+                if self.NIEPEXE.STATUS == 0:
+                    self.NIEPEXE.topologyDown() 
+                for VNFINSTANCE in self.NIEPEXE.VNFS:
+                    call(['rm', '-r', '../VEM/IMAGES/' + self.NIEPEXE.VNFS[VNFINSTANCE].ID], stdout=FNULL, stderr=STDOUT)
+                self.VNFEXEC = None
+                self.SFCEXEC = None
+                del self.NIEPEXE
+            else:
+                 print 'NO TOPOLOGY DEFINED'
+        else:
+            print 'NIEP PROMPT COMMAND'  
 
     def do_vnf(self, args):
         if self.prompt == 'niep > ':
@@ -308,19 +343,64 @@ class NIEPCLI(Cmd):
     
     def do_sfcmanagement(self, args):
         if self.prompt.startswith('sfc'):
-            print 'TO DO'
+            splited_args = args.split(' ')
+            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+                print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
+                return
+
+            if not self.SFCEXEC.checkStatusSFC():
+                print 'SFC IS NOT UP OR NOT TOTALLY UP'
+                return
+
+            management = self.SFCEXEC.managementSFC()
+            if management == None:
+                print 'INVALID SFC STATUS'
+                return
+            if management == -1:
+                print 'SFC IS NOT UP'
+                return
+            if management == -2:
+                print 'ARP PROBLEMS'
+                return
+            else:
+                for managementData in management:
+                    print managementData
         else:
             print 'SFC PROMPT COMMAND'
 
     def do_sfcup(self, args):
         if self.prompt.startswith('sfc'):
-            print 'TO DO'
+            splited_args = args.split(' ')
+            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+                print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
+                return
+
+            self.SFCEXEC.checkStatusSFC()
+            upstatus = self.SFCEXEC.wakeSFC()
+            if upstatus == None:
+                print 'INVALID SFC STATUS'
+                return
+            if upstatus == -1:
+                print 'SFC ALREADY UP'
+                return
         else:
             print 'SFC PROMPT COMMAND'
 
     def do_sfcdown(self, args):
         if self.prompt.startswith('sfc'):
-            print 'TO DO'
+            splited_args = args.split(' ')
+            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+                print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
+                return
+
+            self.SFCEXEC.checkStatusSFC()
+            downstatus = self.SFCEXEC.sleepSFC()
+            if downstatus == None:
+                print 'INVALID SFC STATUS'
+                return
+            if downstatus == -1:
+                print 'SFC ALREADY DOWN'
+                return
         else:
             print 'SFC PROMPT COMMAND'
 
@@ -339,7 +419,6 @@ class NIEPCLI(Cmd):
                 self.NIEPEXE.topologyDown()
 
         exit()
-        return True
 
     def do_EOF(self, args):
         return True

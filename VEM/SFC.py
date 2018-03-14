@@ -14,6 +14,7 @@ class SFC:
     SFC_LAST_INSTANCES = []
 
     SFC_UP = False
+    SFC_PARCIAL_UP = False
     SFC_STATUS = 0
     SFC_JSON = ''
 
@@ -339,6 +340,64 @@ class SFC:
         self.SFC_UP = False
         return 0
 
+#checkStatusSFC: check if all SFC' VMs are up, if they are it is up,
+#                else it is down.
+#                True = Up SFC
+#                False = Down SFC
+    def checkStatusSFC(self):
+
+        downCounter = 0
+        for INSTANCE in self.SFC_VNF_INSTANCES:
+            if not INSTANCE.VNF_UP: 
+                downCounter += 1
+
+        if downCounter > 0:
+            self.SFC_UP = False
+            if len(self.SFC_VNF_INSTANCES) == downCounter:
+                self.SFC_PARCIAL_UP = False
+            else:
+                self.SFC_PARCIAL_UP = True
+            return False
+
+        self.SFC_UP = True
+        self.SFC_PARCIAL_UP = True
+        return True
+
+#sleepSFC: down the SFC VNFS but does not remove the VMs from the hypervisor, 
+#          neither remove the VNFs instances from the VNF instaces list.
+#         -1 = SFC already down
+#          0 = SFC sleeped successfully
+    def sleepSFC(self):
+
+        if self.SFC_STATUS < 0:
+            return
+
+        if not self.SFC_UP and not self.SFC_PARCIAL_UP:
+            return -1
+
+        for INSTANCE in self.SFC_VNF_INSTANCES:
+            INSTANCE.sleepVNF()
+
+        self.SFC_UP = False
+        return 0
+
+#wakeSFC: restore sleeped VMs waking the VM.
+#         -1 = SFC already up
+#          0 = SFC sleeped successfully
+    def wakeSFC(self):
+
+        if self.SFC_STATUS < 0:
+            return
+
+        if self.SFC_UP:
+            return -1
+
+        for INSTANCE in self.SFC_VNF_INSTANCES:
+            INSTANCE.upVNF()
+
+        self.SFC_UP = True
+        return 0
+
 #managementSFC: get all management interfaces form SFC's VNFs and show to user.
 #               -2 = some instance is not accessible
 #               -1 = SFC is not up, up it to access VNFs
@@ -399,6 +458,7 @@ class SFC:
 
         return actionsResult
 
+'''
 #Simple CLI interface to test the library, if not necessay comment it.
 def help():
     print('\n================== CLI INTERFACE ==================')
@@ -494,7 +554,6 @@ def VNFControlMode(instance):
         if option == 'quit':
             running = False
 
-'''
 SFCPath = raw_input('SFC JSON PATH: ')
 SFCInstance = SFC(SFCPath)
 if (SFCInstance.SFC_STATUS < 0):

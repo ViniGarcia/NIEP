@@ -30,6 +30,16 @@ class Executer:
         else:
             self.STATUS = -4
 
+    def __del__(self):
+        self.CONFIGURATION = None
+        self.HOSTS.clear()
+        self.SWITCHES.clear()
+        self.OVSSWITCHES.clear()
+        self.CONTROLLERS.clear()
+        self.VNFS.clear()
+        self.NET = None
+        self.STATUS = None
+
 #------------------------------------------------------------------
 
     def interfacesMaping(self):
@@ -173,6 +183,10 @@ class Executer:
                 VNFINSTANCE.upVNF()
                 self.VNFS[VNFINSTANCE.ID] = VNFINSTANCE
 
+        if self.CONFIGURATION.SFCS:
+            for SFCINSTANCE in self.CONFIGURATION.SFCS:
+                SFCINSTANCE.SFC_UP = True
+
         if self.mininetPrepare() != 0:
             return
 
@@ -210,6 +224,9 @@ class Executer:
 
         for VNFINSTANCE in self.CONFIGURATION.VNFS:
             VNFINSTANCE.downVNF()
+
+        for SFCINSTANCE in self.CONFIGURATION.SFCS:
+            SFCINSTANCE.SFC_UP = False
 
         self.STATUS = None
 

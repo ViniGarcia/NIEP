@@ -87,7 +87,7 @@ class PlatformParser:
 
         if self.STATUS == None:
             SFCVNFS = self.SFCCheck()
-            if isinstance(SFCVNFS, list):
+            if isinstance(SFCVNFS, dict):
                 if self.VNFSCheck(SFCVNFS) == 0:
                     if self.mininetCheck() == 0:
                         if self.connectionsCheck() == 0:
@@ -141,17 +141,32 @@ class PlatformParser:
 
     def VNFSCheck(self, SFCVNFS):
 
-        for VNFPATH in self.JSON['VNFS'] + SFCVNFS:
+        FULLVNF = self.JSON['VNFS']
+        for SFCID in SFCVNFS:
+            for VNFPATH in SFCVNFS[SFCID]:
+                if VNFPATH in FULLVNF:
+                    FULLVNF.remove(VNFPATH)
+            FULLVNF = FULLVNF + SFCVNFS[SFCID] 
+
+        PATHINSTANCE = {}
+        for VNFPATH in FULLVNF:
             if isinstance(VNFPATH, basestring) and isfile(VNFPATH):
                 instance = VNF(VNFPATH, None)
                 if instance.VNF_STATUS < 0:
                     self.STATUS = -3
                     return -3
                 self.VNFS.append(instance)
+                PATHINSTANCE[VNFPATH] = instance
             else:
                 self.STATUS = -2
                 return -2
 
+        for SFCINSTANCE in self.SFCS:
+            SFCPATHS = [VNFPATH['PATH'] for VNFPATH in SFCINSTANCE.VNFS]
+            for PATH in PATHINSTANCE:
+                if PATH in SFCPATHS:
+                    SFCINSTANCE.SFC_VNF_INSTANCES.append(PATHINSTANCE[PATH])
+                    
         return 0
 
 #------------------------------------------------------------------
@@ -159,6 +174,7 @@ class PlatformParser:
     def SFCCheck(self):
 
         SFCVNFS = []
+        SFCDIC = {}
         for SFCPATH in self.JSON['SFCS']:
             if isinstance(SFCPATH, basestring) and isfile(SFCPATH):
                 instance = SFC(SFCPATH)
@@ -172,11 +188,13 @@ class PlatformParser:
                     else:
                         self.STATUS = -5
                         return -5
+                SFCDIC[instance.ID] = SFCVNFS
+                SFCVNFS = []
             else:
                 self.STATUS = -4
                 return -4
 
-        return SFCVNFS
+        return SFCDIC
 
 #------------------------------------------------------------------
 

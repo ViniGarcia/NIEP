@@ -189,7 +189,7 @@ class VNF:
             return
 
         if not self.VNF_EXIST:
-            call(['mkdir', STDPATH + 'IMAGES/' + self.ID], stdout=FNULL, stderr=subprocess.STDOUT)
+            call(['mkdir', STDPATH + 'IMAGES/' + self.ID], stdout=FNULL, stderr=STDOUT)
             call(['cp', STDPATH + 'IMAGES/click-on-osv.qcow2', STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.qcow2'], stdout=FNULL, stderr=STDOUT)
             self.VNF_EXIST = True
             self.applyVNF()
