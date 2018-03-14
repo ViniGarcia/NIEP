@@ -9,11 +9,11 @@ path.insert(0, '../TOPO-MAN/')
 from Executer import Executer
 from Parser import PlatformParser
 
-#MISSING TASKS:
-# Assisted creation for SFCs and VNFs
-# Graphical interface
-# PyCOO scripts
-# See SFC structure
+#MISSING TASKS (priority order):
+# 1.See SFC structure
+# 2.Assisted creation for SFCs and VNFs
+# 3.Graphical interface
+# 4.PyCOO scripts
 
 #FNULL: redirects the system call normal output
 FNULL = open(devnull, 'w')

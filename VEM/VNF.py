@@ -54,6 +54,24 @@ class VNF:
         else:
             self.inInterfaces(configurationPath)
 
+#__del__: restores the class to the fundamental state, avoiding same memory
+#         allocations problems.
+    def __del__(self):
+        self.ID = ''
+        self.MEMORY = 0
+        self.VCPU = 0
+        self.MANAGEMENT_MAC = ''
+        del self.INTERFACES[:]
+
+        self.VNF_EXIST = False
+        self.VNF_UP = False
+        self.VNF_STATUS = 0
+
+        self.VNF_JSON = ''
+        self.VNF_REST = None
+
+        self.VIRT_VM = None
+
 #inInterfaces: receives the JSON VNF configuration, parses it, apply data in destiny attributes and
 #              validates the read data and check for VNF existence.
 #              -5 = file does not exist

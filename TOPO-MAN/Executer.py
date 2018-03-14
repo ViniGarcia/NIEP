@@ -31,6 +31,7 @@ class Executer:
             self.STATUS = -4
 
     def __del__(self):
+        
         self.CONFIGURATION = None
         self.HOSTS.clear()
         self.SWITCHES.clear()

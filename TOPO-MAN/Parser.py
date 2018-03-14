@@ -93,6 +93,19 @@ class PlatformParser:
                         if self.connectionsCheck() == 0:
                             self.STATUS = 0
 
+    def __del__(self):
+
+        self.JSON = None
+        self.STATUS = None
+        self.ID = ""
+        del self.VNFS[:]
+        del self.SFCS[:]
+        del self.MNHOSTS[:]
+        del self.MNSWITCHES[:]
+        del self.MNCONTROLLER[:]
+        del self.MNOVSES[:]
+        del self.CONNECTIONS[:]
+
 #------------------------------------------------------------------
 
     def checkMAC(self, MAC):

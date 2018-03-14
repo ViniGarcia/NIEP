@@ -44,6 +44,25 @@ class SFC:
         if self.structureValidation() == 0:
             self.graphValidation()
 
+#__del__: restores the class to the fundamental state, avoiding same memory
+#         allocations problems.
+    def __del__(self):
+
+        self.ID = ''
+        del self.VNFS[:]
+        self.IP.clear()
+        del self.OPS[:]
+        del self.CONNECTIONS[:]
+
+        del self.SFC_VNFS_CONF[:]
+        del self.SFC_VNF_INSTANCES[:]
+        del self.SFC_LAST_INSTANCES[:]
+
+        self.SFC_UP = False
+        self.SFC_PARCIAL_UP = False
+        self.SFC_STATUS = 0
+        self.SFC_JSON = ''
+
 #structureValidation = verifies all data and check it coherence.
 #                       0 = valid structure
 #                      -1 = some data is missing
