@@ -23,7 +23,7 @@ applications below:
 1.3 Net Tools (apt-get install net-tools)<br/>
 1.4 Git (apt-get install git)<br/>
 2. Python<br/>
-2.1 Python 2.7.9 (apt-get install -t jessie python2.7)<br/>
+2.1 Python 2.7.9 (apt-get install python2.7)<br/>
 2.2 Pip (apt-get install python-pip)<br/>
 2.3 Requets (pip install requests)<br/>
 3. Hypervisor<br/>
@@ -31,7 +31,7 @@ applications below:
 3.2 Libvirt 1.2.9 (apt-get install libvirt-bin)<br/>
 3.3 Virt Manager - Optional - (apt-get install virt-manager)<br/>
 4. Mininet<br/>
-4.1 Mininet 2.3.0d1 ()
+4.1 Mininet 2.3.0d1 (https://github.com/mininet/mininet.git)
 
 Actually, there is no installer for NIEP (in progress), to use
 it you should (in the NIEP folder) execute 'python CLI/CLI.py' (use
