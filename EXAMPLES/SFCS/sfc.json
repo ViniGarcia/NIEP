@@ -1,8 +1,8 @@
 {
 	"ID": "sfc",
-	"VNFS": [{"ID":"x","PATH":"/home/gt-fende/Documentos/NIEP/EXAMPLES/VNFS/x.json"}, 
-			 {"ID":"y","PATH":"/home/gt-fende/Documentos/NIEP/EXAMPLES/VNFS/y.json"}, 
-			 {"ID":"z","PATH":"/home/gt-fende/Documentos/NIEP/EXAMPLES/VNFS/z.json"}],
+	"VNFS": [{"ID":"x","PATH":"../EXAMPLES/VNFS/x.json"}, 
+			 {"ID":"y","PATH":"../EXAMPLES/VNFS/y.json"}, 
+			 {"ID":"z","PATH":"../EXAMPLES/VNFS/z.json"}],
 	"IP" : {
 		"ID":"IP",
 		"LINK":"br0"

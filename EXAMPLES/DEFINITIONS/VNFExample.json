@@ -1,6 +1,6 @@
 {
 	"ID": "TESTE",
-	"VNFS":["/home/gt-fende/Documentos/NIEP/EXAMPLES/VNFS/x.json"],
+	"VNFS":["../EXAMPLES/VNFS/x.json"],
 	"SFCS":[],
 	"MININET":{
 		"HOSTS":[
