@@ -25,7 +25,7 @@ applications below:
 2. Python<br/>
 2.1 Python 2.7.9 (apt-get install python2.7)<br/>
 2.2 Pip (apt-get install python-pip)<br/>
-2.3 Requets (pip install requests)<br/>
+2.3 Requests (pip install requests)<br/>
 3. Hypervisor<br/>
 3.1 Qemu (apt-get install qemu-kvm)<br/>
 3.2 Libvirt 1.2.9 (apt-get install libvirt-bin)<br/>
