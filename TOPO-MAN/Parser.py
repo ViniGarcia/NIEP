@@ -154,15 +154,15 @@ class PlatformParser:
 
     def VNFSCheck(self, SFCVNFS):
 
-        FULLVNF = self.JSON['VNFS']
+        VERIFIEDSFCVNFS = {}
         for SFCID in SFCVNFS:
-            for VNFPATH in SFCVNFS[SFCID]:
-                if VNFPATH in FULLVNF:
-                    FULLVNF.remove(VNFPATH)
-            FULLVNF = FULLVNF + SFCVNFS[SFCID] 
+            for VNFID in SFCVNFS[SFCID]:
+                if SFCVNFS[SFCID][VNFID]["PATH"] not in self.JSON['VNFS']:                                        #VNF REDEFINITION, FIRST ASSUMED
+                    if SFCVNFS[SFCID][VNFID]["PATH"] not in VERIFIEDSFCVNFS:                                      #VNF REDEFINITION, FIRST ASSUMED
+                        VERIFIEDSFCVNFS[SFCVNFS[SFCID][VNFID]["PATH"]] = SFCVNFS[SFCID][VNFID]["CONNECTIONS"]
 
         PATHINSTANCE = {}
-        for VNFPATH in FULLVNF:
+        for VNFPATH in self.JSON['VNFS']:
             if isinstance(VNFPATH, basestring) and isfile(VNFPATH):
                 instance = VNF(VNFPATH, None)
                 if instance.VNF_STATUS < 0:
@@ -173,6 +173,19 @@ class PlatformParser:
             else:
                 self.STATUS = -2
                 return -2
+ 
+        for VNFPATH in VERIFIEDSFCVNFS:
+            if isfile(VNFPATH):
+                instance = VNF(VNFPATH, VERIFIEDSFCVNFS[VNFPATH])
+                if instance.VNF_STATUS < 0:
+                    self.STATUS = -3
+                    return -3
+                self.VNFS.append(instance)
+                PATHINSTANCE[VNFPATH] = instance
+            else:
+                self.STATUS = -2
+                return -2
+
 
         for SFCINSTANCE in self.SFCS:
             SFCPATHS = [VNFPATH['PATH'] for VNFPATH in SFCINSTANCE.VNFS]
@@ -186,7 +199,7 @@ class PlatformParser:
 
     def SFCCheck(self):
 
-        SFCVNFS = []
+        SFCVNFS = {}
         SFCDIC = {}
         for SFCPATH in self.JSON['SFCS']:
             if isinstance(SFCPATH, basestring) and isfile(SFCPATH):
@@ -194,10 +207,14 @@ class PlatformParser:
                 if instance.SFC_STATUS < 0:
                     self.STATUS = -5
                     return -5
+                if instance.prepareSFC() < 0:
+                    self.STATUS = -5
+                    return -5
                 self.SFCS.append(instance)
-                for VNFPATH in instance.VNFS:
-                    if VNFPATH not in self.VNFS:
-                        SFCVNFS.append(VNFPATH["PATH"])
+
+                for VNFCONF in instance.SFC_VNFS_CONF:
+                    if VNFCONF[0][0] not in SFCVNFS:                                                    #VNF REDEFINITION, FIRST ASSUMED
+                        SFCVNFS[VNFCONF[0][0]] = {"PATH":VNFCONF[0][1], "CONNECTIONS":VNFCONF[1:]}
                     else:
                         self.STATUS = -5
                         return -5

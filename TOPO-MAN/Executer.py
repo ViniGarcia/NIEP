@@ -180,7 +180,8 @@ class Executer:
 
         if self.CONFIGURATION.VNFS:
             for VNFINSTANCE in self.CONFIGURATION.VNFS:
-                VNFINSTANCE.createVNF()
+                if VNFINSTANCE.createVNF() == -1:
+                    VNFINSTANCE.applyVNF()
                 VNFINSTANCE.upVNF()
                 self.VNFS[VNFINSTANCE.ID] = VNFINSTANCE
 
