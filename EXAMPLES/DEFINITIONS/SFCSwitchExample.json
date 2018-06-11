@@ -1,0 +1,52 @@
+{
+	"ID": "TESTE",
+	"VNFS":[],
+	"SFCS":["../EXAMPLES/SFCS/singlevnfsfc.json"],
+	"MININET":{
+		"HOSTS":[
+			{
+				"ID":"HOST01",
+				"IP":"192.168.122.01/24"
+			},
+			{
+				"ID":"HOST02",
+				"IP":"192.168.122.02/24"
+			},
+			{
+				"ID":"HOST03",
+				"IP":"192.168.122.03/24"
+			},
+			{
+				"ID":"HOST04",
+				"IP":"192.168.122.04/24"
+			}
+		],
+		"SWITCHES":[],
+		"CONTROLLERS":[{"ID":"CTR01", "IP":"127.0.0.1", "PORT":"6633"}],
+		"OVSWITCHES":[{"ID":"OVS01", "CONTROLLER":"CTR01"}]
+	},
+	"CONNECTIONS":[
+		{
+			"IN/OUT":"HOST01",
+			"OUT/IN":"OVS01"
+		},
+		{
+			"IN/OUT":"HOST02",
+			"OUT/IN":"OVS01"
+		},
+		{
+			"IN/OUT":"HOST03",
+			"OUT/IN":"OVS01"
+		},
+		{
+			"IN/OUT":"OVS01",
+			"OUT/IN":"x",
+			"OUT/INIFACE":"52:54:00:6c:22:13"
+		},
+		{
+			"IN/OUT":"x",
+			"OUT/IN":"HOST04",
+			"IN/OUTIFACE":"52:54:00:6c:22:14"
+		}
+	]
+}

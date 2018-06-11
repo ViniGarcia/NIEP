@@ -27,10 +27,14 @@ class MNSwitch:
 
 class MNController:
     ID = ""
+    IP = ""
+    PORT = None
     ELEM = None
 
-    def __init__(self, ID):
+    def __init__(self, ID, IP, PORT):
         self.ID = ID
+        self.IP = IP
+        self.PORT = PORT
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -270,13 +274,16 @@ class PlatformParser:
         if "CONTROLLERS" in MininetList:
             if isinstance(MininetList["CONTROLLERS"], list):
                 for CONTROLLER in MininetList["CONTROLLERS"]:
-                    if CONTROLLER in IDLIST:
+                    if not "ID" in  CONTROLLER or not "IP" in CONTROLLER or not "PORT" in CONTROLLER or CONTROLLER in IDLIST:
                         self.STATUS = -9
                         return -9
                     else:
-                        CONTROLLERLIST.append(CONTROLLER)
+                        if not self.isint(CONTROLLER["PORT"]):
+                            self.STATUS = -9
+                            return -9
+                        CONTROLLERLIST.append(CONTROLLER["ID"])
 
-                    self.MNCONTROLLER.append(MNController(CONTROLLER))
+                    self.MNCONTROLLER.append(MNController(CONTROLLER["ID"], CONTROLLER["IP"], int(CONTROLLER["PORT"])))
 
         if "OVSWITCHES" in MininetList:
             if isinstance(MininetList["OVSWITCHES"], list):
