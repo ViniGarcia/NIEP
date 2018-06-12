@@ -1,0 +1,12 @@
+{
+	"ID":"1527179620",
+	"VNFS":[],
+	"SFCS":["../RVEM/FILES/1527179620/sfcteste.json"],
+	"MININET":{
+		"HOSTS":[],
+		"SWITCHES":[],
+		"CONTROLLERS":[],
+		"OVSWITCHES":[]
+	},
+	"CONNECTIONS":[]
+}

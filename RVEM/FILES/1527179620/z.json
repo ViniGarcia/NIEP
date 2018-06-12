@@ -1,0 +1,1 @@
+{"ID": "z","MEMORY": 300,"VCPU": 1,"MANAGEMENT_MAC": "52:54:01:6c:22:03","INTERFACES": [{"ID": "br2","MAC": "52:54:00:6c:22:17"},{"ID": "br3","MAC": "52:54:00:6c:22:18"}]}
