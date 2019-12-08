@@ -73,7 +73,7 @@ Contact us towards git issues requests or by the e-mail vfulber@inf.ufsm.br.
 
 ### NIEP Research Group
 
-Vinícius Fülber Garcia (UFSM - Brazil)<br/>
+Vinícius Fülber Garcia (UFPR - Brazil)<br/>
 Thales Nicolai Tavares (UFSM - Brazil)<br/>
 Leonardo da Cruz Marcuzzo (UFSM - Brazil)<br/>
 Giovanni Venâncio de Souza (UFPR - Brazil)<br/>
