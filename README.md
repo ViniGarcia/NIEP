@@ -59,13 +59,14 @@ applications below:
 
 ### Next Steps
 
-1. Native distributed mode (NIEP agent)<br/>
-2. VNF-REPO (Local(OK), HDFS(OK), HTTP(IMPLEMENTING))<br/>
-3. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
-4. Topology structure viewer<br/>
-5. NIEP working as an API (NIEP Module)<br/>
-6. High level scripts for VNFs actions (PyCOO[3] based)<br/>
-7. Graphical interface
+1. User guide<br/>
+2. Native distributed mode (NIEP agent)<br/>
+3. VNF-REPO (Local(OK), HDFS(OK), HTTP(IMPLEMENTING))<br/>
+4. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
+5. Topology structure viewer<br/>
+6. NIEP working as an API (NIEP Module)<br/>
+7. High level scripts for VNFs actions (PyCOO[3] based)<br/>
+8. Graphical interface
 
 ### Support
 
@@ -87,16 +88,14 @@ Alberto Egon Schaeffer-Filho (UFRGS - Brazil)
 
 ### Publications
 
--> NIEP - NFV Infrastructure Emulation Platform <-<br/>
-T. Tavares, L. Marcuzzo, V. Garcia, G. Venâncio, M. Franco, L. Bondan, F. De Turk, L. Granville, E. Duarte, C. Santos and A. Schaeffer-filho, "NIEP - NFV Infrastructure Emulation Platform", in 32nd IEEE AINA, Cracow, Poland, 2018.
+T. Tavares, L. Marcuzzo, V. Fulber-Garcia, G. Venâncio, M. Franco, L. Bondan, F. De Turk, L. Granville, E. Duarte, C. Santos and A. Schaeffer-filho, "NIEP - NFV Infrastructure Emulation Platform", in 32nd IEEE AINA, Cracow, Poland, 2018.
+<br/>
+V. Fulber-Garcia, T. Tavares, L. Marcuzzo, G. Venâncio, M. Franco, L. Bondan, A. Schaeffer-Filho, C. Santos, F. De Turck, L. Granville, E. Duarte, "On the Design and Development of Emulation Platforms for NFV-based Infrastructures", in International Journal of Grid and Utility Computing (IJGUC), 11(2). 2020.
 
 ### References
 
--> Mininet <-<br/>
 [1] B. Lantz, B. Heller and N. McKeown, "A network in a laptop: rapid prototyping for software-defined networks", in 9th ACM SIGCOMM Workshop on Hot Topics in Networks (Hotnets-IX), Monterey, California, 2010, p. 6. doi=10.1145/1868447.1868466
 <br/>
--> Click-On-OSv <-<br/>
 [2] L. da Cruz Marcuzzo et al., "Click-on-OSv: A platform for running Click-based middleboxes", 2017 IFIP/IEEE Symposium on Integrated Network and Service Management (IM), Lisbon, 2017, pp. 885-886. doi: 10.23919/INM.2017.7987396
 <br/>
--> PyCOO <-<br/>
 [3] V. F. Garcia et al., "PyCOO: Uma API em Python para Plataforma Click-On-Osv", 2017 Escola Regional de Redes de Computadores (ERRC), Santa Maria, 2017, pp. 119-126. 
