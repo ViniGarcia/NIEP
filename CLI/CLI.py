@@ -3,9 +3,9 @@ from sys import path
 from subprocess import call
 from subprocess import STDOUT
 from os import devnull
-from os.path import isfile
+from os.path import isfile, abspath
 from mininet.cli import CLI
-path.insert(0, '../TOPO-MAN/')
+path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['TOPO-MAN']))
 from Executer import Executer
 from Parser import PlatformParser
 
@@ -20,6 +20,26 @@ from Parser import PlatformParser
 
 #FNULL: redirects the system call normal output
 FNULL = open(devnull, 'w')
+
+#ERRORS: definition of errors for execution debug
+PARSERERRORS = {-1: "Invalid definition file path or invalid key included",
+                -2: "Invalid data type included as a key value",
+                -3: "Invalid VNF configuration provided",
+                -4: "Invalid SFC file path provided",
+                -5: "Invalid SFC configuration provided",
+                -6: "Invalid Mininet configuration provided",
+                -7: "Invalid Mininet host configuration provided",
+                -8: "Invalid Mininet switch configuration provided",
+                -9: "Invalid Mininet controller configuration provided",
+                -10: "Invalid Mininet OVS switch configuration provided",
+                -11: "Invalid connections configuration provided",
+                -12: "Invalid In/Out point configuration provided",
+                -13: "Invalid Out/In point configuration provided",
+                -14: "Inconsistent in In/Out and Out/In poits"}
+EXECUTERERRORS = {-1: "Mininet network interfaces mapping failed",
+                  -2: "Invalid definition of Mininet network interface",
+                  -3: "Unrecognized Mininet network interface",
+                  -4: "Parser error detected"}
 
 class NIEPCLI(Cmd):
 
@@ -71,10 +91,16 @@ class NIEPCLI(Cmd):
                 print 'WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED'
                 return
 
-            self.NIEPEXE = Executer(PlatformParser(args))
+            NIEPPARSER = PlatformParser(args)
+            if NIEPPARSER.STATUS != 0:
+                print("ERROR: " + PARSERERRORS[NIEPPARSER.STATUS] + " (DEFINE / PARSER)")
+                return
+
+            self.NIEPEXE = Executer(NIEPPARSER)
             if not self.NIEPEXE.STATUS == None:
+                print("ERROR: " + EXECUTERERRORS[self.NIEPEXE.STATUS] + " (DEFINE / EXECUTER)")
                 self.NIEPEXE = None
-                return 
+                return
         else:
             print 'NIEP PROMPT COMMAND'
 

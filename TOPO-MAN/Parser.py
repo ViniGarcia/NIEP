@@ -1,7 +1,7 @@
 import json
-from os.path import isfile
+from os.path import isfile, abspath
 from sys import path
-path.insert(0, '../VEM/')
+path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
 from VNF import VNF
 from SFC import SFC
 
