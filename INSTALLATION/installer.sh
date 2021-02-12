@@ -26,12 +26,7 @@ else
 	echo "11 of 12 - Installing Virt Manager..."
 	apt-get install -y virt-manager
 	echo "12 of 12 - Installing Mininet..."
-	git clone git://github.com/mininet/mininet
-	cd mininet
-	git tag
-	git checkout -b 2.3.0d1
-	cd ..
-	mininet/util/install.sh -a
+	apt-get install -y mininet
 
 	echo 'Your system must reboot - do it now? (y/n)' && read x && [[ "$x" == "y" ]] && /sbin/reboot;
 fi
