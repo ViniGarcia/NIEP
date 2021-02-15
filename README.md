@@ -34,7 +34,9 @@ named as 'installer.sh'. Please, make sure that your CPU has support for virtual
 technology and it is enabled. <br/>
 
 For the platform execution, in NIEP folder, execute 'python CLI/CLI.py' (use
-'help' command in the NIEP CLI to show the platform functionalities). 
+'help' command in the NIEP CLI to show the platform functionalities).
+
+You can see a brief tutorial about NIEP installation and usage [HERE](https://docs.google.com/presentation/d/e/2PACX-1vSuS-3_7BMIaioXhqmlGuGkvf36IZvKu8GRQnOle1gYHUOwGxcnAroJi5Y5dJQ4oGABe7uf5RN5GzBw/pub?start=false&loop=false&delayms=3000).
 
 ### How does it was created?
 
