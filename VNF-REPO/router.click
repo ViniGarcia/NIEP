@@ -15,8 +15,8 @@ net0out :: ToDPDKDevice(0);
 net1in :: FromDPDKDevice(1);
 net1out :: ToDPDKDevice(1);
 
-// Port 0, 00:00:00:00:00:01, 192.168.121.1
-// Port 1, 00:00:00:00:00:02, 192.168.122.1
+// Port 0, 00:00:00:00:02:01, 192.168.121.1
+// Port 1, 00:00:00:00:02:02, 192.168.122.1
 
 c0 :: Classifier(12/0806 20/0001,
                   12/0806 20/0002,
@@ -35,8 +35,8 @@ net0in -> Print("1: ") -> [0]c0;
 net1in -> [0]c1;
 
 //ARP
-arpq0 :: ARPQuerier(192.168.121.1, 00:00:00:00:00:01);
-arpq1 :: ARPQuerier(192.168.122.1, 00:00:00:00:00:02);
+arpq1 :: ARPQuerier(192.168.121.1, 00:00:00:00:02:01);
+arpq0 :: ARPQuerier(192.168.122.1, 00:00:00:00:02:02);
 
 t :: Tee(2);
 c0[1] -> Print("2: ") -> t;
@@ -47,8 +47,8 @@ t[1] -> Print("3.2: ") -> [1]arpq1;
 arpq0 -> Print("5: ") -> net0out;
 arpq1 -> net1out;
 
-arpr0 :: ARPResponder(192.168.121.1 00:00:00:00:00:01);
-arpr1 :: ARPResponder(192.168.122.1 00:00:00:00:00:02);
+arpr0 :: ARPResponder(192.168.122.1 00:00:00:00:02:02);
+arpr1 :: ARPResponder(192.168.121.1 00:00:00:00:02:01);
 c0[0] -> Print("4: ") -> arpr0 -> Print("4.1: ") -> net0out;
 c1[0] -> arpr1 -> net1out;
 

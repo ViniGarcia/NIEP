@@ -62,7 +62,7 @@ class Executer:
         self.NET = Mininet(topo=None, build=False)
 
         for HOST in self.CONFIGURATION.MNHOSTS:
-            HOST.ELEM = self.NET.addHost(HOST.ID, mac=HOST.MAC) 
+            HOST.ELEM = self.NET.addHost(HOST.ID, mac=HOST.MAC)
             self.HOSTS[HOST.ID] = HOST
 
         for SWITCH in self.CONFIGURATION.MNSWITCHES:
