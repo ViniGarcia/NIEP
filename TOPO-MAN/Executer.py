@@ -1,8 +1,9 @@
 from Parser import *
 from subprocess import check_output
-from subprocess import call
+from subprocess import call, Popen
 from subprocess import STDOUT
 from os import devnull
+from time import sleep
 from mininet.net import Mininet
 from mininet.node import Host
 from mininet.node import Switch
@@ -20,6 +21,7 @@ class Executer:
     OVSSWITCHES = {}
     CONTROLLERS = {}
     VNFS = {}
+    POX = None 
     NET = None
     STATUS = None
 
@@ -60,7 +62,7 @@ class Executer:
         self.NET = Mininet(topo=None, build=False)
 
         for HOST in self.CONFIGURATION.MNHOSTS:
-            HOST.ELEM = self.NET.addHost(HOST.ID) 
+            HOST.ELEM = self.NET.addHost(HOST.ID, mac=HOST.MAC) 
             self.HOSTS[HOST.ID] = HOST
 
         for SWITCH in self.CONFIGURATION.MNSWITCHES:
@@ -68,8 +70,10 @@ class Executer:
             self.SWITCHES[SWITCH.ID] = SWITCH
 
         if self.SWITCHES:
-            UNICTRL = MNController('UNICTRL')
-            UNICTRL.ELEM = self.NET.addController('UNICTRL')
+            self.POX = Popen(['python', '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT)
+            sleep(3)
+            UNICTRL = MNController('UNICTRL', '127.0.0.1', 6633)
+            UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
             self.CONTROLLERS['UNICTRL'] = UNICTRL
 
         for CONTROLLER in self.CONFIGURATION.MNCONTROLLER:
@@ -152,6 +156,9 @@ class Executer:
         for HOST in self.HOSTS:
             if not self.HOSTS[HOST].IP is None:
                 self.HOSTS[HOST].ELEM.setIP(self.HOSTS[HOST].IP)
+#            if not self.HOSTS[HOST].MAC is None:
+#                print("--", self.HOSTS[HOST].MAC)
+#                print(self.HOSTS[HOST].ELEM.setMAC(self.HOSTS[HOST].MAC))
 
         return 0
 
@@ -221,6 +228,9 @@ class Executer:
 
         for SWITCH in self.SWITCHES:
             self.SWITCHES[SWITCH].ELEM.stop()
+
+        if type(self.POX) == Popen:
+            self.POX.terminate()
 
         call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL, stderr=STDOUT)
         call(['ifconfig', 'vbrNIEP', 'down'], stdout=FNULL, stderr=STDOUT)

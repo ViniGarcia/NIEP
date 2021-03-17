@@ -1,4 +1,5 @@
 import json
+import random
 import libvirt 
 from REST import REST
 from time import sleep
@@ -72,6 +73,41 @@ class VNF:
 
         self.VIRT_VM = None
 
+#__checkMAC = verifies a given MAC address and return if it is valid or not.
+#              0 = valid MAC
+#             -1 = invalid MAC
+    def __checkMAC(self, MAC):
+
+        if isinstance(MAC, basestring) and len(MAC) == 17:
+            for i in range(2, 16, 3):
+                if MAC[i] != ':':
+                    return -1
+            for i in range(0, 16, 2):
+                if (ord(MAC[i]) < 48 and ord(MAC[i]) > 57) and (ord(MAC[i]) < 65 and ord(MAC[i]) > 70) and (ord(MAC[i]) < 97 and ord(MAC[i]) > 66):
+                    return -1
+            for i in range(1, 16, 2):
+                if (ord(MAC[i]) < 48 and ord(MAC[i]) > 57) and (ord(MAC[i]) < 65 and ord(MAC[i]) > 70) and (ord(MAC[i]) < 97 and ord(MAC[i]) > 66):
+                    return -1
+        else:
+            return -1
+
+        return 0
+
+#__randomizeMAC = creates a new random MAC address for internal usage.
+#                   str = valid MAC address
+    def __randomizeMAC(self):
+
+        MACValues = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"]
+        MACString = "00:"
+
+        while True:
+            MACString = MACString + MACValues[random.randint(0, 15)] + MACValues[random.randint(0, 15)]
+            if len(MACString) == 17:
+                break
+            MACString = MACString + ":"
+
+        return MACString
+
 #inInterfaces: receives the JSON VNF configuration, parses it, apply data in destiny attributes and
 #              validates the read data and check for VNF existence.
 #              -5 = file does not exist
@@ -141,6 +177,12 @@ class VNF:
             if 'ID' not in iface or 'MAC' not in iface:
                 self.VNF_STATUS = -2
                 return -2
+            if 'LINK_MAC' in iface:
+                if self.__checkMAC(iface['LINK_MAC']):
+                    self.VNF_STATUS = -2
+                    return -2
+            else:
+                iface['LINK_MAC'] = self.__randomizeMAC()
 
         existingImages = glob(STDPATH + 'IMAGES/*')
         for images in existingImages:
@@ -341,6 +383,7 @@ class VNF:
 
             for iface in ifacesCreate:
                 call(['brctl', 'addbr', iface['ID']], stdout=FNULL, stderr=STDOUT)
+                call(['ifconfig', iface['ID'], "hw", "ether", iface['LINK_MAC']], stdout=FNULL, stderr=STDOUT)
             for iface in self.INTERFACES:
                 call(['ifconfig', iface['ID'], 'up'], stdout=FNULL, stderr=STDOUT)
 

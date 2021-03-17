@@ -111,6 +111,10 @@ class NIEPCLI(Cmd):
                 if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
                     print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
                     return
+                
+                if self.NIEPEXE.STATUS != None:
+                    print 'THIS COMMAND WAS ALREADY EXECUTED FOR THIS TOPOLOGY - CODE ' + str(self.NIEPEXE.STATUS)
+                    return
 
                 self.NIEPEXE.topologyUp()
                 if not self.NIEPEXE.STATUS == 0:

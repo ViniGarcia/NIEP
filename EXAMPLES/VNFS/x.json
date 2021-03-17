@@ -5,7 +5,8 @@
 	"MANAGEMENT_MAC": "52:54:01:6c:22:01",
 	"INTERFACES": [{
 		"ID": "br0",
-		"MAC": "52:54:00:6c:22:13"
+		"MAC": "52:54:00:6c:22:13",
+		"LINK_MAC": "00:cb:31:9a:8f:fe"
 	},
 	{
 		"ID": "br1",

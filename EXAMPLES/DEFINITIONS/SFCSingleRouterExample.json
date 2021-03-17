@@ -1,18 +1,18 @@
 {
-	"ID": "TESTE",
+	"ID": "SFCSingleRouterExample",
 	"VNFS":[],
-	"SFCS":["../EXAMPLES/SFCS/singlevnfsfc.json"],
+	"SFCS":["../EXAMPLES/SFCS/singleroutersfc.json"],
 	"MININET":{
 		"HOSTS":[
 			{
 				"ID":"HOST01",
 				"IP":"192.168.121.1/24",
-				"MAC":"b0:36:38:d1:4a:4c"
+				"MAC":"00:00:00:00:02:01"
 			},
 			{
 				"ID":"HOST02",
 				"IP":"192.168.122.1/24",
-				"MAC":"b0:4b:60:23:f1:e2"
+				"MAC":"00:00:00:00:02:02"
 			}
 
 		],
@@ -24,12 +24,12 @@
 		{
 			"IN/OUT":"HOST01",
 			"OUT/IN":"x",
-			"OUT/INIFACE":"52:54:00:6c:22:13"
+			"OUT/INIFACE":"00:00:00:00:01:01"
 		},
 		{
 			"IN/OUT":"x",
 			"OUT/IN":"HOST02",
-			"IN/OUTIFACE":"52:54:00:6c:22:14"
+			"IN/OUTIFACE":"00:00:00:00:01:02"
 		}
 	]
 }

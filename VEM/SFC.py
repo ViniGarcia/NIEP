@@ -1,4 +1,5 @@
 import json
+import random
 from VNF import VNF
 from os import path
 
@@ -62,6 +63,41 @@ class SFC:
         self.SFC_PARCIAL_UP = False
         self.SFC_STATUS = 0
         self.SFC_JSON = ''
+
+#__checkMAC = verifies a given MAC address and return if it is valid or not.
+#              0 = valid MAC
+#             -1 = invalid MAC
+    def __checkMAC(self, MAC):
+
+        if isinstance(MAC, basestring) and len(MAC) == 17:
+            for i in range(2, 16, 3):
+                if MAC[i] != ':':
+                    return -1
+            for i in range(0, 16, 2):
+                if (ord(MAC[i]) < 48 and ord(MAC[i]) > 57) and (ord(MAC[i]) < 65 and ord(MAC[i]) > 70) and (ord(MAC[i]) < 97 and ord(MAC[i]) > 66):
+                    return -1
+            for i in range(1, 16, 2):
+                if (ord(MAC[i]) < 48 and ord(MAC[i]) > 57) and (ord(MAC[i]) < 65 and ord(MAC[i]) > 70) and (ord(MAC[i]) < 97 and ord(MAC[i]) > 66):
+                    return -1
+        else:
+            return -1
+
+        return 0
+
+#__randomizeMAC = creates a new random MAC address for internal usage.
+#                   str = valid MAC address
+    def __randomizeMAC(self):
+
+        MACValues = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"]
+        MACString = "00:"
+
+        while True:
+            MACString = MACString + MACValues[random.randint(0, 15)] + MACValues[random.randint(0, 15)]
+            if len(MACString) == 17:
+                break
+            MACString = MACString + ":"
+
+        return MACString
 
 #structureValidation = verifies all data and check it coherence.
 #                       0 = valid structure
@@ -127,6 +163,12 @@ class SFC:
                 if not 'ILL_MAC' in CONNECTION or not 'OLL_MAC' in CONNECTION:
                     self.SFC_STATUS = -5
                     return -5
+                if 'LINK_MAC' in CONNECTION:
+                    if self.__checkMAC(CONNECTION['LINK_MAC']):
+                        self.SFC_STATUS = -5
+                        return -5
+                else:
+                    CONNECTION['LINK_MAC'] = self.__randomizeMAC()
 
             if self.CONNECTIONS.count(CONNECTION) != 1:
                 self.SFC_STATUS = -5
@@ -179,6 +221,12 @@ class SFC:
             if self.IP['LINK'] in CONNECTIONLINK:
                 self.SFC_STATUS = -7
                 return -7
+            if 'LINK_MAC' in self.IP:
+                if self.__checkMAC(self.IP['LINK_MAC']):
+                    self.SFC_STATUS = -7
+                    return -7
+            else:
+                self.IP['LINK_MAC'] = self.__randomizeMAC()
 
         for OP in self.OPS:
             if not OP['ID'] in CONNECTIONSILL:
@@ -191,6 +239,12 @@ class SFC:
                 if OP['LINK'] in CONNECTIONLINK:
                     self.SFC_STATUS = -8
                     return -8
+                if 'LINK_MAC' in OP:
+                    if self.__checkMAC(OP['LINK_MAC']):
+                        self.SFC_STATUS = -8
+                        return -8
+                else:
+                    OP['LINK_MAC'] = self.__randomizeMAC()
 
         for VNF in self.VNFS:
             if not VNF['ID'] in CONNECTIONSILL:
@@ -229,19 +283,19 @@ class SFC:
             for CONNECTION in self.CONNECTIONS:
                 if 'LINK' in CONNECTION:
                     if CONNECTION['ILL'] == VNF['ID']:
-                        CONF.append({'ID':CONNECTION['LINK'], 'MAC':CONNECTION['ILL_MAC']})
+                        CONF.append({'ID':CONNECTION['LINK'], 'MAC':CONNECTION['ILL_MAC'], 'LINK_MAC':CONNECTION['LINK_MAC']})
                         continue
                     if CONNECTION['OLL'] == VNF['ID']:
-                        CONF.append({'ID':CONNECTION['LINK'], 'MAC':CONNECTION['OLL_MAC']})
+                        CONF.append({'ID':CONNECTION['LINK'], 'MAC':CONNECTION['OLL_MAC'], 'LINK_MAC':CONNECTION['LINK_MAC']})
                         continue
                 else:
                     if CONNECTION['OLL'] == self.IP['ID']:
                         if CONNECTION['ILL'] == VNF['ID']:
-                            CONF.append({'ID':self.IP['LINK'], 'MAC':CONNECTION['ILL_MAC']})
+                            CONF.append({'ID':self.IP['LINK'], 'MAC':CONNECTION['ILL_MAC'], 'LINK_MAC':self.IP['LINK_MAC']})
                     else:
                         if CONNECTION['OLL'] == VNF['ID']:
                             OP = filter(lambda OP : OP['ID'] == CONNECTION['ILL'], self.OPS)
-                            CONF.append({'ID':OP[0]['LINK'], 'MAC':CONNECTION['OLL_MAC']})
+                            CONF.append({'ID':OP[0]['LINK'], 'MAC':CONNECTION['OLL_MAC'], 'LINK_MAC':OP[0]['LINK_MAC']})
             self.SFC_VNFS_CONF.append(CONF)
 
         return 0

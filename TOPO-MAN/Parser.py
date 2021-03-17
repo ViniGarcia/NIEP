@@ -1,4 +1,5 @@
 import json
+import random
 from os.path import isfile, abspath
 from sys import path
 path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
@@ -7,12 +8,14 @@ from SFC import SFC
 
 class MNHost:
     ID = ""
-    IP = None
+    IP = ""
+    MAC = ""
     ELEM = None
 
-    def __init__(self, ID, IP):
+    def __init__(self, ID, IP, MAC):
         self.ID = ID
         self.IP = IP
+        self.MAC = MAC
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -133,7 +136,7 @@ class PlatformParser:
 
     def generateMAC(self, lastDigitsTuple):
 
-        MACMask = "FF:FF:FF:FF:FF:"
+        MACMask = "ff:ff:ff:ff:ff:"
         if lastDigitsTuple < 10:
             MACMask += "0" + str(lastDigitsTuple)
             return MACMask
@@ -144,6 +147,21 @@ class PlatformParser:
             else:
                 self.STATUS = -5
                 return -5
+
+#------------------------------------------------------------------
+
+    def randomizeMAC(self):
+
+        MACValues = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"]
+        MACString = "b0:"
+
+        while True:
+            MACString = MACString + MACValues[random.randint(0, 15)] + MACValues[random.randint(0, 15)]
+            if len(MACString) == 17:
+                break
+            MACString = MACString + ":"
+
+        return MACString
 
 #------------------------------------------------------------------
 
@@ -246,6 +264,12 @@ class PlatformParser:
             if isinstance(MininetList["HOSTS"], list):
                 for HOST in MininetList["HOSTS"]:
                     if "ID" in HOST and "IP" in HOST:
+                        if "MAC" in HOST:
+                            if self.checkMAC(HOST["MAC"]):
+                                self.STATUS = -7
+                                return -7
+                        else:
+                            HOST["MAC"] = self.randomizeMAC()
                         if HOST["ID"] in IDLIST:
                             self.STATUS = -7
                             return -7
@@ -255,7 +279,7 @@ class PlatformParser:
                         self.STATUS = -7
                         return -7
 
-                    self.MNHOSTS.append(MNHost(HOST["ID"], HOST["IP"]))
+                    self.MNHOSTS.append(MNHost(HOST["ID"], HOST["IP"], HOST["MAC"]))
             else:
                 self.STATUS = -7
                 return -7

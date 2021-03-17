@@ -1,0 +1,24 @@
+{
+	"ID": "singleroutersfc",
+	"VNFS": [{"ID":"x","PATH":"../EXAMPLES/VNFS/x.json"}],
+	"IP" : {
+		"ID":"IP",
+		"LINK":"br0",
+		"LINK_MAC": "00:00:00:00:00:01"
+		},
+	"OPS" : [{
+		"ID":"OP1",
+		"LINK":"br1",
+		"LINK_MAC": "00:00:00:00:00:02"
+		}],
+	"CONNECTIONS": [{
+		"OLL":"IP",
+		"ILL":"x",
+		"ILL_MAC":"00:00:00:00:01:01"
+	},
+	{
+		"OLL":"x",
+		"OLL_MAC":"00:00:00:00:01:02",
+		"ILL":"OP1"
+	}]
+}

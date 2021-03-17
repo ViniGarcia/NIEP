@@ -5,12 +5,14 @@
 			 {"ID":"z","PATH":"../EXAMPLES/VNFS/z.json"}],
 	"IP" : {
 		"ID":"IP",
-		"LINK":"br0"
-		},
+		"LINK":"br0",
+		"LINK_MAC": "00:54:00:6c:22:01"
+	},
 	"OPS" : [{
 		"ID":"OP1",
-		"LINK":"br5"
-		}],
+		"LINK":"br5",
+		"LINK_MAC": "00:54:00:6c:22:02"
+	}],
 	"CONNECTIONS": [{
 		"OLL":"IP",
 		"ILL":"x",
@@ -18,6 +20,7 @@
 	},
 	{
 		"LINK":"br1",
+		"LINK_MAC": "00:54:00:6c:22:03",
 		"OLL": "x",
 		"OLL_MAC":"52:54:00:6c:22:14",
 		"ILL": "y",
