@@ -4,6 +4,7 @@ from subprocess import call, Popen
 from subprocess import STDOUT
 from os import devnull
 from time import sleep
+from signal import signal, SIGINT, SIG_IGN
 from mininet.net import Mininet
 from mininet.node import Host
 from mininet.node import Switch
@@ -13,6 +14,10 @@ from mininet.link import Link, Intf
 
 #FNULL: redirects the system call normal output
 FNULL = open(devnull, 'w')
+
+#pre_exec: ignores a CTRL+C command in a subprocess
+def pre_exec():
+    signal(SIGINT, SIG_IGN)
 
 class Executer:
     CONFIGURATION = None
@@ -70,7 +75,7 @@ class Executer:
             self.SWITCHES[SWITCH.ID] = SWITCH
 
         if self.SWITCHES:
-            self.POX = Popen(['python', '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT)
+            self.POX = Popen(['python', '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT, preexec_fn=pre_exec)
             sleep(3)
             UNICTRL = MNController('UNICTRL', '127.0.0.1', 6633)
             UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
