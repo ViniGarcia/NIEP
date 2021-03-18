@@ -108,7 +108,7 @@ class REST:
         functionFile = open(functionPath)
         functionData = functionFile.read()
 
-        response = post(self.VNF_ADDRESS + '/click_plugin/write_file?path=func.click&content=' + functionData)
+        response = post(self.VNF_ADDRESS + '/click_plugin/write_file', params={'path':'func.click', 'content':functionData})
         return response.status_code
 
 # scriptError: trigger for a non 200 rest return.
