@@ -1,13 +1,18 @@
-from cmd import Cmd
 from sys import path
 from subprocess import call
 from subprocess import STDOUT
-from os import devnull
-from os.path import isfile, abspath
+from os import devnull, listdir
+from os.path import isfile, abspath, commonprefix
 from mininet.cli import CLI
+
+import cmd
+import readline
+import rlcompleter
+
 path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['TOPO-MAN']))
 from Executer import Executer
 from Parser import PlatformParser
+from Completer import Completer
 
 #MISSING TASKS (priority order):
 # 1.Distributed mode
@@ -41,12 +46,47 @@ EXECUTERERRORS = {-1: "Mininet network interfaces mapping failed",
                   -3: "Unrecognized Mininet network interface",
                   -4: "Parser error detected"}
 
-class NIEPCLI(Cmd):
+def PATHCOMPLETER(text):
+
+    try:    
+        children_dir = listdir(text + "/")
+        if len(children_dir) > 1:
+            if not text.endswith("/"):
+                readline.insert_text("/")
+            return children_dir  + [".", ".."]
+        if len(children_dir) == 1:
+            if text.endswith("/"):
+                return [text + children_dir[0]]
+            else:
+                return [text + "/" + children_dir[0]]
+    except:
+        pass
+
+    last_dir = text.rfind("/")
+    if last_dir != -1:
+        children_dir = listdir(text[:last_dir] + "/")
+        subpath_prefix = text[last_dir+1:]
+        supaths_dir = [f for f in children_dir if f.startswith(subpath_prefix)]
+        if len(supaths_dir) == 0:
+            return []
+        if len(supaths_dir) == 1:
+            return [text[:last_dir] + "/" + supaths_dir[0]]
+        else:
+            common_prefix = commonprefix(supaths_dir)
+            if len(common_prefix) < 2 or len(common_prefix) <= len(text[last_dir+1:]):
+                return supaths_dir + [".", ".."]
+            else:
+                return [text[:last_dir] + "/" + common_prefix]
+
+    return []
+
+class NIEPCLI(cmd.Cmd):
 
     prompt = 'niep> '
     NIEPEXE = None
     VNFEXEC = None
     SFCEXEC = None
+    CLICOMP = None    
 
 ##################################################################################################################################
 # NIEP INTERFACE
@@ -57,15 +97,15 @@ class NIEPCLI(Cmd):
             print '-> NIEP PROMPT <-'
             print '\tdefine path -> input a NIEP topology define in path argument'
             print '\ttopoup -> up a defined architecture'
-            print '\ttopodown -> down an upped architecture'
-            print '\ttopoclean -> if an architecture defined and upped, downs it and clean the definition'
+            print '\ttopodown -> down an started architecture'
+            print '\ttopoclean -> if an architecture defined and started, downs it and clean the definition'
             print '\ttopodestroy -> clean the definition and delete the topology NIEP files'
             print '\tvnf arg -> assumes a VNF or list the defined ones'
             print '\t\t-> arg = list (list every defined VNF ID)'
-            print '\t\t-> ard = VNF ID (assumes VNF ID prompt)'
+            print '\t\t-> arg = VNF ID (assumes VNF ID prompt)'
             print '\tsfc arg -> assumes a SFC or list the defined ones'
             print '\t\t-> arg = list (list every defined SFC ID)'
-            print '\t\t-> ard = SFC ID (assumes SFC ID prompt)'
+            print '\t\t-> arg = SFC ID (assumes SFC ID prompt)'
             print '\tmininet -> assumes the mininet prompt\n'
             print '-> VNF PROMPT <-'
             print '\tvnfmanagement -> return the VNF management interface address'
@@ -103,6 +143,10 @@ class NIEPCLI(Cmd):
                 return
         else:
             print 'NIEP PROMPT COMMAND'
+
+    def complete_define(self, text, line, begidx, endidx):
+
+        return PATHCOMPLETER(text)
 
     def do_topoup(self, args):
         if self.prompt == 'niep> ':
@@ -212,6 +256,31 @@ class NIEPCLI(Cmd):
         else:
             print 'NIEP PROMPT COMMAND'
 
+    def complete_vnf(self, text, line, begidx, endidx):
+
+        if self.NIEPEXE == None or self.NIEPEXE.STATUS != 0:
+            return []
+
+        if self.NIEPEXE.VNFS == None or len(self.NIEPEXE.VNFS) == 0:
+            return ['list']
+
+        args_list = ['list'] + list(self.NIEPEXE.VNFS.keys())
+        if len(text) == 0:
+            return args_list
+        args_sublist = [a for a in args_list if a.startswith(text)]
+        if len(args_sublist) == 0:
+            return []
+        if len(args_sublist) == 1:
+            return args_sublist
+        else:
+            common_prefix = commonprefix(args_sublist)
+            if len(common_prefix) < 2 or len(common_prefix) <= len(text):
+                return args_sublist
+            else:
+                return [common_prefix]
+
+        return []
+
     def do_sfc(self, args):
         if self.prompt == 'niep> ':
             if not self.NIEPEXE == None:
@@ -241,6 +310,31 @@ class NIEPCLI(Cmd):
                 print 'NO TOPOLOGY DEFINED'
         else:
             print 'NIEP PROMPT COMMAND'
+
+    def complete_sfc(self, text, line, begidx, endidx):
+
+        if self.NIEPEXE == None or self.NIEPEXE.STATUS != 0:
+            return []
+
+        if self.NIEPEXE.CONFIGURATION.SFCS == None or len(self.NIEPEXE.VNFS) == 0:
+            return ['list']
+
+        args_list = ['list'] + [sfc.ID for sfc in self.NIEPEXE.CONFIGURATION.SFCS]
+        if len(text) == 0:
+            return args_list
+        args_sublist = [a for a in args_list if a.startswith(text)]
+        if len(args_sublist) == 0:
+            return []
+        if len(args_sublist) == 1:
+            return args_sublist
+        else:
+            common_prefix = commonprefix(args_sublist)
+            if len(common_prefix) < 2 or len(common_prefix) <= len(text):
+                return args_sublist
+            else:
+                return [common_prefix]
+
+        return []
 
     def do_mininet(self, args):
         if self.prompt == 'niep> ':
@@ -396,6 +490,31 @@ class NIEPCLI(Cmd):
         else:
             print 'VNF PROMPT COMMAND'
 
+    def complete_vnfaction(self, text, line, begidx, endidx):
+
+        args_list = ['list', 'start', 'stop', 'replace', 'runnig', 'data', 'id', 'metrics', 'log']
+        line_arg = line.split(' ')
+
+        if len(line_arg) == 2:
+            if len(text) == 0:
+                return args_list
+            args_sublist = [a for a in args_list if a.startswith(text)]
+            if len(args_sublist) == 0:
+                return []
+            if len(args_sublist) == 1:
+                return args_sublist
+            else:
+                common_prefix = commonprefix(args_sublist)
+                if len(common_prefix) < 2 or len(common_prefix) <= len(text):
+                    return args_sublist
+                else:
+                    return [common_prefix]
+        elif len(line_arg) == 3:
+            if line_arg[1] == 'replace':
+                return PATHCOMPLETER(text)
+
+        return []
+
 ##################################################################################################################################
 
 ##################################################################################################################################
@@ -478,20 +597,32 @@ class NIEPCLI(Cmd):
             if self.NIEPEXE.STATUS == 0:
                 self.NIEPEXE.topologyDown()
 
-        exit()
+        return True
 
     def do_EOF(self, args):
         return True
     
+    def preloop(self):
+        try:
+            if 'libedit' in readline.__doc__:
+                readline.parse_and_bind("bind ^I rl_complete")
+            else:
+                readline.parse_and_bind("tab: complete")
+            readline.set_completer_delims(readline.get_completer_delims().replace('/', ''))
+            readline.set_history_length(100)
+            readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM")
+            return True
+        except Exception as e:
+            return False
+
     def postloop(self):
-        print ''
-        return True
+        try:
+            readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM")
+            return True
+        except Exception as e:
+            return False
 
 ##################################################################################################################################
 
 if __name__ == '__main__':
     NIEPCLI().cmdloop()
-
-# /home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/VNFExample.json
-# /home/gt-fende/Documentos/NIEP/EXAMPLES/DEFINITIONS/SFCExample.json
-# /home/gt-fende/Documentos/NIEP/VNF-REPO/firewall.click
