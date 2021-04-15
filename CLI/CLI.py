@@ -12,7 +12,6 @@ import rlcompleter
 path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['TOPO-MAN']))
 from Executer import Executer
 from Parser import PlatformParser
-from Completer import Completer
 
 #MISSING TASKS (priority order):
 # 1.Distributed mode
