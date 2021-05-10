@@ -1,7 +1,7 @@
 {
 	"ID": "sfc",
 	"VNFS": [{"ID":"x","PATH":"../EXAMPLES/VNFS/x.json"}, 
-			 {"ID":"y","PATH":"../EXAMPLES/VNFS/y.json"}],
+			 {"ID":"z","PATH":"../EXAMPLES/VNFS/z.json"}],
 	"IP" : {
 		"ID":"IP",
 		"LINK":"br0",
@@ -22,11 +22,11 @@
 		"LINK_MAC": "00:54:00:6c:22:03",
 		"OLL": "x",
 		"OLL_MAC":"52:54:00:6c:22:14",
-		"ILL": "y",
+		"ILL": "z",
 		"ILL_MAC":"52:54:00:6c:22:15"
 	},
 	{
-		"OLL":"y",
+		"OLL":"z",
 		"OLL_MAC":"52:54:00:6c:22:16",
 		"ILL":"OP1"
 	}]
