@@ -45,7 +45,16 @@ EXECUTERERRORS = {-1: "Mininet network interfaces mapping failed",
                   -3: "Unrecognized Mininet network interface",
                   -4: "Parser error detected"}
 
-def PATHCOMPLETER(text):
+def PATHCOMPLETER(line, text):
+
+    line = line[:-len(text)]
+    if line.endswith("\\ "):
+        line = line.replace("\\ ", "\0")
+        prefix = line.split(" ")[-1].replace("\0", " ")
+        text = prefix + text
+        prefix = prefix.replace(" ", "\\ ")
+    else:
+        prefix = ""
 
     try:    
         children_dir = listdir(text + "/")
@@ -55,9 +64,9 @@ def PATHCOMPLETER(text):
             return children_dir  + [".", ".."]
         if len(children_dir) == 1:
             if text.endswith("/"):
-                return [text + children_dir[0]]
+                return [(text.replace(" ", "\\ ") + children_dir[0].replace(" ", "\\ ")).replace(prefix, "")]
             else:
-                return [text + "/" + children_dir[0]]
+                return [(text.replace(" ", "\\ ") + "/" + children_dir[0].replace(" ", "\\ ")).replace(prefix, "")]
     except:
         pass
 
@@ -69,13 +78,13 @@ def PATHCOMPLETER(text):
         if len(supaths_dir) == 0:
             return []
         if len(supaths_dir) == 1:
-            return [text[:last_dir] + "/" + supaths_dir[0]]
+            return [(text[:last_dir].replace(" ", "\\ ") + "/" + supaths_dir[0].replace(" ", "\\ ")).replace(prefix, "")]
         else:
             common_prefix = commonprefix(supaths_dir)
             if len(common_prefix) < 2 or len(common_prefix) <= len(text[last_dir+1:]):
                 return supaths_dir + [".", ".."]
             else:
-                return [text[:last_dir] + "/" + common_prefix]
+                return [(text[:last_dir].replace(" ", "\\ ") + "/" + common_prefix.replace(" ", "\\ ")).replace(prefix, "")]
 
     return []
 
@@ -144,8 +153,8 @@ class NIEPCLI(cmd.Cmd):
             print 'NIEP PROMPT COMMAND'
 
     def complete_define(self, text, line, begidx, endidx):
-
-        return PATHCOMPLETER(text)
+        
+        return PATHCOMPLETER(line, text)
 
     def do_topoup(self, args):
         if self.prompt == 'niep> ':
@@ -245,6 +254,7 @@ class NIEPCLI(cmd.Cmd):
                     return
 
                 if args in self.NIEPEXE.VNFS:
+                    self.changecontext(self.prompt, "vnf")
                     self.VNFEXEC = self.NIEPEXE.VNFS[args]
                     self.prompt = 'vnf(' + args + ')> '
                     return
@@ -301,6 +311,7 @@ class NIEPCLI(cmd.Cmd):
 
                 for SFC in self.NIEPEXE.CONFIGURATION.SFCS:
                     if args == SFC.ID:
+                        self.changecontext(self.prompt, "sfc")
                         self.SFCEXEC = SFC
                         self.prompt = 'sfc(' + args + ')> ' 
                         return
@@ -510,7 +521,7 @@ class NIEPCLI(cmd.Cmd):
                     return [common_prefix]
         elif len(line_arg) == 3:
             if line_arg[1] == 'replace':
-                return PATHCOMPLETER(text)
+                return PATHCOMPLETER(line, text)
 
         return []
 
@@ -589,6 +600,7 @@ class NIEPCLI(cmd.Cmd):
 
     def do_exit(self, args):
         if not self.prompt == 'niep> ':
+            self.changecontext(self.prompt, "niep")
             self.prompt = 'niep> '
             return
 
@@ -609,14 +621,41 @@ class NIEPCLI(cmd.Cmd):
                 readline.parse_and_bind("tab: complete")
             readline.set_completer_delims(readline.get_completer_delims().replace('/', ''))
             readline.set_history_length(100)
-            readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM")
+            readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
             return True
         except Exception as e:
             return False
 
     def postloop(self):
         try:
-            readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM")
+            if self.prompt.startswith("niep"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
+            elif self.prompt.startswith("vnf"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
+            elif self.prompt.startswith("sfc"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/SFCMEM")
+            return True
+        except Exception as e:
+            return False
+
+    def changecontext(self, current, succeeding):
+        try:
+            if current.startswith("niep"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
+            elif current.startswith("vnf"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
+            elif current.startswith("sfc"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/SFCMEM")
+
+            readline.clear_history()
+
+            if succeeding.startswith("niep"):
+                readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
+            elif succeeding.startswith("vnf"):
+                readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
+            elif succeeding.startswith("sfc"):
+                readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/SFCMEM")
+
             return True
         except Exception as e:
             return False

@@ -61,14 +61,15 @@ applications below:
 
 ### Next Steps
 
-1. User guide<br/>
-2. Native distributed mode (NIEP agent)<br/>
-3. VNF-REPO (Local(OK), HDFS(OK), HTTP(IMPLEMENTING))<br/>
-4. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
-5. Topology structure viewer<br/>
-6. NIEP working as an API (NIEP Module)<br/>
-7. High level scripts for VNFs actions (PyCOO[3] based)<br/>
-8. Graphical interface
+1. VNF-REPO (Local(OK), HDFS(OK), HTTP(WAITING), GIT(WAITING))<br/>
+2. Native support to COVEN [3] VNF platform<br/>
+3. Nativer support to HoLMES [4] EMS solution<br/>
+4. Stable distributed mode (NIEP agent)<br/> 
+5. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
+6. Topology structure viewer<br/>
+7. NIEP working as an API (NIEP Module)<br/>
+8. High level scripts for VNFs actions (PyCOO[5] based)<br/>
+9. Graphical interface
 
 ### Support
 
@@ -100,4 +101,8 @@ V. Fulber-Garcia, T. Tavares, L. Marcuzzo, G. Venâncio, M. Franco, L. Bondan, A
 <br/>
 [2] L. da Cruz Marcuzzo et al., "Click-on-OSv: A platform for running Click-based middleboxes", 2017 IFIP/IEEE Symposium on Integrated Network and Service Management (IM), Lisbon, 2017, pp. 885-886. doi: 10.23919/INM.2017.7987396
 <br/>
-[3] V. F. Garcia et al., "PyCOO: Uma API em Python para Plataforma Click-On-Osv", 2017 Escola Regional de Redes de Computadores (ERRC), Santa Maria, 2017, pp. 119-126. 
+[3] V. Fulber-Garcia, et al. "On the design of a flexible architecture for virtualized network function platforms", 2019 IEEE Global Communications Conference (GLOBECOM). Waikoloa, 2019, pp. 1-6. doi: 10.1109/GLOBECOM38437.2019.9013111
+<br/>
+[4] https://github.com/ViniGarcia/HoLMES
+<br/>
+[5] V. F. Garcia et al., "PyCOO: Uma API em Python para Plataforma Click-On-Osv", 2017 Escola Regional de Redes de Computadores (ERRC), Santa Maria, 2017, pp. 119-126. 
