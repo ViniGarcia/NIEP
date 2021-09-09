@@ -92,6 +92,7 @@ class NIEPCLI(cmd.Cmd):
 
     prompt = 'niep> '
     NIEPEXE = None
+    VMEXEC = None
     VNFEXEC = None
     SFCEXEC = None
     CLICOMP = None    
@@ -206,6 +207,7 @@ class NIEPCLI(cmd.Cmd):
             if not self.NIEPEXE == None: 
                 if self.NIEPEXE.STATUS == 0:
                     self.NIEPEXE.topologyDown()
+                self.VMEXEC = None
                 self.VNFEXEC = None
                 self.SFCEXEC = None
                 del self.NIEPEXE
@@ -226,6 +228,9 @@ class NIEPCLI(cmd.Cmd):
                     self.NIEPEXE.topologyDown() 
                 for VNFINSTANCE in self.NIEPEXE.VNFS:
                     call(['rm', '-r', '../VEM/IMAGES/' + self.NIEPEXE.VNFS[VNFINSTANCE].ID], stdout=FNULL, stderr=STDOUT)
+                for VMINSTANCE in self.NIEPEXE.VMS:
+                    call(['rm', '-r', '../VEM/IMAGES/' + self.NIEPEXE.VMS[VMINSTANCE].ID], stdout=FNULL, stderr=STDOUT)
+                self.VMEXEC = None
                 self.VNFEXEC = None
                 self.SFCEXEC = None
                 del self.NIEPEXE
@@ -233,6 +238,62 @@ class NIEPCLI(cmd.Cmd):
                  print 'NO TOPOLOGY DEFINED'
         else:
             print 'NIEP PROMPT COMMAND'  
+
+    def do_vm(self, args):
+        if self.prompt == 'niep> ':
+            if not self.NIEPEXE == None:
+                if not self.NIEPEXE.STATUS == 0:
+                    print 'TOPOLOGY IS NOT UP'
+                    return
+
+                splited_args = args.split(' ')
+                if not len(splited_args) == 1:
+                    print 'WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED'
+                    return
+
+                if args == 'list':
+                    print '\n############## VMS LIST ###############'
+                    for VM in self.NIEPEXE.VMS:
+                        print(VM)
+                    print '#######################################\n'
+                    return
+
+                if args in self.NIEPEXE.VMS:
+                    self.changecontext(self.prompt, "vm")
+                    self.VMEXEC = self.NIEPEXE.VMS[args]
+                    self.prompt = 'vm(' + args + ')> '
+                    return
+                else:
+                    print 'VM ' + args + ' NOT FOUND'
+            else:
+                print 'NO TOPOLOGY DEFINED'
+        else:
+            print 'NIEP PROMPT COMMAND'
+
+    def complete_vm(self, text, line, begidx, endidx):
+
+        if self.NIEPEXE == None or self.NIEPEXE.STATUS != 0:
+            return []
+
+        if self.NIEPEXE.VMS == None or len(self.NIEPEXE.VMS) == 0:
+            return ['list']
+
+        args_list = ['list'] + list(self.NIEPEXE.VMS.keys())
+        if len(text) == 0:
+            return args_list
+        args_sublist = [a for a in args_list if a.startswith(text)]
+        if len(args_sublist) == 0:
+            return []
+        if len(args_sublist) == 1:
+            return args_sublist
+        else:
+            common_prefix = commonprefix(args_sublist)
+            if len(common_prefix) < 2 or len(common_prefix) <= len(text):
+                return args_sublist
+            else:
+                return [common_prefix]
+
+        return []
 
     def do_vnf(self, args):
         if self.prompt == 'niep> ':
@@ -363,6 +424,33 @@ class NIEPCLI(cmd.Cmd):
                 print 'NO TOPOLOGY DEFINED'
         else:
             print 'NIEP PROMPT COMMAND'
+
+##################################################################################################################################
+
+##################################################################################################################################
+# VM INTERFACE
+
+    def do_vmmanagement(self, args):
+        if self.prompt.startswith('vm'):
+            splited_args = args.split(' ')
+            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+                print 'WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED'
+                return
+
+            management = self.VMEXEC.managementVM()
+            if management == None:
+                print 'INVALID VM STATUS'
+                return
+            if management == -1:
+                print 'VM IS NOT UP'
+                return
+            if management == -2:
+                print 'ARP PROBLEMS'
+                return
+            else:
+                print management
+        else:
+            print 'VM PROMPT COMMAND'
 
 ##################################################################################################################################
 
@@ -630,6 +718,8 @@ class NIEPCLI(cmd.Cmd):
         try:
             if self.prompt.startswith("niep"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
+            elif self.prompt.startswith("vm"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VMMEM")   
             elif self.prompt.startswith("vnf"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
             elif self.prompt.startswith("sfc"):
@@ -642,15 +732,20 @@ class NIEPCLI(cmd.Cmd):
         try:
             if current.startswith("niep"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
+            elif current.startswith("vm"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VMMEM")
             elif current.startswith("vnf"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
             elif current.startswith("sfc"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/SFCMEM")
+            
 
             readline.clear_history()
 
             if succeeding.startswith("niep"):
                 readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
+            elif succeeding.startswith("vm"):
+                readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VMMEM")
             elif succeeding.startswith("vnf"):
                 readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
             elif succeeding.startswith("sfc"):
