@@ -1,5 +1,6 @@
 {
-	"ID": "TESTE",
+	"ID": "SFCSingleVNFExample",
+	"VMS":[],
 	"VNFS":[],
 	"SFCS":["../EXAMPLES/SFCS/singlevnfsfc.json"],
 	"MININET":{

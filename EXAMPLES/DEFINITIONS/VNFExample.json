@@ -1,5 +1,6 @@
 {
-	"ID": "TESTE",
+	"ID": "VNFExample",
+	"VMS":[],
 	"VNFS":["../EXAMPLES/VNFS/x.json"],
 	"SFCS":[],
 	"MININET":{

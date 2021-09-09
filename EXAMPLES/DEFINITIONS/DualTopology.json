@@ -1,5 +1,6 @@
 {
-	"ID": "DUAL",
+	"ID": "DualTopology",
+	"VMS":[],
 	"VNFS":["../EXAMPLES/VNFS/x.json", "../EXAMPLES/VNFS/z.json"],
 	"SFCS":[],
 	"MININET":{

@@ -1,10 +1,23 @@
 import json
 import random
-from os.path import isfile, abspath
 from sys import path
+from os.path import isfile, abspath
+
 path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
 from VNF import VNF
 from SFC import SFC
+from VM import VM
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# TO DO LIST
+
+#Detect error when the same interface (MAC) is used to link multiple
+#connections in CONNECTIONS of topology definitions.
+
+#Detect the usage of VMs with alias, and block the usage of the VM
+#original ID to other elements.
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 class MNHost:
     ID = ""
@@ -56,6 +69,7 @@ class PlatformParser:
     JSON = None
     STATUS = None
     ID = ""
+    VMS = []
     VNFS = []
     SFCS = []
     MNHOSTS = []
@@ -76,6 +90,9 @@ class PlatformParser:
         if 'ID' not in self.JSON:
             self.STATUS = -1
             return
+        if 'VMS' not in self.JSON:
+            self.STATUS = -1
+            return   
         if 'VNFS' not in self.JSON:
             self.STATUS = -1
             return
@@ -93,18 +110,20 @@ class PlatformParser:
             return
 
         if self.STATUS == None:
-            SFCVNFS = self.SFCCheck()
-            if isinstance(SFCVNFS, dict):
-                if self.VNFSCheck(SFCVNFS) == 0:
-                    if self.mininetCheck() == 0:
-                        if self.connectionsCheck() == 0:
-                            self.STATUS = 0
+            if self.VMSCheck() == 0:
+                SFCVNFS = self.SFCCheck()
+                if isinstance(SFCVNFS, dict):
+                    if self.VNFSCheck(SFCVNFS) == 0:
+                        if self.mininetCheck() == 0:
+                            if self.connectionsCheck() == 0:
+                                self.STATUS = 0
 
     def __del__(self):
 
         self.JSON = None
         self.STATUS = None
         self.ID = ""
+        del self.VMS[:]
         del self.VNFS[:]
         del self.SFCS[:]
         del self.MNHOSTS[:]
@@ -171,6 +190,23 @@ class PlatformParser:
             return True
         except ValueError:
             return False
+
+#------------------------------------------------------------------
+    #TODO [VINICIUS - 30/08/21]: Add security tests to duplicate IDs (will raise a KVM error if an ID is duplicated)
+    def VMSCheck(self):
+
+        for VMPATH in self.JSON['VMS']:
+            if isinstance(VMPATH, basestring) and isfile(VMPATH):
+                instance = VM(VMPATH, None, None)
+                if instance.VM_STATUS < 0:
+                    self.STATUS = -3
+                    return -3
+                self.VMS.append(instance)
+            else:
+                self.STATUS = -2
+                return -2
+
+        return 0
 
 #------------------------------------------------------------------
 
@@ -330,10 +366,11 @@ class PlatformParser:
 
         return 0
 # ------------------------------------------------------------------
-
     def connectionsCheck(self):
 
-        VNFSIDS = [VNFINSTANCE.ID for VNFINSTANCE in self.VNFS]
+        VMSSUMMARY = {VMINSTANCE.ID:VMINSTANCE for VMINSTANCE in self.VMS}
+        for VNFINSTANCE in self.VNFS:
+            VMSSUMMARY[VNFINSTANCE.ID] = VNFINSTANCE.VM
         HOSTSIDS = [HOST.ID for HOST in self.MNHOSTS]
         SWITCHESIDS = [SWITCH.ID for SWITCH in self.MNSWITCHES]
         OVSSWITCHESIDS = [OVS.ID for OVS in self.MNOVSES]
@@ -346,9 +383,9 @@ class PlatformParser:
 
         for CONNECTION in ConnectionsList:
             if "IN/OUT" in CONNECTION:
-                if CONNECTION["IN/OUT"] in VNFSIDS:
+                if CONNECTION["IN/OUT"] in VMSSUMMARY:
                     if "IN/OUTIFACE" in CONNECTION:
-                        if not any(CONNECTION["IN/OUTIFACE"] == IFACE["MAC"] for IFACE in self.VNFS[VNFSIDS.index(CONNECTION["IN/OUT"])].INTERFACES):
+                        if not any(CONNECTION["IN/OUTIFACE"] == IFACE["MAC"] for IFACE in VMSSUMMARY[CONNECTION["IN/OUT"]].INTERFACES):
                             self.STATUS = -12
                             return -12
                     else:
@@ -363,9 +400,9 @@ class PlatformParser:
                 return -12
 
             if "OUT/IN" in CONNECTION:
-                if CONNECTION["OUT/IN"] in VNFSIDS:
+                if CONNECTION["OUT/IN"] in VMSSUMMARY:
                     if "OUT/INIFACE" in CONNECTION:
-                        if not any(CONNECTION["OUT/INIFACE"] == IFACE["MAC"] for IFACE in self.VNFS[VNFSIDS.index(CONNECTION["OUT/IN"])].INTERFACES):
+                        if not any(CONNECTION["OUT/INIFACE"] == IFACE["MAC"] for IFACE in VMSSUMMARY[CONNECTION["OUT/IN"]].INTERFACES):
                             self.STATUS = -13
                             return -13
                     else:

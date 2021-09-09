@@ -25,6 +25,7 @@ class Executer:
     SWITCHES = {}
     OVSSWITCHES = {}
     CONTROLLERS = {}
+    VMS = {}
     VNFS = {}
     POX = None 
     NET = None
@@ -44,6 +45,7 @@ class Executer:
         self.SWITCHES.clear()
         self.OVSSWITCHES.clear()
         self.CONTROLLERS.clear()
+        self.VMS.clear()
         self.VNFS.clear()
         self.NET = None
         self.STATUS = None
@@ -61,7 +63,7 @@ class Executer:
         return ifacesDictionary
 
 #------------------------------------------------------------------
-
+    #TODO [VINICIUS - 30/08/21]: THIS METHOD IS KIND OF A FRANKENSTEIN, I NEED TO FIX THE HIERARCHY VM->VNF->SFC
     def mininetPrepare(self):
 
         self.NET = Mininet(topo=None, build=False)
@@ -111,7 +113,11 @@ class Executer:
                 self.NET.addLink(Element01.ELEM, Element02.ELEM)
             else:
                 if "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
-                    for iface in self.VNFS[LINK["IN/OUT"]].INTERFACES:
+                    if LINK["IN/OUT"] in self.VNFS:
+                        EXTERNALLINKS = self.VNFS[LINK["IN/OUT"]].VM
+                    else:
+                        EXTERNALLINKS = self.VMS[LINK["IN/OUT"]]
+                    for iface in EXTERNALLINKS.INTERFACES:
                         if iface["MAC"] == LINK["IN/OUTIFACE"]:
                             if iface["ID"] in ifacesData:
                                 brName = iface["ID"]
@@ -133,7 +139,11 @@ class Executer:
                                 return -2
                 else:
                     if "OUT/INIFACE" in LINK and not "IN/OUTIFACE" in LINK:
-                        for iface in self.VNFS[LINK["OUT/IN"]].INTERFACES:
+                        if LINK["OUT/IN"] in self.VNFS:
+                            EXTERNALLINKS = self.VNFS[LINK["OUT/IN"]].VM
+                        else:
+                            EXTERNALLINKS = self.VMS[LINK["OUT/IN"]]
+                        for iface in EXTERNALLINKS.INTERFACES:
                             if iface["MAC"] == LINK["OUT/INIFACE"]:
                                 if iface["ID"] in ifacesData:
                                     brName = iface["ID"]
@@ -161,9 +171,6 @@ class Executer:
         for HOST in self.HOSTS:
             if not self.HOSTS[HOST].IP is None:
                 self.HOSTS[HOST].ELEM.setIP(self.HOSTS[HOST].IP)
-#            if not self.HOSTS[HOST].MAC is None:
-#                print("--", self.HOSTS[HOST].MAC)
-#                print(self.HOSTS[HOST].ELEM.setMAC(self.HOSTS[HOST].MAC))
 
         return 0
 
@@ -191,6 +198,13 @@ class Executer:
                 break
         if not checked:
             call(['virsh', 'net-create', '../CONFS/vnNIEP.xml'], stdout=FNULL, stderr=STDOUT)
+
+        if self.CONFIGURATION.VMS:
+            for VMINSTANCE in self.CONFIGURATION.VMS:
+                if VMINSTANCE.createVM() == -1:
+                    VMINSTANCE.applyVM()
+                VMINSTANCE.upVM()
+                self.VMS[VMINSTANCE.ID] = VMINSTANCE
 
         if self.CONFIGURATION.VNFS:
             for VNFINSTANCE in self.CONFIGURATION.VNFS:
@@ -240,6 +254,9 @@ class Executer:
         call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL, stderr=STDOUT)
         call(['ifconfig', 'vbrNIEP', 'down'], stdout=FNULL, stderr=STDOUT)
         call(['brctl', 'delbr', 'vbrNIEP'], stdout=FNULL, stderr=STDOUT)
+
+        for VMINSTANCE in self.CONFIGURATION.VMS:
+            VMINSTANCE.downVM()
 
         for VNFINSTANCE in self.CONFIGURATION.VNFS:
             VNFINSTANCE.downVNF()

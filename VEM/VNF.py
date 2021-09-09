@@ -1,24 +1,9 @@
 import json
-import random
-import libvirt 
-from REST import REST
-from time import sleep
-from glob import glob
-from uuid import uuid4
-from os import path
-from os import devnull
-from copy import copy
-from subprocess import call
-from subprocess import check_output
-from subprocess import STDOUT
-from xml.etree import ElementTree
 
-#FNULL: redirects the system call normal output
-FNULL = open(devnull, 'w')
-#STDPATH: standard path - added to be used in NIEP
-STDPATH = '../VEM/'
-#VIRT_CONNECTION: used to manage the virtual machines creation and exclusion
-VIRT_CONNECTION = libvirt.open("qemu:///system")
+from REST import REST
+from os import path
+
+from VM import *
 
 #VNFServer: class for Click-On-OSv VNFs management.
 #Assumptions:
@@ -32,212 +17,47 @@ VIRT_CONNECTION = libvirt.open("qemu:///system")
 
 class VNF:
     ID = ''
-    MEMORY = 0
-    VCPU = 0
-    MANAGEMENT_MAC = ''
-    INTERFACES = []
+    VM = None
 
-    VNF_EXIST = False
+    VNF_REST = None
+    
     VNF_UP = False
     VNF_STATUS = 0
 
-    VNF_JSON = ''
-    VNF_REST = None
-
-    VIRT_VM = None
-
 # __init__: redirects to the correct function to initialize the class, for file interfaces use set 'interface'
-#          as none.
+#          as None.
     def __init__(self, configurationPath, interfaces):
 
-        if interfaces != None:
-            self.outInterfaces(configurationPath, interfaces)
+        if path.isfile(configurationPath):
+            self.VNF_JSON = configurationPath
+            with open(self.VNF_JSON) as dataVNF:
+                parsedVNF = json.load(dataVNF)
         else:
-            self.inInterfaces(configurationPath)
+            self.VNF_STATUS = -1
+            return
+
+        if 'ID' in parsedVNF:
+            self.ID = parsedVNF['ID']
+        if "VM" in parsedVNF:
+            if interfaces != None:
+                self.VM = VM(parsedVNF["VM"], self.ID, interfaces)
+            else:
+                self.VM = VM(parsedVNF["VM"], self.ID, None)
+
+        if self.VM.__class__.__name__ != VM.__name__:
+            self.VNF_STATUS = -2
+            return
 
 #__del__: restores the class to the fundamental state, avoiding same memory
 #         allocations problems.
     def __del__(self):
         self.ID = ''
-        self.MEMORY = 0
-        self.VCPU = 0
-        self.MANAGEMENT_MAC = ''
-        del self.INTERFACES[:]
+        self.VM = None
 
-        self.VNF_EXIST = False
-        self.VNF_UP = False
-        self.VNF_STATUS = 0
-
-        self.VNF_JSON = ''
         self.VNF_REST = None
 
-        self.VIRT_VM = None
-
-#__checkMAC = verifies a given MAC address and return if it is valid or not.
-#              0 = valid MAC
-#             -1 = invalid MAC
-    def __checkMAC(self, MAC):
-
-        if isinstance(MAC, basestring) and len(MAC) == 17:
-            for i in range(2, 16, 3):
-                if MAC[i] != ':':
-                    return -1
-            for i in range(0, 16, 2):
-                if (ord(MAC[i]) < 48 and ord(MAC[i]) > 57) and (ord(MAC[i]) < 65 and ord(MAC[i]) > 70) and (ord(MAC[i]) < 97 and ord(MAC[i]) > 66):
-                    return -1
-            for i in range(1, 16, 2):
-                if (ord(MAC[i]) < 48 and ord(MAC[i]) > 57) and (ord(MAC[i]) < 65 and ord(MAC[i]) > 70) and (ord(MAC[i]) < 97 and ord(MAC[i]) > 66):
-                    return -1
-        else:
-            return -1
-
-        return 0
-
-#__randomizeMAC = creates a new random MAC address for internal usage.
-#                   str = valid MAC address
-    def __randomizeMAC(self):
-
-        MACValues = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"]
-        MACString = "00:"
-
-        while True:
-            MACString = MACString + MACValues[random.randint(0, 15)] + MACValues[random.randint(0, 15)]
-            if len(MACString) == 17:
-                break
-            MACString = MACString + ":"
-
-        return MACString
-
-#inInterfaces: receives the JSON VNF configuration, parses it, apply data in destiny attributes and
-#              validates the read data and check for VNF existence.
-#              -5 = file does not exist
-    def inInterfaces(self, configurationPath):
-
-        if path.isfile(configurationPath):
-            self.VNF_JSON = configurationPath
-            with open(self.VNF_JSON) as dataVNF:
-                parsedVNF = json.load(dataVNF)
-        else:
-            self.VNF_STATUS = -5
-            return -5
-
-        if 'ID' in parsedVNF:
-            self.ID = parsedVNF['ID']
-        if 'MEMORY' in parsedVNF:
-            self.MEMORY = parsedVNF['MEMORY']
-        if 'VCPU' in parsedVNF:
-            self.VCPU = parsedVNF['VCPU']
-        if 'MANAGEMENT_MAC' in parsedVNF:
-            self.MANAGEMENT_MAC = parsedVNF['MANAGEMENT_MAC']
-        if 'INTERFACES' in parsedVNF:
-            self.INTERFACES = parsedVNF['INTERFACES']
-
-        self.fullValidation()
-
-# outInterfaces : receives the JSON VNF configuration and ignores the interface data, in this case
-#                 it receives as argument too, parses it, apply data in destiny attributes and validates
-#                 the read data and check for VNF existence.
-#                 -5 = file does not exist
-    def outInterfaces(self, configurationPath, interfaces):
-
-        if path.isfile(configurationPath):
-            self.VNF_JSON = configurationPath
-            with open(self.VNF_JSON) as dataVNF:
-                parsedVNF = json.load(dataVNF)
-        else:
-            self.VNF_STATUS = -5
-            return -5
-
-        if 'ID' in parsedVNF:
-            self.ID = parsedVNF['ID']
-        if 'MEMORY' in parsedVNF:
-            self.MEMORY = parsedVNF['MEMORY']
-        if 'VCPU' in parsedVNF:
-            self.VCPU = parsedVNF['VCPU']
-        if 'MANAGEMENT_MAC' in parsedVNF:
-            self.MANAGEMENT_MAC = parsedVNF['MANAGEMENT_MAC']
-        self.INTERFACES = interfaces
-
-        self.fullValidation()
-
-#fullValidation: verify all attributes checking if it contains possible values, check the VNF existence
-#          in database.
-#          -4 = VNF already exists created by an external agent
-#          -3 = VNF already in use by an external agent or other VNFServer instance
-#          -2 = problems in INTERFACES data
-#          -1 = problems in GENERAL data
-#           0 = valid configuration, VNF is not in the database and is free for creation
-#           1 = valid configuration, VNF already in the database
-    def fullValidation(self):
-
-        if self.ID == '' or self.MEMORY <= 0 or self.VCPU <= 0 or self.MANAGEMENT_MAC == '':
-            self.VNF_STATUS = -1
-            return -1
-        for iface in self.INTERFACES:
-            if 'ID' not in iface or 'MAC' not in iface:
-                self.VNF_STATUS = -2
-                return -2
-            if 'LINK_MAC' in iface:
-                if self.__checkMAC(iface['LINK_MAC']):
-                    self.VNF_STATUS = -2
-                    return -2
-            else:
-                iface['LINK_MAC'] = self.__randomizeMAC()
-
-        existingImages = glob(STDPATH + 'IMAGES/*')
-        for images in existingImages:
-            if images[14:] == self.ID:
-                self.VNF_EXIST = True
-                break
-
-        upVMs = check_output(['virsh', 'list']).split('\n')
-        for index in range(2, len(upVMs)-2):
-            if [VM for VM in upVMs[index].replace(' ', ',').split(',') if VM != ''][1] == self.ID:
-                self.VNF_UP = True
-                break
-
-        identicalVM = False
-        allVMs = check_output(['virsh', 'list', '--all']).split('\n')
-        for index in range(2, len(allVMs)-2):
-            if [VM for VM in allVMs[index].replace(' ', ',').split(',') if VM != ''][1] == self.ID:
-                identicalVM = True
-                break
-
-        if self.VNF_EXIST:
-            if self.VNF_UP:
-                self.VNF_STATUS = -3
-                return -3
-            else:
-                if identicalVM:
-                    self.VNF_STATUS = -4
-                    return -4
-                else:
-                    self.VNF_STATUS = 1
-                    return 1
-        else:
-            if identicalVM:
-                self.VNF_STATUS = -4
-                return -4
-
+        self.VNF_UP = False
         self.VNF_STATUS = 0
-        return 0
-
-#modifyValidation: verify only attributes checking if it contains possible values
-#                  -2 = problems in INTERFACES data
-#                  -1 = problems in GENERAL data
-#                   1 = valid configuration, VNF ready for modification
-    def modifyValidation(self):
-
-        if self.ID == '' or self.MEMORY <= 0 or self.VCPU <= 0 or self.MANAGEMENT_MAC == '':
-            self.VNF_STATUS = -1
-            return -1
-        for iface in self.INTERFACES:
-            if 'ID' not in iface or 'MAC' not in iface:
-                self.VNF_STATUS = -2
-                return -2
-
-        self.VNF_STATUS = 1
-        return 1
 
 #createVNF: copy data file in VNF does not exist in the database and modify the XML configuration
 #           according to received JSON.
@@ -248,19 +68,13 @@ class VNF:
         if self.VNF_STATUS < 0:
             return
 
-        if not self.VNF_EXIST:
-            call(['mkdir', STDPATH + 'IMAGES/' + self.ID], stdout=FNULL, stderr=STDOUT)
-            call(['cp', STDPATH + 'IMAGES/click-on-osv.qcow2', STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.qcow2'], stdout=FNULL, stderr=STDOUT)
-            self.VNF_EXIST = True
-            self.applyVNF()
-            return 0
-        else:
-            return -1
-
+        return self.VM.createVM()
+        
 # modifyVNF: reads the VNF JSON to replace the actual configuration.
-#            -4 = VNF does not exist, you need create it before apply configurations
-#            -3 = problems in INTERFACES data
-#            -2 = problems in GENERAL data
+#            -5 = VNF does not exist, you need create it before apply configurations
+#            -4 = problems in INTERFACES data
+#            -3 = problems in GENERAL data
+#            -2 = the VNF disk can not be changed
 #            -1 = VNF is up, down it to modify
 #             0 = VNF successfully modified
     def modifyVNF(self):
@@ -271,31 +85,11 @@ class VNF:
         if self.VNF_UP:
             return -1
 
-        with open(self.VNF_JSON) as dataVNF:
-            parsedVNF = json.load(dataVNF)
-
-        if 'MEMORY' in parsedVNF:
-            self.MEMORY = parsedVNF['MEMORY']
-        if 'VCPU' in parsedVNF:
-            self.VCPU = parsedVNF['VCPU']
-        if 'MANAGEMENT_MAC' in parsedVNF:
-            self.MANAGEMENT_MAC = parsedVNF['MANAGEMENT_MAC']
-        if 'INTERFACES' in parsedVNF:
-            self.INTERFACES = parsedVNF['INTERFACES']
-
-        check = self.modifyValidation()
-        if check == -1:
-            return -2
-        if check == -2:
-            return -3
-        check = self.applyVNF()
-        if check == -2:
-            return -4
-        return 0
+        return self.VM.modifyVM()
 
 # destroyVNF: remove the VNF from database deleting all files.
-#           -2 = VNF is up, down it to destroy
-#           -1 = VNF does not exists, so it can't be removed
+#           -2 = VNF does not exists, so it can't be removed
+#           -1 = VNF is up, down it to destroy
 #            0 = VNF successfully removed
     def destroyVNF(self):
 
@@ -303,62 +97,13 @@ class VNF:
             return
 
         if self.VNF_UP:
-            return -2
+            return -1
 
-        if self.VNF_EXIST:
-            call(['rm', '-r', './IMAGES/' + self.ID], stdout=FNULL, stderr=STDOUT)
-            self.VNF_EXIST = False
+        resultVm = self.VM.destroyVM()
+        if resultVm == 0:
             self.VNF_STATUS = 0
-            return 0
-        else:
-            return -1
 
-#applyVNF: modify the standart XML configuration according to received JSON for VNF deploy.
-#           -2 = VNF does not exist, you need create it before apply configurations
-#           -1 = VNF is up, down it to modify the configuration
-#            0 = configuration successfully set
-    def applyVNF(self):
-
-        if self.VNF_STATUS < 0:
-            return
-
-        if not self.VNF_EXIST:
-            return -2
-
-        if not self.VNF_UP:
-            call(['cp', STDPATH + 'IMAGES/click-on-osv.xml', STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml'], stdout=FNULL, stderr=STDOUT)
-
-            configurationXML = ElementTree.parse(STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml')
-            configurationXML.find('name').text = self.ID
-            configurationXML.find('uuid').text = str(uuid4())
-            configurationXML.find('memory').text = str(self.MEMORY * 1024)
-            configurationXML.find('currentMemory').text = str(self.MEMORY * 1024)
-            configurationXML.find('vcpu').text = str(self.VCPU)
-            configurationXML.find('devices/interface/mac').attrib['address'] = self.MANAGEMENT_MAC
-            configurationXML.find('devices/disk/source').attrib['file'] = path.abspath(STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.qcow2')
-
-            slotID = bytearray('a')
-            for iface in self.INTERFACES:
-                interfaceTag = ElementTree.SubElement(configurationXML.find('devices'), 'interface')
-                interfaceTag.attrib['type'] = 'bridge'
-                interfaceConfig = ElementTree.SubElement(interfaceTag, 'mac')
-                interfaceConfig.attrib['address'] = iface['MAC']
-                interfaceConfig = ElementTree.SubElement(interfaceTag, 'source')
-                interfaceConfig.attrib['bridge'] = iface['ID']
-                interfaceConfig = ElementTree.SubElement(interfaceTag, 'model')
-                interfaceConfig.attrib['type'] = 'virtio'
-                interfaceConfig = ElementTree.SubElement(interfaceTag, 'address')
-                interfaceConfig.attrib['type'] = 'pci'
-                interfaceConfig.attrib['domain'] = '0x0000'
-                interfaceConfig.attrib['bus'] = '0x00'
-                interfaceConfig.attrib['slot'] = '0x0' + str(slotID)
-                interfaceConfig.attrib['function'] = '0x0'
-                slotID[0] += 1
-
-            configurationXML.write(STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml')
-            return 0
-        else:
-            return -1
+        return resultVm
 
 #upVNF: starts the VNF VM in KVM hypervisor, it is a temporary VM, so when the VM downs it will
 #       disappear from hypervisor list.
@@ -370,32 +115,15 @@ class VNF:
         if self.VNF_STATUS < 0:
             return
 
-        if not self.VNF_EXIST:
-            return -2
-
-        if not self.VNF_UP:
-            ifacesData = check_output(['brctl', 'show']).split('\n')
-            ifacesCreate = copy(self.INTERFACES)
-            for iface in self.INTERFACES:
-                for iface2 in ifacesData:
-                    if iface2.startswith(iface['ID']):    
-                        ifacesCreate.remove(iface)
-
-            for iface in ifacesCreate:
-                call(['brctl', 'addbr', iface['ID']], stdout=FNULL, stderr=STDOUT)
-                call(['ifconfig', iface['ID'], "hw", "ether", iface['LINK_MAC']], stdout=FNULL, stderr=STDOUT)
-            for iface in self.INTERFACES:
-                call(['ifconfig', iface['ID'], 'up'], stdout=FNULL, stderr=STDOUT)
-
-            with open(STDPATH + 'IMAGES/' + self.ID + '/click-on-osv.xml', 'r') as domainFile:
-                domainXML = domainFile.read()
-            VIRT_CONNECTION.defineXML(domainXML)
-            self.VIRT_VM = VIRT_CONNECTION.lookupByName(self.ID)
-            self.VIRT_VM.create()
-            self.VNF_UP = True
-            return 0
-        else:
+        if self.VNF_UP:
             return -1
+
+        resultVm = self.VM.upVM()
+
+        if resultVm == 0:
+            self.VNF_UP = True
+
+        return resultVm
 
 #downVNF: down a started VNF and removes from hypervisor list.
 #         -2 = VNF does not exist
@@ -406,21 +134,16 @@ class VNF:
         if self.VNF_STATUS < 0:
             return
 
-        if not self.VNF_EXIST:
-            return -2
+        if not self.VNF_UP:
+            return -1
 
-        if self.VNF_UP:
-            self.VIRT_VM.destroy()
-            self.VIRT_VM.undefine()
-            self.VIRT_VM = None
+        resultVm = self.VM.downVM()
+
+        if resultVm == 0:
             self.VNF_UP = False
             self.VNF_REST = None
-            for iface in self.INTERFACES:
-                call(['ifconfig', iface['ID'], 'down'], stdout=FNULL, stderr=STDOUT)
-                call(['brctl', 'delbr', iface['ID']], stdout=FNULL, stderr=STDOUT)
-            return 0
-        else:
-            return -1
+
+        return resultVm
 
 #sleepVNF: down a started VNF but do not remove from hypervisor neither interfaces.
 #         -2 = VNF does not exist
@@ -431,17 +154,16 @@ class VNF:
         if self.VNF_STATUS < 0:
             return
 
-        if not self.VNF_EXIST:
-            return -2
+        if not self.VNF_UP:
+            return -1
 
-        if self.VNF_UP:
-            self.VIRT_VM.destroy()
-            self.VIRT_VM = None
+        resultVm = self.VM.sleepVM()
+
+        if resultVm == 0:
             self.VNF_UP = False
             self.VNF_REST = None
-            return 0
-        else:
-            return -1
+
+        return resultVm
 
 
 #managementVNF: get the management interface address by a arp request.
@@ -453,18 +175,10 @@ class VNF:
         if self.VNF_STATUS < 0:
             return
 
-        if self.VNF_UP:
-            for attempt in range(0,3):
-                arpData = check_output(['arp', '-n']).split('\n')
-                for index in range(1,len(arpData)-1):
-                    iface = [data for data in arpData[index].replace(' ', ',').split(',') if data != '']
-                    if iface[2] == self.MANAGEMENT_MAC:
-                        return iface[0] + ':8000'
-                sleep(2)
-        else:
+        if not self.VNF_UP:
             return -1
 
-        return -2
+        return self.VM.managementVM()
 
 #controlVNF: control functions life cycle and get VNFs informations, the action is
 #            the expected RESTfull call and arguments is a list of this call needs,

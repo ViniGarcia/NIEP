@@ -1,0 +1,16 @@
+{
+	"ID": "a",
+	"MEMORY": 300,
+	"VCPU": 1,
+	"DISK": "tinycore12",
+	"MANAGEMENT_MAC": "52:54:01:6c:22:80",
+	"INTERFACES": [{
+		"ID": "br0",
+		"MAC": "52:54:00:6c:22:81",
+		"LINK_MAC": "00:cb:31:9a:80:fe"
+	},
+	{
+		"ID": "br1",
+		"MAC": "52:54:00:6c:22:82"
+	}]
+}

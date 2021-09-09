@@ -1,19 +1,19 @@
 {
-	"ID": "SFCExample",
-	"VMS":[],
+	"ID": "VMExample",
+	"VMS":["../EXAMPLES/VMS/a.json"],
 	"VNFS":[],
-	"SFCS":["../EXAMPLES/SFCS/sfc.json"],
+	"SFCS":[],
 	"MININET":{
 		"HOSTS":[
 			{
 				"ID":"HOST01",
 				"IP":"192.168.122.01/24",
-				"MAC":"b0:36:38:d1:4a:4c"
+				"MAC":"00:00:00:00:01:01"
 			},
 			{
 				"ID":"HOST02",
 				"IP":"192.168.122.02/24",
-				"MAC":"b0:4b:60:23:f1:e2"
+				"MAC":"00:00:00:00:01:02"
 			}
 
 		],
@@ -24,13 +24,13 @@
 	"CONNECTIONS":[
 		{
 			"IN/OUT":"HOST01",
-			"OUT/IN":"x",
-			"OUT/INIFACE":"52:54:00:6c:22:13"
+			"OUT/IN":"a",
+			"OUT/INIFACE":"52:54:00:6c:22:81"
 		},
 		{
-			"IN/OUT":"z",
+			"IN/OUT":"a",
 			"OUT/IN":"HOST02",
-			"IN/OUTIFACE":"52:54:00:6c:22:18"
+			"IN/OUTIFACE":"52:54:00:6c:22:82"
 		}
 	]
 }

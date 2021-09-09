@@ -1,5 +1,6 @@
 {
-	"ID": "COMPLEX",
+	"ID": "ComplexTopology",
+	"VMS":[],
 	"VNFS":[],
 	"SFCS":["../EXAMPLES/SFCS/doublevnfsfc.json"],
 	"MININET":{

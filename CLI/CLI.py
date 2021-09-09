@@ -170,8 +170,8 @@ class NIEPCLI(cmd.Cmd):
 
                 self.NIEPEXE.topologyUp()
                 if not self.NIEPEXE.STATUS == 0:
+                    print 'PROBLEMS ON TOPOLOGY DEFINITION ON UP PROCESS - TOPOLOGY UNDEFINED (' + str(self.NIEPEXE.STATUS) + ')'
                     self.NIEPEXE = None
-                    print 'PROBLEMS ON TOPOLOGY DEFINITION ON UP PROCESS - TOPOLOGY UNDEFINED'
                     return
             else:
                 print 'NO TOPOLOGY DEFINED'
@@ -188,8 +188,8 @@ class NIEPCLI(cmd.Cmd):
 
                 self.NIEPEXE.topologyDown()
                 if not self.NIEPEXE.STATUS == None:
+                    print 'PROBLEMS ON TOPOLOGY DEFINITION ON DOWN PROCESS - TOPOLOGY UNDEFINED (' + str(self.NIEPEXE.STATUS) + ')'
                     self.NIEPEXE = None
-                    print 'PROBLEMS ON TOPOLOGY DEFINITION ON DOWN PROCESS - TOPOLOGY UNDEFINED'
                     return
             else:
                 print 'NO TOPOLOGY DEFINED'

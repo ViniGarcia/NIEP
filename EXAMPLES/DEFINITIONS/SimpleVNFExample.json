@@ -1,0 +1,34 @@
+{
+	"ID": "SimpleVNFExample",
+	"VMS":[],
+	"VNFS":["../EXAMPLES/VNFS/z.json"],
+	"SFCS":[],
+	"MININET":{
+		"HOSTS":[
+			{
+				"ID":"HOST01",
+				"IP":"192.168.122.01/24"
+			},
+			{
+				"ID":"HOST02",
+				"IP":"192.168.122.02/24"
+			}
+
+		],
+		"SWITCHES":[],
+		"CONTROLLERS":[],
+		"OVSWITCHES":[]
+	},
+	"CONNECTIONS":[
+		{
+			"IN/OUT":"z",
+			"OUT/IN":"HOST01",
+			"IN/OUTIFACE":"52:54:00:6c:22:17"
+		},
+		{
+			"IN/OUT":"HOST02",
+			"OUT/IN":"z",
+			"OUT/INIFACE":"52:54:00:6c:22:18"
+		}
+	]
+}

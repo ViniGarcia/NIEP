@@ -1,5 +1,6 @@
 {
 	"ID": "SFCSingleRouterExample",
+	"VMS":[],
 	"VNFS":[],
 	"SFCS":["../EXAMPLES/SFCS/singleroutersfc.json"],
 	"MININET":{
