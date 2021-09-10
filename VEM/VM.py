@@ -498,7 +498,7 @@ class VM:
 #managementVM: get the management interface address by a arp request.
 #               -2 = arp did not respond
 #               -1 = VM is not up
-#               IP:Port = management address
+#               IP = management address
     def managementVM(self):
 
         if self.VM_STATUS < 0:
@@ -516,6 +516,26 @@ class VM:
             return -1
 
         return -2
+
+#sshVM: try to establish a ssh connection with the VM.
+#       -3 = ssh failed
+#       -2 = could not retrieve management IP
+#       -1 = VM is not up
+#        0 = success
+    def sshVM(self, user, passwd):
+        if self.VM_STATUS < 0:
+            return
+
+        if self.VM_UP:
+            managementIp = self.managementVM()
+            if type(managementIp) != str:
+                return -2
+            call(['sshpass', '-p', str(passwd), 'ssh', '-o', 'StrictHostKeyChecking=no', str(user) + '@' + managementIp])
+            return 0
+        else:
+            return -1
+
+        return -3
 
 """
 #Simple CLI interface to test the library, if not necessay comment it.

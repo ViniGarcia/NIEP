@@ -1,7 +1,7 @@
 NIEP: NFV Infrastructure Emulation Platform
 ========================================================
 
-*Status: Stable -- Version: 1.0*
+*Status: Beta -- Version: 1.1*
 
 ### What is NIEP?
 
@@ -19,6 +19,7 @@ that simulates the packet forwarding of a common switch.<br/>
 3. Mininet OvS - Open vSwitch emulation with an external controller (NIEP natively provides POX in the repository,
 but others can be also used).<br/>
 4. Mininet Links - used to connect mininet elements with other mininet elements.<br/>
+5. TinyCore 12 VMs - generic minimalist linux distribution, natively acessible using SSH (Username: tc / Password: NIEPvm00).<br/>
 5. Click-on-OSv VNFs - platform to execute Click functions, it natively provides an EMS to control the VNF lifecvyle.<br/>
 6. CLick-on-OSv Links - created to connect Click-on-OSv elements with other Click-on-OSv elements and Click-on-OSv 
 elements with Mininet elements.<br/>
@@ -47,7 +48,8 @@ applications below:
 1.1 Sudoers (apt-get install sudo)<br/>
 1.2 Bridge Utils (apt-get install bridge-utils)<br/>
 1.3 Net Tools (apt-get install net-tools)<br/>
-1.4 Git (apt-get install git)<br/>
+1.4 SSH Pass (apt-get install sshpass) <br/>
+1.5 Git (apt-get install git)<br/>
 2. Python<br/>
 2.1 Python 2.7.9 (apt-get install python2.7)<br/>
 2.2 Pip (apt-get install python-pip)<br/>
@@ -61,15 +63,14 @@ applications below:
 
 ### Next Steps
 
-1. VNF-REPO (Local(OK), HDFS(OK), HTTP(WAITING), GIT(WAITING))<br/>
-2. Native support to COVEN [3] VNF platform<br/>
-3. Nativer support to HoLMES [4] EMS solution<br/>
-4. Stable distributed mode (NIEP agent)<br/> 
-5. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
-6. Topology structure viewer<br/>
-7. NIEP working as an API (NIEP Module)<br/>
-8. High level scripts for VNFs actions (PyCOO[5] based)<br/>
-9. Graphical interface
+1. Native support to COVEN [3] VNF platform<br/>
+2. Nativer support to HoLMES [4] EMS solution<br/>
+3. Stable distributed mode (NIEP agent)<br/> 
+4. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
+5. Topology structure viewer<br/>
+6. NIEP working as an API (NIEP Module)<br/>
+7. High level scripts for VNFs actions (PyCOO[5] based)<br/>
+8. Graphical interface
 
 ### Support
 

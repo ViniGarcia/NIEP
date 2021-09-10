@@ -109,6 +109,9 @@ class NIEPCLI(cmd.Cmd):
             print '\ttopodown -> down an started architecture'
             print '\ttopoclean -> if an architecture defined and started, downs it and clean the definition'
             print '\ttopodestroy -> clean the definition and delete the topology NIEP files'
+            print '\tvm arg -> assumes a VM or list the defined ones'
+            print '\t\t-> arg = list (list every defined VM ID)'
+            print '\t\t-> arg = VM ID (assumes VM ID prompt)'
             print '\tvnf arg -> assumes a VNF or list the defined ones'
             print '\t\t-> arg = list (list every defined VNF ID)'
             print '\t\t-> arg = VNF ID (assumes VNF ID prompt)'
@@ -116,6 +119,11 @@ class NIEPCLI(cmd.Cmd):
             print '\t\t-> arg = list (list every defined SFC ID)'
             print '\t\t-> arg = SFC ID (assumes SFC ID prompt)'
             print '\tmininet -> assumes the mininet prompt\n'
+            print '-> VM PROMPT <-'
+            print '\tvmmanagement -> return the VM management interface address'
+            print '\tvmssh arg1 arg2-> try to establish a ssh connection with the VM'
+            print '\t\targ1 -> username'
+            print '\t\targ2 -> password\n'
             print '-> VNF PROMPT <-'
             print '\tvnfmanagement -> return the VNF management interface address'
             print '\tvnfup -> wake the VNF'
@@ -449,6 +457,16 @@ class NIEPCLI(cmd.Cmd):
                 return
             else:
                 print management
+        else:
+            print 'VM PROMPT COMMAND'
+
+    def do_vmssh(self, args):
+        if self.prompt.startswith('vm'):
+            splited_args = args.split(' ')
+            if len(splited_args) != 2:
+                print 'WRONG ARGUMENTS AMOUNT - 2 ARGUMENTS EXPECTED'
+                return
+            self.VMEXEC.sshVM(splited_args[0], splited_args[1])
         else:
             print 'VM PROMPT COMMAND'
 

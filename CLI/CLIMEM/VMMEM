@@ -1,0 +1,11 @@
+vmsssh
+vmssh
+vmssh tc 
+vmssh tc lala
+exit
+vmssh
+vmssh tc NIEPvm00
+exit
+vmmanagement
+vmssh tc NIEPvm00
+exit
