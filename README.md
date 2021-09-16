@@ -69,8 +69,7 @@ applications below:
 4. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
 5. Topology structure viewer<br/>
 6. NIEP working as an API (NIEP Module)<br/>
-7. High level scripts for VNFs actions (PyCOO[5] based)<br/>
-8. Graphical interface
+7. Graphical interface
 
 ### Support
 

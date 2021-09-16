@@ -1,0 +1,13 @@
+{
+	"ID": "OnlyVNFExample",
+	"VMS":[],
+	"VNFS":["../EXAMPLES/VNFS/x.json"],
+	"SFCS":[],
+	"MININET":{
+		"HOSTS":[],
+		"SWITCHES":[],
+		"CONTROLLERS":[],
+		"OVSWITCHES":[]
+	},
+	"CONNECTIONS":[]
+}

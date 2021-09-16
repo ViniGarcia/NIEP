@@ -1,11 +1,11 @@
 import json
 
-from REST import REST
+from ClickOnOSv import ClickOnOSv
 from os import path
 
 from VM import *
 
-#VNFServer: class for Click-On-OSv VNFs management.
+#VNFServer: class for VNFs management.
 #Assumptions:
 #   - Debian Like Environment
 #   - KVM Hypervisor
@@ -19,7 +19,7 @@ class VNF:
     ID = ''
     VM = None
 
-    VNF_REST = None
+    VNF_OPERATOR = None
     
     VNF_UP = False
     VNF_STATUS = 0
@@ -54,10 +54,36 @@ class VNF:
         self.ID = ''
         self.VM = None
 
-        self.VNF_REST = None
+        self.VNF_OPERATOR = None
 
         self.VNF_UP = False
         self.VNF_STATUS = 0
+
+#scriptExecution: execute defined tasks in a json script file.
+#                 -1 = Script file does not exist
+#                 -2 = Invalid action requested in the script
+#                 -3 = Wrong number of arguments for the requested action
+    def __scriptExecution(self, scriptPath):
+
+        if not path.isfile(scriptPath):
+            return(False, -1)
+        
+        scriptTasks = []
+        scriptFile = [[command.replace('\n', '') for command in line.split(' ')] for line in open(scriptPath).readlines()]
+        for line in scriptFile:
+            if not line[0] in self.VNF_OPERATOR.VNF_CATALOG:
+                return (False, -2)
+            if len(line) - 1 != self.VNF_OPERATOR.VNF_CATALOG[line[0]][1]:
+                return (False, -3) 
+
+        scriptResults = []
+        for line in scriptFile:
+            actionResult = self.VNF_OPERATOR.VNF_CATALOG[line[0]][0](*line[1:])
+            scriptResults.append(actionResult)
+            if not actionResult[0]:
+                return (False, scriptResults)
+
+        return (True, scriptResults)
 
 #createVNF: copy data file in VNF does not exist in the database and modify the XML configuration
 #           according to received JSON.
@@ -141,7 +167,7 @@ class VNF:
 
         if resultVm == 0:
             self.VNF_UP = False
-            self.VNF_REST = None
+            self.VNF_OPERATOR = None
 
         return resultVm
 
@@ -161,7 +187,7 @@ class VNF:
 
         if resultVm == 0:
             self.VNF_UP = False
-            self.VNF_REST = None
+            self.VNF_OPERATOR = None
 
         return resultVm
 
@@ -181,11 +207,11 @@ class VNF:
         return self.VM.managementVM()
 
 #controlVNF: control functions life cycle and get VNFs informations, the action is
-#            the expected RESTfull call and arguments is a list of this call needs,
-#            actually, only 'function_replace' uses to pass the function file.
+#            the expected call and arguments is a list of this call needs.
 #            -1    = VNF is no up, up to control it
 #            -2    = management not acessible by ARP
-#            other = check REST.py file
+#            -3    = action is not available
+#            -4    = wrong number of arguments provided
     def controlVNF(self, action, arguments):
 
         if self.VNF_STATUS < 0:
@@ -194,38 +220,31 @@ class VNF:
         if not self.VNF_UP:
             return -1
 
-        if self.VNF_REST == None:
+        if self.VNF_OPERATOR == None:
             management = self.managementVNF()
             if isinstance(management, basestring):
-                self.VNF_REST = REST(management)
+                self.VNF_OPERATOR = ClickOnOSv(management)
             else:
                 return -2
 
-        if action == 'function_start':
-            return self.VNF_REST.postStart()
-        if action == 'function_stop':
-            return self.VNF_REST.postStop()
-        if action == 'function_replace':
-            return self.VNF_REST.postFunction(arguments[0])
-        if action == 'function_run':
-            return self.VNF_REST.getRunning()
-        if action == 'function_data':
-            return self.VNF_REST.getFunction()
-        if action == 'function_id':
-            return self.VNF_REST.getIdentification()
-        if action == 'function_metrics':
-            return self.VNF_REST.getMetrics()
-        if action == 'function_log':
-            return self.VNF_REST.getLog()
+        if action == "list":
+            return {key:self.VNF_OPERATOR.VNF_CATALOG[key][2] for key in self.VNF_OPERATOR.VNF_CATALOG}
 
-#scriptVNF: execute a script serialized in a dictionary in scriptTasks, scriptError is
-#           another serial tasks set as a error handle (can be None), finally, functionPath is for
-#           replace actions, it can be None.
-#            []     = seccessfull execution, REST results is presented
+        if not action in self.VNF_OPERATOR.VNF_CATALOG:
+            return -3
+
+        if len(arguments) != self.VNF_OPERATOR.VNF_CATALOG[action][1]:
+            return -4
+        
+        return self.VNF_OPERATOR.VNF_CATALOG[action][0](*arguments)
+
+
+
+#scriptVNF: execute a script serialized in a dictionary in scriptNormal, scriptError is
+#           another serial tasks set operating as an error handle (it can be None).
 #           -1      = VNF is no up, up to control it
 #           -2      = management not acessible by ARP
-#           -3 ~ -8 = analog to REST.scriptExecution + 2 result
-    def scriptVNF(self, scriptTasks, scriptError, functionPath):
+    def scriptVNF(self, scriptNormal, scriptError):
 
         if self.VNF_STATUS < 0:
             return
@@ -233,80 +252,22 @@ class VNF:
         if not self.VNF_UP:
             return -1
 
-        if self.VNF_REST == None:
+        if self.VNF_OPERATOR == None:
             management = self.managementVNF()
             if isinstance(management, basestring):
-                self.VNF_REST = REST(management)
+                self.VNF_OPERATOR = ClickOnOSv(management)
             else:
                 return -2
 
-        resultCheck = self.VNF_REST.scriptExecution(scriptTasks, scriptError, functionPath)
-        if isinstance(resultCheck, list):
-            return resultCheck
-        else:
-            if resultCheck < 0:
-                return resultCheck - 2
+        normalResult = self.__scriptExecution(scriptNormal)
+        if normalResult[0]:
+            return (True, [normalResult])
+
+        if scriptError != None:
+            errorResult = self.__scriptExecution(scriptError)
+            if errorResult[0]:
+                return (True, [normalResult, errorResult])
             else:
-                return resultCheck
+                return (False, [normalResult, errorResult])
 
-"""
-#Simple CLI interface to test the library, if not necessay comment it.
-def help():
-    print('\n================== CLI INTERFACE ==================')
-    print('up -> UP VNF SERVER')
-    print('down -> DOWN VNF SERVER')
-    print('modify -> APLLY NEW CONFIGURATIONS SET IN VNF JSON')
-    print('destroy -> DESTROY VNF SERVER FILES')
-    print('management -> GET THE MANAGEMENT ADDRESS')
-    print('help -> SHOW THIS INFORMATION')
-    print('quit -> END PROGRAM AND DOWN VNF (IF IT\'S NOT)')
-    print('===================================================')
-
-VNFPath = raw_input('VNF JSON PATH: ')
-
-VNF = VNF(VNFPath, None)
-if (VNF.VNF_STATUS < 0):
-    print 'ERROR ' + VNF.VNF_STATUS + ' OCCURED IN VALIDATION!!'
-else:
-    if (VNF.VNF_STATUS == 0):
-        VNF.createVNF()
-    running = True
-    help()
-    while running:
-        option = raw_input('OPERATION: ')
-        if option == 'up':
-            resultCheck = VNF.upVNF()
-            if resultCheck < 0:
-                print ('ERROR ' + str(resultCheck) + ' OCCURED IN upVNF')
-            continue
-        if option == 'down':
-            resultCheck = VNF.downVNF()
-            if resultCheck < 0:
-                print ('ERROR ' + str(resultCheck) + ' OCCURED IN downVNF')
-            continue
-        if option == 'modify':
-            resultCheck = VNF.modifyVNF()
-            if resultCheck < 0:
-                print ('ERROR ' + str(resultCheck) + ' OCCURED IN modifyVNF')
-            continue
-        if option == 'destroy':
-            resultCheck = VNF.destroyVNF()
-            if resultCheck < 0:
-                print ('ERROR ' + str(resultCheck) + ' OCCURED IN destroyVNF')
-            continue
-        if option == 'management':
-            resultCheck = VNF.managementVNF()
-            if isinstance(resultCheck, basestring):
-                print resultCheck
-            else:
-                print ('ERROR ' + str(resultCheck) + ' OCCURED IN managementVNF')
-            continue
-        if option == 'help':
-            help()
-            continue
-        if option == 'quit':
-            if VNF.VNF_UP:
-                VNF.downVNF()
-            running = False
-            continue
-"""
+        return (False, [normalResult])

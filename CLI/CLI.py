@@ -13,22 +13,13 @@ path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['TOPO-MAN']))
 from Executer import Executer
 from Parser import PlatformParser
 
-#MISSING TASKS (priority order):
-# 1.Distributed mode
-# 2.VNF-REPO (HTTP, Local)
-# 3.Assisted creation for SFCs and VNFs
-# 4.See SFC structure
-# 5.API Interface
-# 6.PyCOO scripts
-# 7.Graphical interface
-
 #FNULL: redirects the system call normal output
 FNULL = open(devnull, 'w')
 
 #ERRORS: definition of errors for execution debug
 PARSERERRORS = {-1: "Invalid definition file path or invalid key included",
                 -2: "Invalid data type included as a key value",
-                -3: "Invalid VNF configuration provided",
+                -3: "Invalid VNF/VM configuration provided",
                 -4: "Invalid SFC file path provided",
                 -5: "Invalid SFC configuration provided",
                 -6: "Invalid Mininet configuration provided",
@@ -122,8 +113,8 @@ class NIEPCLI(cmd.Cmd):
             print '-> VM PROMPT <-'
             print '\tvmmanagement -> return the VM management interface address'
             print '\tvmssh arg1 arg2-> try to establish a ssh connection with the VM'
-            print '\t\targ1 -> username'
-            print '\t\targ2 -> password\n'
+            print '\t\t-> arg1 -> username'
+            print '\t\t-> arg2 -> password\n'
             print '-> VNF PROMPT <-'
             print '\tvnfmanagement -> return the VNF management interface address'
             print '\tvnfup -> wake the VNF'
@@ -131,6 +122,9 @@ class NIEPCLI(cmd.Cmd):
             print '\tvnfaction arg -> execute an action in the VNF instance or list possible actions'
             print '\t\t-> arg = list (list every possible action and them definitions)'
             print '\t\t-> arg = action (execute the requested action)'
+            print '\tvnfscript arg1 arg2 -> execute a set of actions provided in a script file'
+            print '\t\targ1 = main scipt file path'
+            print '\t\targ2 = error recover script file path (optional)'
             print '-> SFC PROMPT <-'
             print '\tsfcmanagement -> return the SFC\'s VNFS management interface addresses'
             print '\tsfcup -> wake the SFC\'s VNFS'
@@ -545,42 +539,8 @@ class NIEPCLI(cmd.Cmd):
                 return
 
             actionstatus = None
-            if len(splited_args) == 1:
-                if args == 'list':
-                    print '\n############# ACTION LIST #############'
-                    print 'start -> start the VNF function'
-                    print 'stop -> stop the VNF function' 
-                    print 'replace path -> replace the function with the function in path'
-                    print 'running -> check if VNF is running'
-                    print 'data -> check the VNF function'
-                    print 'id -> check the VNF ID'
-                    print 'metrics -> check the VNF metrics'
-                    print 'log -> check the VNF log'
-                    print '#######################################\n'
-                    return
-                if args == 'start':
-                    actionstatus = self.VNFEXEC.controlVNF('function_start', [])
-                else:
-                    if args == 'stop':
-                        actionstatus = self.VNFEXEC.controlVNF('function_stop', [])
-                    else:
-                        if args == 'running':
-                            actionstatus = self.VNFEXEC.controlVNF('function_run', [])
-                        else:
-                            if args == 'data':
-                                actionstatus = self.VNFEXEC.controlVNF('function_data', [])
-                            else:
-                                if args == 'id':
-                                    actionstatus = self.VNFEXEC.controlVNF('function_id', [])
-                                else:
-                                    if args == 'metrics':
-                                        actionstatus = self.VNFEXEC.controlVNF('function_metrics', [])
-                                    else:
-                                        if args == 'log':
-                                            actionstatus = self.VNFEXEC.controlVNF('function_log', [])
-            if len(splited_args) == 2:
-                if splited_args[0] == 'replace':
-                    actionstatus = self.VNFEXEC.controlVNF('function_replace', [splited_args[1]])
+            if len(splited_args) > 0:
+                actionstatus = self.VNFEXEC.controlVNF(splited_args[0], splited_args[1:])
 
             if actionstatus == None:
                 print 'UNDEFINED ACTION'
@@ -592,25 +552,41 @@ class NIEPCLI(cmd.Cmd):
                 print 'VNF MANAGEMENT IS NOT ACCESIBLE'
                 return
             if actionstatus == -3:
-                print 'FILE DOES NOT EXISTS'
+                print 'VNF ACTION DOES NOT EXIST'
                 return
-            if type(actionstatus) is list:
-                if actionstatus[0] == '200':
-                    print actionstatus[1]
+            if actionstatus == -4:
+                print 'INVALID ARGUMENTS FOR THE REQUESTED VNF ACTION'
+                return
+
+            if splited_args[0] == 'list':
+                    print '\n############# ACTION LIST #############'
+                    actionkeys = list(actionstatus.keys())
+                    actionkeys.sort()
+                    for action in actionkeys:
+                        print action + " -> " + actionstatus[action]
+                    print '#######################################\n'
+                    return
+
+            if actionstatus[0]:
+                if len(actionstatus) > 1:
+                    print 'SUCCESS [' + str(actionstatus[1]) + ']'
                 else:
-                    print 'REST ERROR - ' + str(actionstatus[0])
-                return
-            if not actionstatus == 200:
-                print 'REST ERROR - ' + str(actionstatus)
+                    print 'SUCCESS'
+            else:
+                if len(actionstatus) > 1:
+                    print 'VNF PLATFORM ERROR [' + str(actionstatus[1]) + ']'
+                else:
+                    print 'VNF PLATFORM ERROR'
 
         else:
             print 'VNF PROMPT COMMAND'
 
     def complete_vnfaction(self, text, line, begidx, endidx):
 
-        args_list = ['list', 'start', 'stop', 'replace', 'runnig', 'data', 'id', 'metrics', 'log']
-        line_arg = line.split(' ')
+        args_list = list(self.VNFEXEC.controlVNF("list", []).keys())
+        args_list.sort()
 
+        line_arg = line.split(' ')
         if len(line_arg) == 2:
             if len(text) == 0:
                 return args_list
@@ -625,9 +601,62 @@ class NIEPCLI(cmd.Cmd):
                     return args_sublist
                 else:
                     return [common_prefix]
-        elif len(line_arg) == 3:
-            if line_arg[1] == 'replace':
-                return PATHCOMPLETER(line, text)
+        elif len(line_arg) > 2:
+            return PATHCOMPLETER(line, text)
+
+        return []
+
+    def do_vnfscript(self, args):
+        if self.prompt.startswith('vnf'):
+            
+            splited_args = args.split(' ')
+            if len(splited_args) > 2 or len(splited_args) == 1 and len(splited_args[0]) == 0:
+                print 'WRONG ARGUMENTS AMOUNT - 1 OR 2 ARGUMENTS EXPECTED'
+                return
+
+            if len(splited_args) == 1:
+                script_result = self.VNFEXEC.scriptVNF(splited_args[0], None)
+            else:
+                script_result = self.VNFEXEC.scriptVNF(splited_args[0], splited_args[1])
+
+            if script_result == -1:
+                print 'VNF IS NOT UP'
+                return
+            if script_result == -2:
+                print 'VNF MANAGEMENT IS NOT ACCESIBLE'
+                return
+
+            print '\n############# EXECUTION SUMMARY #############'
+            if not script_result[0] or len(script_result[1]) == 2:
+                print '-> NORMAL SCRIPT (FAILED)'
+                
+                if script_result[1][0][1] == -1:
+                    print 'VNF IS NOT UP'
+                elif script_result[1][0][1] == -2:
+                    print 'INVALID ACTION REQUESTED'
+                else:
+                    print "FAILED AT LINE " + str(len(script_result[1][0][1])) + " " + str(script_result[1][0][1][-1]) 
+                    if script_result[0]:
+                        print '\n-> ERROR RECOVERING SCRIPT (SUCCESS)'
+                        for index in range(len(script_result[1][1][1])):
+                            print 'LINE ' + str(index + 1) + ': ' + str(script_result[1][1][1][index][1])
+                    elif len(script_result[1]) == 2:
+                        print '\n-> ERROR RECOVERING SCRIPT (FAILED)'
+                        print "FAILED AT LINE " + str(len(script_result[1][1][1])) + " " + str(script_result[1][1][1][-1]) 
+            else:
+                print '-> NORMAL SCRIPT (SUCCESS)'
+                for index in range(len(script_result[1][0][1])):
+                    print 'LINE ' + str(index + 1) + ': ' + str(script_result[1][0][1][index][1])
+            print '#######################################\n'
+
+        else:
+            print 'VNF PROMPT COMMAND'
+
+    def complete_vnfscript(self, text, line, begidx, endidx):
+
+        line_arg = line.split(' ')
+        if len(line_arg) < 4:
+            return PATHCOMPLETER(line, text)
 
         return []
 
