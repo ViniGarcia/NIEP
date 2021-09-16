@@ -64,7 +64,7 @@ applications below:
 ### Next Steps
 
 1. Native support to COVEN [3] VNF platform<br/>
-2. Nativer support to HoLMES [4] EMS solution<br/>
+2. Native support to HoLMES [4] EMS solution<br/>
 3. Stable distributed mode (NIEP agent)<br/> 
 4. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
 5. Topology structure viewer<br/>
