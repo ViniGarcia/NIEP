@@ -50,7 +50,7 @@ applications below:
 1.3 Net Tools (apt-get install net-tools)<br/>
 1.4 SSH Pass (apt-get install sshpass) <br/>
 1.5 Git (apt-get install git)<br/>
-1.6 GIT LFS (http://arfc.github.io/manual/guides/git-lfs)<br/>
+1.6 Git LFS (http://arfc.github.io/manual/guides/git-lfs)<br/>
 2. Python<br/>
 2.1 Python 2.7.9 (apt-get install python2.7)<br/>
 2.2 Pip (apt-get install python-pip)<br/>
