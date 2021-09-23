@@ -30,6 +30,16 @@ else
 	echo "13 of 13 - Installing Mininet..."
 	apt-get install -y mininet
 
+	echo "Addon 1 of 1 - Installing Git LFS..."
+	mkdir git-lfs
+	cd git-lfs
+	wget https://github.com/git-lfs/git-lfs/releases/download/v2.9.0/git-lfs-linux-amd64-v2.9.0.tar.gz
+	tar -xf git-lfs-linux-amd64-v2.9.0.tar.gz
+	chmod 755 install.sh
+	./install.sh
+	cd ..
+	rm -r git-lfs
+
 	echo 'Your system must reboot - do it now? (y/n)' && read x && [[ "$x" == "y" ]] && /sbin/reboot;
 fi
 
