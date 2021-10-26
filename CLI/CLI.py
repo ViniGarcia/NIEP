@@ -144,12 +144,12 @@ class NIEPCLI(cmd.Cmd):
 
             NIEPPARSER = PlatformParser(args)
             if NIEPPARSER.STATUS != 0:
-                print("ERROR: " + PARSERERRORS[NIEPPARSER.STATUS] + " (DEFINE / PARSER)")
+                print("ERROR: " + PARSERERRORS[NIEPPARSER.STATUS] + " (DEFINE / PARSER / " + str(NIEPPARSER.STATUS) + ")")
                 return
 
             self.NIEPEXE = Executer(NIEPPARSER)
             if not self.NIEPEXE.STATUS == None:
-                print("ERROR: " + EXECUTERERRORS[self.NIEPEXE.STATUS] + " (DEFINE / EXECUTER)")
+                print("ERROR: " + EXECUTERERRORS[self.NIEPEXE.STATUS] + " (DEFINE / EXECUTER /" + str(self.NIEPEXE.STATUS) + ")")
                 self.NIEPEXE = None
                 return
         else:

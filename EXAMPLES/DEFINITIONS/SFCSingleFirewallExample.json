@@ -7,19 +7,27 @@
 		"HOSTS":[
 			{
 				"ID":"SERVER01",
-				"IP":"192.168.121.10/24"
+				"INTERFACES":[
+					{"IP":"192.168.121.10/24", "MAC":"52:54:01:6c:22:10"}
+				]
 			},
 			{
 				"ID":"SERVER02",
-				"IP":"192.168.121.11/24"
+				"INTERFACES":[
+					{"IP":"192.168.121.11/24", "MAC":"52:54:01:6c:22:11"}
+				]
 			},
 			{
 				"ID":"SERVER03",
-				"IP":"192.168.121.12/24"
+				"INTERFACES":[
+					{"IP":"192.168.121.12/24", "MAC":"52:54:01:6c:22:12"}
+				]
 			},
 			{
 				"ID":"CLIENT01",
-				"IP":"192.168.121.13/24"
+				"INTERFACES":[
+					{"IP":"192.168.121.13/24", "MAC":"52:54:01:6c:22:13"}
+				]
 			}
 		],
 		"SWITCHES":["SWITCH01"],
@@ -29,25 +37,29 @@
 	"CONNECTIONS":[
 		{
 			"IN/OUT":"SERVER01",
+			"IN/OUTIFACE":"52:54:01:6c:22:10",
 			"OUT/IN":"SWITCH01"
 		},
 		{
 			"IN/OUT":"SERVER02",
+			"IN/OUTIFACE":"52:54:01:6c:22:11",
 			"OUT/IN":"SWITCH01"
 		},
 		{
 			"IN/OUT":"SERVER03",
+			"IN/OUTIFACE":"52:54:01:6c:22:12",
 			"OUT/IN":"SWITCH01"
 		},
 		{
 			"IN/OUT":"CLIENT01",
+			"IN/OUTIFACE":"52:54:01:6c:22:13",
 			"OUT/IN":"x",
 			"OUT/INIFACE":"52:54:00:6c:22:13"
 		},
 		{
 			"IN/OUT":"x",
-			"OUT/IN":"SWITCH01",
-			"IN/OUTIFACE":"52:54:00:6c:22:14"
+			"IN/OUTIFACE":"52:54:00:6c:22:14",
+			"OUT/IN":"SWITCH01"
 		}
 	]
 }

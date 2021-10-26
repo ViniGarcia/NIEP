@@ -11,6 +11,7 @@ from mininet.node import Switch
 from mininet.node import OVSSwitch
 from mininet.node import Controller, RemoteController
 from mininet.link import Link, Intf
+from mininet.clean import Cleanup
 
 #FNULL: redirects the system call normal output
 FNULL = open(devnull, 'w')
@@ -63,13 +64,14 @@ class Executer:
         return ifacesDictionary
 
 #------------------------------------------------------------------
-    #TODO [VINICIUS - 30/08/21]: THIS METHOD IS KIND OF A FRANKENSTEIN, I NEED TO FIX THE HIERARCHY VM->VNF->SFC
+
     def mininetPrepare(self):
 
         self.NET = Mininet(topo=None, build=False)
+        Cleanup().cleanup()
 
         for HOST in self.CONFIGURATION.MNHOSTS:
-            HOST.ELEM = self.NET.addHost(HOST.ID, mac=HOST.MAC)
+            HOST.ELEM = self.NET.addHost(HOST.ID)
             self.HOSTS[HOST.ID] = HOST
 
         for SWITCH in self.CONFIGURATION.MNSWITCHES:
@@ -93,26 +95,24 @@ class Executer:
 
         ifacesData = self.interfacesMaping()
         for LINK in self.CONFIGURATION.CONNECTIONS:
-            if not "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
-                if LINK["IN/OUT"] in self.HOSTS:
-                    Element01 = self.HOSTS[LINK["IN/OUT"]]
-                else:
-                    if LINK["IN/OUT"] in self.SWITCHES:
-                        Element01 = self.SWITCHES[LINK["IN/OUT"]]
-                    else:
-                        Element01 = self.OVSSWITCHES[LINK["IN/OUT"]]
 
-                if LINK["OUT/IN"] in self.HOSTS:
-                    Element02 = self.HOSTS[LINK["OUT/IN"]]
+            if not "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
+
+                if LINK["IN/OUT"] in self.SWITCHES:
+                    Element01 = self.SWITCHES[LINK["IN/OUT"]]
                 else:
-                    if LINK["OUT/IN"] in self.SWITCHES:
-                        Element02 = self.SWITCHES[LINK["OUT/IN"]]
-                    else:
-                        Element02 = self.OVSSWITCHES[LINK["OUT/IN"]]
+                    Element01 = self.OVSSWITCHES[LINK["IN/OUT"]]
+
+                if LINK["OUT/IN"] in self.SWITCHES:
+                    Element02 = self.SWITCHES[LINK["OUT/IN"]]
+                else:
+                    Element02 = self.OVSSWITCHES[LINK["OUT/IN"]]
 
                 self.NET.addLink(Element01.ELEM, Element02.ELEM)
-            else:
-                if "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
+                continue
+
+            if "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
+                if LINK["IN/OUT"] in self.VNFS or LINK["IN/OUT"] in self.VMS:
                     if LINK["IN/OUT"] in self.VNFS:
                         EXTERNALLINKS = self.VNFS[LINK["IN/OUT"]].VM
                     else:
@@ -126,52 +126,159 @@ class Executer:
                             else:
                                 self.STATUS = -1
                                 return -1
-                    if LINK["OUT/IN"] in self.HOSTS:
-                        Intf(virtualIface, node = self.HOSTS[LINK["OUT/IN"]].ELEM)
+                    if LINK["OUT/IN"] in self.SWITCHES:
+                        Intf(brName, node = self.SWITCHES[LINK["OUT/IN"]].ELEM)
+                    elif LINK["OUT/IN"] in self.OVSSWITCHES:
+                        Intf(brName, node = self.OVSSWITCHES[LINK["OUT/IN"]].ELEM)
                     else:
-                        if LINK["OUT/IN"] in self.SWITCHES:
-                            Intf(brName, node = self.SWITCHES[LINK["OUT/IN"]].ELEM)
-                        else:
-                            if LINK["OUT/IN"] in self.OVSSWITCHES:
-                                Intf(brName, node = self.OVSSWITCHES[LINK["OUT/IN"]].ELEM)
-                            else:
-                                self.STATUS = -2
-                                return -2
+                        self.STATUS = -2
+                        return -2
+                    continue
                 else:
-                    if "OUT/INIFACE" in LINK and not "IN/OUTIFACE" in LINK:
-                        if LINK["OUT/IN"] in self.VNFS:
-                            EXTERNALLINKS = self.VNFS[LINK["OUT/IN"]].VM
-                        else:
-                            EXTERNALLINKS = self.VMS[LINK["OUT/IN"]]
-                        for iface in EXTERNALLINKS.INTERFACES:
-                            if iface["MAC"] == LINK["OUT/INIFACE"]:
-                                if iface["ID"] in ifacesData:
-                                    brName = iface["ID"]
-                                    virtualIface = ifacesData[iface["ID"]]
-                                    break
-                                else:
-                                    self.STATUS = -1
-                                    return -1
-                        if LINK["IN/OUT"] in self.HOSTS:
-                            Intf(virtualIface, node = self.HOSTS[LINK["IN/OUT"]].ELEM)
-                        else:
-                            if LINK["IN/OUT"] in self.SWITCHES:
-                                Intf(brName, node = self.SWITCHES[LINK["IN/OUT"]].ELEM)
-                            else:
-                                if LINK["IN/OUT"] in self.OVSSWITCHES:
-                                    Intf(brName, node = self.OVSSWITCHES[LINK["IN/OUT"]].ELEM)
-                                else:
-                                    self.STATUS = -2
-                                    return -2
+                    Element01 = self.HOSTS[LINK["IN/OUT"]]
+
+                    if LINK["OUT/IN"] in self.SWITCHES:
+                        Element02 = self.SWITCHES[LINK["OUT/IN"]]
                     else:
-                        self.STATUS = -3
-                        return -3
-        
+                        Element02 = self.OVSSWITCHES[LINK["OUT/IN"]]
+
+                    NodesLink = self.NET.addLink(Element01.ELEM, Element02.ELEM)
+                    HostIface = Element01.ELEM.intf(NodesLink.intf1)
+                    HostIface.setMAC(LINK["IN/OUTIFACE"])
+                    for iface in Element01.INTERFACES:
+                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
+                            iface["ELEM"] = HostIface
+                            break
+                    continue
+
+            if "OUT/INIFACE" in LINK and not "IN/OUTIFACE" in LINK:
+                if LINK["OUT/IN"] in self.VNFS or LINK["OUT/IN"] in self.VMS:
+                    if LINK["OUT/IN"] in self.VNFS:
+                        EXTERNALLINKS = self.VNFS[LINK["OUT/IN"]].VM
+                    else:
+                        EXTERNALLINKS = self.VMS[LINK["OUT/IN"]]
+                    for iface in EXTERNALLINKS.INTERFACES:
+                        if iface["MAC"] == LINK["OUT/INIFACE"]:
+                            if iface["ID"] in ifacesData:
+                                brName = iface["ID"]
+                                virtualIface = ifacesData[iface["ID"]]
+                                break
+                            else:
+                                self.STATUS = -1
+                                return -1
+                    if LINK["IN/OUT"] in self.SWITCHES:
+                        Intf(brName, node = self.SWITCHES[LINK["IN/OUT"]].ELEM)
+                    elif LINK["IN/OUT"] in self.OVSSWITCHES:
+                        Intf(brName, node = self.OVSSWITCHES[LINK["IN/OUT"]].ELEM)
+                    else:
+                        self.STATUS = -2
+                        return -2
+                    continue
+                else:
+                    if LINK["IN/OUT"] in self.SWITCHES:
+                        Element01 = self.SWITCHES[LINK["IN/OUT"]]
+                    else:
+                        Element01 = self.OVSSWITCHES[LINK["IN/OUT"]]
+
+                    Element02 = self.HOSTS[LINK["OUT/IN"]]
+
+                    NodesLink = self.NET.addLink(Element01.ELEM, Element02.ELEM)
+                    HostIface = Element01.ELEM.intf(NodesLink.intf2)
+                    HostIface.setMAC(LINK["OUT/INIFACE"])
+                    for iface in Element02.INTERFACES:
+                        if iface["MAC"] == LINK["OUT/INIFACE"]:
+                            iface["ELEM"] = HostIface
+                            break
+                    continue
+
+            else:
+                if LINK["IN/OUT"] in self.HOSTS and LINK["OUT/IN"] in self.HOSTS:
+                    Element01 = self.HOSTS[LINK["IN/OUT"]]
+                    Element02 = self.HOSTS[LINK["OUT/IN"]]
+
+                    NodesLink = self.NET.addLink(Element01.ELEM, Element02.ELEM)
+                    HostIface01 = Element01.ELEM.intf(NodesLink.intf1)
+                    HostIface02 = Element01.ELEM.intf(NodesLink.intf2)
+
+                    HostIface01.setMAC(LINK["IN/OUTIFACE"])
+                    HostIface02.setMAC(LINK["OUT/INIFACE"])
+
+                    for iface in Element01.INTERFACES:
+                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
+                            iface["ELEM"] = HostIface01
+                            break
+                    for iface in Element02.INTERFACES:
+                        if iface["MAC"] == LINK["OUT/INIFACE"]:
+                            iface["ELEM"] = HostIface02
+                            break
+                    continue
+
+                if LINK["IN/OUT"] in self.HOSTS:
+                    Element01 = self.HOSTS[LINK["IN/OUT"]]
+                    if LINK["OUT/IN"] in self.VNFS:
+                        EXTERNALLINKS = self.VNFS[LINK["OUT/IN"]].VM
+                    else:
+                        EXTERNALLINKS = self.VMS[LINK["OUT/IN"]]
+                    for iface in EXTERNALLINKS.INTERFACES:
+                        if iface["MAC"] == LINK["OUT/INIFACE"]:
+                            if iface["ID"] in ifacesData:
+                                virtualIface = ifacesData[iface["ID"]]
+                                break
+                            else:
+                                self.STATUS = -1
+                                return -1
+
+                    HostIface = Intf(virtualIface, node = Element01.ELEM, mac = LINK["IN/OUTIFACE"])
+                    for iface in Element01.INTERFACES:
+                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
+                            iface["ELEM"] = HostIface
+                            break
+                    continue
+
+                if LINK["OUT/IN"] in self.HOSTS:
+
+                    if LINK["IN/OUT"] in self.VNFS:
+                        EXTERNALLINKS = self.VNFS[LINK["IN/OUT"]].VM
+                    else:
+                        EXTERNALLINKS = self.VMS[LINK["IN/OUT"]]
+                    for iface in EXTERNALLINKS.INTERFACES:
+                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
+                            if iface["ID"] in ifacesData:
+                                virtualIface = ifacesData[iface["ID"]]
+                                break
+                            else:
+                                self.STATUS = -1
+                                return -1
+
+                    Element02 = self.HOSTS[LINK["OUT/IN"]]
+                    HostIface = Intf(virtualIface, node = Element02.ELEM, mac = LINK["OUT/INIFACE"])
+                    for iface in Element02.INTERFACES:
+                        if iface["MAC"] == LINK["OUT/INIFACE"]:
+                            iface["ELEM"] = HostIface
+                            break
+                    continue
+
+                else:
+                    self.STATUS = -3
+                    return -3
+
         self.NET.build()
         for HOST in self.HOSTS:
-            if not self.HOSTS[HOST].IP is None:
-                self.HOSTS[HOST].ELEM.setIP(self.HOSTS[HOST].IP)
-
+            DummyIfaces = 0
+            for IFACE in self.HOSTS[HOST].INTERFACES:
+                if "ELEM" in IFACE: 
+                    if IFACE["IP"] != None:
+                        IFACE["ELEM"].setIP(IFACE["IP"])
+                    else:
+                        if IFACE["ELEM"].IP() != None:
+                            self.HOSTS[HOST].ELEM.cmd("sudo ip addr flush " + str(IFACE["ELEM"].name))
+                else:
+                    self.HOSTS[HOST].ELEM.cmd("sudo ip link add mn-eth" + str(DummyIfaces) + " address " + IFACE["MAC"] + " type dummy")
+                    if IFACE["IP"] != None:
+                        self.HOSTS[HOST].ELEM.cmd("sudo ip addr add " + IFACE["IP"] + " dev " + "mn-eth" + str(DummyIfaces))
+                    self.HOSTS[HOST].ELEM.cmd("sudo ifconfig mn-eth" + str(DummyIfaces) + " up") 
+                    DummyIfaces += 1
+                    
         return 0
 
 #------------------------------------------------------------------

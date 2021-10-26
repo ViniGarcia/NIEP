@@ -7,13 +7,15 @@
 		"HOSTS":[
 			{
 				"ID":"HOST01",
-				"IP":"192.168.122.01/24",
-				"MAC":"b0:36:38:d1:4a:4c"
+				"INTERFACES":[
+					{"IP":"192.168.122.01/24", "MAC":"b0:36:38:d1:4a:4c"}
+				]
 			},
 			{
 				"ID":"HOST02",
-				"IP":"192.168.122.02/24",
-				"MAC":"b0:4b:60:23:f1:e2"
+				"INTERFACES":[
+					{"IP":"192.168.122.02/24", "MAC":"b0:4b:60:23:f1:e2"}
+				]
 			}
 
 		],
@@ -24,13 +26,15 @@
 	"CONNECTIONS":[
 		{
 			"IN/OUT":"HOST01",
+			"IN/OUTIFACE":"b0:36:38:d1:4a:4c",
 			"OUT/IN":"x",
 			"OUT/INIFACE":"52:54:00:6c:22:13"
 		},
 		{
 			"IN/OUT":"z",
+			"IN/OUTIFACE":"52:54:00:6c:22:18",
 			"OUT/IN":"HOST02",
-			"IN/OUTIFACE":"52:54:00:6c:22:18"
+			"OUT/INIFACE":"b0:4b:60:23:f1:e2"
 		}
 	]
 }

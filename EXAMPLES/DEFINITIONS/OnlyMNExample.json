@@ -1,0 +1,39 @@
+{
+	"ID": "OnlyMNExample",
+	"VMS":[],
+	"VNFS":[],
+	"SFCS":[],
+	"MININET":{
+		"HOSTS":[
+			{
+				"ID":"HOST01",
+				"INTERFACES":[
+					{"IP":"192.168.122.01/24", "MAC":"52:54:01:6c:22:10"},
+					{"IP":null, "MAC":"52:54:01:6c:22:11"}
+				]
+			},
+			{
+				"ID":"HOST02",
+				"INTERFACES":[
+					{"IP":"192.168.122.02/24", "MAC":"52:54:01:6c:22:12"}
+				]
+			}
+
+		],
+		"SWITCHES":["SW01"],
+		"CONTROLLERS":[],
+		"OVSWITCHES":[]
+	},
+	"CONNECTIONS":[
+		{
+			"IN/OUT":"HOST01",
+			"IN/OUTIFACE":"52:54:01:6c:22:10",
+			"OUT/IN":"SW01"
+		},
+		{
+			"IN/OUT":"SW01",
+			"OUT/IN":"HOST02",
+			"OUT/INIFACE":"52:54:01:6c:22:12"
+		}
+	]
+}

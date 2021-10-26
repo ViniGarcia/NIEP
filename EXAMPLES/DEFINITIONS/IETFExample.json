@@ -1,0 +1,86 @@
+{
+	"ID": "IETFExampleTopology",
+	"VMS":[],
+	"VNFS":[],
+	"SFCS":[],
+	"MININET":{
+		"HOSTS":[
+			{
+				"ID":"CLIENT01",
+				"INTERFACES":[
+					{"IP":"192.168.122.01/24", "MAC":"00:00:00:00:02:01"}
+				]
+			},
+			{
+				"ID":"SC",
+				"INTERFACES":[
+					{"IP":"192.168.123.01/24", "MAC":"00:00:00:00:02:02"},
+					{"IP":null, "MAC":"00:00:00:00:02:03"},
+					{"IP":null, "MAC":"00:00:00:00:02:04"}
+				]
+			},
+			{
+				"ID":"SFF01",
+				"INTERFACES":[
+					{"IP":"192.168.123.02/24", "MAC":"00:00:00:00:02:05"}
+				]
+			},
+			{
+				"ID":"NF01",
+				"INTERFACES":[
+					{"IP":"192.168.123.03/24", "MAC":"00:00:00:00:02:06"}
+				]
+			},
+			{
+				"ID":"NF02",
+				"INTERFACES":[
+					{"IP":"192.168.123.04/24", "MAC":"00:00:00:00:02:07"}
+				]
+			},
+			{
+				"ID":"SERVER01",
+				"INTERFACES":[
+					{"IP":"192.168.124.01/24", "MAC":"00:00:00:00:02:08"}
+				]
+			}
+
+		],
+		"SWITCHES":["SWITCH01"],
+		"CONTROLLERS":[],
+		"OVSWITCHES":[]
+	},
+	"CONNECTIONS":[
+		{
+			"IN/OUT":"CLIENT01",
+			"IN/OUTIFACE":"00:00:00:00:02:01",
+			"OUT/IN":"SC",
+			"OUT/INIFACE":"00:00:00:00:02:03"
+		},
+		{
+			"IN/OUT":"SC",
+			"IN/OUTIFACE":"00:00:00:00:02:02",
+			"OUT/IN":"SWITCH01"
+		},
+		{
+			"IN/OUT":"SFF01",
+			"IN/OUTIFACE":"00:00:00:00:02:05",
+			"OUT/IN":"SWITCH01"
+		},
+		{
+			"IN/OUT":"NF01",
+			"IN/OUTIFACE":"00:00:00:00:02:06",
+			"OUT/IN":"SWITCH01"
+		},
+		{
+			"IN/OUT":"NF02",
+			"IN/OUTIFACE":"00:00:00:00:02:07",
+			"OUT/IN":"SWITCH01"
+		},
+		{
+			"IN/OUT":"SERVER01",
+			"IN/OUTIFACE":"00:00:00:00:02:08",
+			"OUT/IN":"SC",
+			"OUT/INIFACE":"00:00:00:00:02:04"
+		}
+	]
+}

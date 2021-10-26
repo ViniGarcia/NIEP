@@ -1,3 +1,4 @@
+import re
 import json
 import random
 from sys import path
@@ -21,14 +22,12 @@ from VM import VM
 
 class MNHost:
     ID = ""
-    IP = ""
-    MAC = ""
+    INTERFACES = None
     ELEM = None
 
-    def __init__(self, ID, IP, MAC):
+    def __init__(self, ID, INTERFACES):
         self.ID = ID
-        self.IP = IP
-        self.MAC = MAC
+        self.INTERFACES = INTERFACES
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -134,6 +133,15 @@ class PlatformParser:
 
 #------------------------------------------------------------------
 
+    def checkIP(self, IP):
+
+        if re.match("^([01]?\\d\\d?|2[0-4]\\d|25[0-5])(?:\\.[01]?\\d\\d?|\\.2[0-4]\\d|\\.25[0-5]){3}(?:/[0-2]\\d|/3[0-2])?$", IP):
+            return 0
+
+        return -1
+
+#------------------------------------------------------------------
+
     def checkMAC(self, MAC):
 
         if isinstance(MAC, basestring) and len(MAC) == 17:
@@ -192,7 +200,8 @@ class PlatformParser:
             return False
 
 #------------------------------------------------------------------
-    #TODO [VINICIUS - 30/08/21]: Add security tests to duplicate IDs (will raise a KVM error if an ID is duplicated)
+#TODO [VINICIUS - 30/08/21]: Add security tests to duplicate IDs (will raise a KVM error if an ID is duplicated)
+
     def VMSCheck(self):
 
         for VMPATH in self.JSON['VMS']:
@@ -299,13 +308,34 @@ class PlatformParser:
         if "HOSTS" in MininetList:
             if isinstance(MininetList["HOSTS"], list):
                 for HOST in MininetList["HOSTS"]:
-                    if "ID" in HOST and "IP" in HOST:
-                        if "MAC" in HOST:
-                            if self.checkMAC(HOST["MAC"]):
-                                self.STATUS = -7
-                                return -7
+                    if "ID" in HOST and "INTERFACES" in HOST:
+
+                        if isinstance(HOST["INTERFACES"], list):
+                            for IFACE in HOST["INTERFACES"]:
+                                if isinstance(IFACE, dict):
+                                    if "MAC" in IFACE and "IP" in IFACE:
+                                        if IFACE["MAC"] != None:
+                                            if self.checkMAC(IFACE["MAC"]):
+                                                self.STATUS = -7
+                                                return -7
+                                        else:
+                                            self.STATUS = -7
+                                            return -7
+                                        if IFACE["IP"] != None:
+                                            if self.checkIP(IFACE["IP"]):
+                                                self.STATUS = -7
+                                                return -7
+                                    else:
+                                        self.STATUS = -7
+                                        return -7
+                                else:
+                                    self.STATUS = -7
+                                    return -7
                         else:
-                            HOST["MAC"] = self.randomizeMAC()
+                            self.STATUS = -7
+                            return -7
+                        
+                        
                         if HOST["ID"] in IDLIST:
                             self.STATUS = -7
                             return -7
@@ -315,7 +345,7 @@ class PlatformParser:
                         self.STATUS = -7
                         return -7
 
-                    self.MNHOSTS.append(MNHost(HOST["ID"], HOST["IP"], HOST["MAC"]))
+                    self.MNHOSTS.append(MNHost(HOST["ID"], HOST["INTERFACES"]))
             else:
                 self.STATUS = -7
                 return -7
@@ -365,13 +395,15 @@ class PlatformParser:
                     self.MNOVSES.append(MNOVSSwitch(OVSSWITCH["ID"], OVSSWITCH["CONTROLLER"]))
 
         return 0
+
 # ------------------------------------------------------------------
+
     def connectionsCheck(self):
 
         VMSSUMMARY = {VMINSTANCE.ID:VMINSTANCE for VMINSTANCE in self.VMS}
+        HOSTSSUMMARY = {HOSTINSTANCE.ID:HOSTINSTANCE for HOSTINSTANCE in self.MNHOSTS}
         for VNFINSTANCE in self.VNFS:
             VMSSUMMARY[VNFINSTANCE.ID] = VNFINSTANCE.VM
-        HOSTSIDS = [HOST.ID for HOST in self.MNHOSTS]
         SWITCHESIDS = [SWITCH.ID for SWITCH in self.MNSWITCHES]
         OVSSWITCHESIDS = [OVS.ID for OVS in self.MNOVSES]
 
@@ -391,8 +423,16 @@ class PlatformParser:
                     else:
                         self.STATUS = -12
                         return -12
+                elif CONNECTION["IN/OUT"] in HOSTSSUMMARY:
+                    if "IN/OUTIFACE" in CONNECTION:
+                        if not any(CONNECTION["IN/OUTIFACE"] == IFACE["MAC"] for IFACE in HOSTSSUMMARY[CONNECTION["IN/OUT"]].INTERFACES):
+                            self.STATUS = -12
+                            return -12
+                    else:
+                        self.STATUS = -12
+                        return -12
                 else:
-                    if CONNECTION["IN/OUT"] not in HOSTSIDS and CONNECTION["IN/OUT"] not in SWITCHESIDS and CONNECTION["IN/OUT"] not in OVSSWITCHESIDS:
+                    if CONNECTION["IN/OUT"] not in SWITCHESIDS and CONNECTION["IN/OUT"] not in OVSSWITCHESIDS:
                         self.STATUS = -12
                         return -12
             else:
@@ -408,8 +448,16 @@ class PlatformParser:
                     else:
                         self.STATUS = -13
                         return -13
+                elif CONNECTION["OUT/IN"] in HOSTSSUMMARY:
+                    if "OUT/INIFACE" in CONNECTION:
+                        if not any(CONNECTION["OUT/INIFACE"] == IFACE["MAC"] for IFACE in HOSTSSUMMARY[CONNECTION["OUT/IN"]].INTERFACES):
+                            self.STATUS = -13
+                            return -13
+                    else:
+                        self.STATUS = -13
+                        return -13
                 else:
-                    if CONNECTION["OUT/IN"] not in HOSTSIDS and CONNECTION["OUT/IN"] not in SWITCHESIDS and CONNECTION["OUT/IN"] not in OVSSWITCHESIDS:
+                    if CONNECTION["OUT/IN"] not in HOSTSSUMMARY and CONNECTION["OUT/IN"] not in SWITCHESIDS and CONNECTION["OUT/IN"] not in OVSSWITCHESIDS:
                         self.STATUS = -13
                         return -13
             else:
