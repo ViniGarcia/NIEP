@@ -9,10 +9,6 @@ import re
 
 import NSH
 
-################################################## TODO AREA ##################################################
-#TODO #1: SFP REMOTION METHOD
-###############################################################################################################
-
 ################################################### SC AREA ###################################################
 
 class SC:
@@ -74,16 +70,16 @@ class SC:
 
 	def registerSFF(self, sff_id, sff_address):
 
-			if not isinstance(sff_id, int):
-				return -1
-			if not isinstance(sff_address, str):
-				return -2
+		if not isinstance(sff_id, int):
+			return -1
+		if not isinstance(sff_address, str):
+			return -2
 
-			if not self.__isIP(sff_address):
-				return -3
+		if not self.__isIP(sff_address):
+			return -3
 
-			self.sff_addresses[sff_id] = sff_address
-			return 0
+		self.sff_addresses[sff_id] = sff_address
+		return 0
 
 
 	def deleteSFP(self, sfp_id):
@@ -131,78 +127,89 @@ class SC:
 			return -7
 
 		for sf in sf_addresses:
-			if not isinstance(sf_addresses[sf], str):
-				return -8
-			if not self.__isIP(sf_addresses[sf]):
-				return -9
+			for instance in sf_addresses[sf]:
+				if not isinstance(instance, str):
+					return -8
+				if not self.__isIP(instance):
+					return -9
 			if not sf in sf_mapping:
 				return -10
 
 		if len(sf_mapping.keys()) == 0:
 			return -11
-		for sf_sff in sf_mapping:
-			if not sf_sff in sf_addresses:
+		for sf in sf_mapping:
+			if not isinstance(sf_mapping[sf], list):
 				return -12
-			if not sf_mapping[sf_sff] in self.sff_addresses:
+			if not sf in sf_addresses:
 				return -13
+			for sff in sf_mapping[sf]:	
+				if not sff in self.sff_addresses:
+					return -14
 
 		if list(sf_addresses.keys()) != list(sfp_routing.keys()):
-			return -14
+			return -15
 		for route in sfp_routing:
 			if not sfp_routing[route] in sf_addresses and sfp_routing[route] != None:
-				return -15
+				return -16
 
 		for destination in sfp_destinations:
 			if not isinstance(destination, str):
-				return -16
-			if not self.__isIP(destination):
 				return -17
+			if not self.__isIP(destination):
+				return -18
 
 		if sfp_id in self.sfp_routing:
 			self.deleteSFP(sfp_id)
 
-		reg_result = requests.post("http://" + self.sff_addresses[sf_mapping[1]] + ":8080/entity", {"service_path":sfp_id, "service_index":0, "ip_address":self.__default_sc_ip})		
-		if reg_result.status_code != 200:
-			return -18
+		for sf in sf_mapping[1]:
+			reg_result = requests.post("http://" + self.sff_addresses[sf] + ":8080/entity", {"service_path":sfp_id, "service_index":0, "ip_address":self.__default_sc_ip})		
+			if reg_result.status_code != 200:
+				return -19
 
 		none_si = max([si for si in list(sfp_routing.values()) + list(sfp_routing.keys()) if si != None]) + 1
 		for none_key in [key for (key, value) in sfp_routing.items() if value == None]:
 			sfp_routing[none_key] = none_si
-			reg_result = requests.post("http://" + self.sff_addresses[sf_mapping[none_key]] + ":8080/entity", {"service_path":sfp_id, "service_index":none_si, "ip_address":self.__default_sc_ip})		
-			if reg_result.status_code != 200:
-				return -18
+			for sff in sf_mapping[none_key]:
+				reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":none_si, "ip_address":self.__default_sc_ip})
+				if reg_result.status_code != 200:
+					return -19
 
 		for sf in sf_addresses:
-			reg_result = requests.post("http://" + self.sff_addresses[sf_mapping[sf]] + ":8080/entity", {"service_path":sfp_id, "service_index":sf, "ip_address":sf_addresses[sf]})		
-			if reg_result.status_code != 200:
-				return -18
-
-			if sfp_routing[sf] != none_si:
-				if sf_mapping[sf] != sf_mapping[sfp_routing[sf]]:
-					reg_result = requests.post("http://" + self.sff_addresses[sf_mapping[sf]] + ":8080/entity", {"service_path":sfp_id, "service_index":sfp_routing[sf], "ip_address":self.sff_addresses[sf_mapping[sfp_routing[sf]]]})		
-					if reg_result.status_code != 200:
-						return -18
-					reg_result = requests.post("http://" + self.sff_addresses[sf_mapping[sfp_routing[sf]]] + ":8080/entity", {"service_path":sfp_id, "service_index":sf, "ip_address":self.sff_addresses[sf_mapping[sf]]})		
-					if reg_result.status_code != 200:
-						return -18
-
-		reg_result = requests.post("http://" + self.sff_addresses[sf_mapping[1]] + ":8080/route", {"service_path":sfp_id, "service_index":0, "next_destination":1})		
-		if reg_result.status_code != 200:
-			return -19
-
-		for sf in sfp_routing:
-			reg_result = requests.post("http://" + self.sff_addresses[sf_mapping[sf]] + ":8080/route", {"service_path":sfp_id, "service_index":sf, "next_destination":sfp_routing[sf]})		
-			if reg_result.status_code != 200:
-				return -19
-
-			if sfp_routing[sf] != none_si:
-				if sf_mapping[sf] != sf_mapping[sfp_routing[sf]]:
-					reg_result = requests.post("http://" + self.sff_addresses[sf_mapping[sfp_routing[sf]]] + ":8080/route", {"service_path":sfp_id, "service_index":sf, "next_destination":sfp_routing[sf]})
+			for sff in sf_mapping[sf]:
+				for instance in sf_addresses[sf]:
+					reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":sf, "ip_address":instance})
 					if reg_result.status_code != 200:
 						return -19
 
-		self.sfp_sffs[sfp_id] = list(set(sf_mapping.values()))
+				if sfp_routing[sf] != none_si:
+					if not sff in sf_mapping[sfp_routing[sf]]:
+						reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":sfp_routing[sf], "ip_address":self.sff_addresses[sff_route]})		
+						if reg_result.status_code != 200:
+							return -19
+						reg_result = requests.post("http://" + self.sff_addresses[sff_route] + ":8080/entity", {"service_path":sfp_id, "service_index":sf, "ip_address":self.sff_addresses[sff]})		
+						if reg_result.status_code != 200:
+							return -19
 
+		for sff in sf_mapping[1]:
+			reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/route", {"service_path":sfp_id, "service_index":0, "next_destination":1})		
+			if reg_result.status_code != 200:
+				return -20
+
+		for sf in sfp_routing:
+			for sff in sf_mapping[sf]:
+				reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/route", {"service_path":sfp_id, "service_index":sf, "next_destination":sfp_routing[sf]})		
+				if reg_result.status_code != 200:
+					return -20
+
+				if sfp_routing[sf] != none_si:
+					for sff_route in sf_mapping[sfp_routing[sf]]:
+						if sff != sff_route:
+							reg_result = requests.post("http://" + self.sff_addresses[sff_route] + ":8080/route", {"service_path":sfp_id, "service_index":sf, "next_destination":sfp_routing[sf]})
+							if reg_result.status_code != 200:
+								return -20
+
+
+		self.sfp_sffs[sfp_id] = list(set(sum(sf_mapping.values(), [])))
 		self.sfp_routing[sfp_id] = sf_mapping[list(sfp_routing.keys())[0]]
 
 		for destination in sfp_destinations:
@@ -258,10 +265,10 @@ class SC:
 				self.interface_out_access.send(incoming_data)
 				continue
 
-			sff_ip = self.sff_addresses[self.sfp_routing[self.sfp_destinations[destination_ip]]]
-			new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[destination_ip], self.sfp_routing[self.sfp_destinations[destination_ip]], bytearray(16))
+			new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[destination_ip], 0, bytearray(16))
 			outgoing_data = incoming_data[:-len(incoming_data) + 14] + new_nsh + incoming_data[14:]
-			self.interface_sc_access.sendto(outgoing_data, (sff_ip, self.__default_port))
+			for sff in self.sfp_routing[self.sfp_destinations[destination_ip]]:
+				self.interface_sc_access.sendto(outgoing_data, (self.sff_addresses[sff], self.__default_port))
 
 
 	def outgoingServer(self):
@@ -313,7 +320,7 @@ def setupSFP():
 	try:
 		sfp_yaml = bottle.request.forms.get("sfp_yaml")
 	except:
-		return bottle.HTTPResponse(status=400, body="ERROR: SFP YAML NOT PROVIDED!")	
+		return bottle.HTTPResponse(status=400, body="ERROR: SFP YAML NOT PROVIDED!")
 
 	resp_code = service_classifier.setupSFP(sfp_yaml)
 	if resp_code[0] == -1:

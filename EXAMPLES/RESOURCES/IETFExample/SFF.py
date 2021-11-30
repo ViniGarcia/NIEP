@@ -7,10 +7,6 @@ import re
 
 import NSH
 
-################################################## TODO AREA ##################################################
-#TODO #1: SFP REMOTION METHOD
-###############################################################################################################
-
 ################################################## SFF AREA ###################################################
 
 class SFF:
@@ -25,6 +21,8 @@ class SFF:
 	nsh_processor = None
 
 	incoming_server = None
+
+	packet_control = None
 
 
 	def __init__(self, interface_access_ip):
@@ -41,6 +39,7 @@ class SFF:
 
 		self.nsh_processor = NSH.NSH()
 
+		self.packet_control = self.data_manager.dict()
 
 	def __del__(self):
 
@@ -94,7 +93,11 @@ class SFF:
 
 		if not service_path in self.entity_addresses:
 			self.entity_addresses[service_path] = {}
-		self.entity_addresses[service_path] = {**self.entity_addresses[service_path], **{service_index:ip_address}}
+		if not service_index in self.entity_addresses[service_path]:
+			self.entity_addresses[service_path] = {**self.entity_addresses[service_path], **{service_index:[ip_address]}}
+		else:
+			self.entity_addresses[service_path] = {**self.entity_addresses[service_path], **{service_index:[ip_address] + self.entity_addresses[service_path][service_index]}}
+
 		return 0
 
 
@@ -144,6 +147,7 @@ class SFF:
 			#self.entity_addresses = {**self.entity_addresses}
 		return 0
 
+
 	def incomingServer(self):
 
 		while True:
@@ -154,9 +158,16 @@ class SFF:
 			except:
 				continue
 
-			target_entity = self.traffic_routes[self.nsh_processor.service_spi][self.nsh_processor.service_si]
-			self.interface_access.sendto(incoming_data, (self.entity_addresses[self.nsh_processor.service_spi][target_entity], self.__default_port))
+			origin_id = int.from_bytes(incoming_data[58:62], "big")
+			message_id = int.from_bytes(incoming_data[-4:], "big")
+			if origin_id in self.packet_control:
+				if self.packet_control[origin_id][0] >= message_id and self.packet_control[origin_id][1] >= self.nsh_processor.service_si:
+					continue
+			self.packet_control[origin_id] = (message_id, self.nsh_processor.service_si)
 
+			target_entity = self.traffic_routes[self.nsh_processor.service_spi][self.nsh_processor.service_si]
+			for target_address in self.entity_addresses[self.nsh_processor.service_spi][target_entity]:
+				self.interface_access.sendto(incoming_data, (target_address, self.__default_port))
 
 	def startServers(self):
 
@@ -252,6 +263,7 @@ def deleteSFP():
 		return bottle.HTTPResponse(status=400, body="ERROR: INAVLID SERVICE PATH PROVIDED!")
 
 	return "SUCCESS: SFP SUCCESSFULLY DELETED!"
+
 
 @bottle.route('/stop', method='POST')
 def stopSFF():

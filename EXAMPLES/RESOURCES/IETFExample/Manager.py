@@ -25,6 +25,11 @@ def configure(sfp_yaml, sc_ip):
     print("SC SETUP: ", response, "\n")
 
 
+def delete(sc_ip, sfp_id):
+    
+    response = requests.post("http://" + sc_ip + ":8080/delete", {"sfp_id": sfp_id})
+    print("SC DELETE: ", response, "\n")    
+
 def start(sc_ip):
 
     response = requests.post("http://" + sc_ip + ":8080/start")
@@ -35,11 +40,12 @@ def status(sc_ip):
     response = requests.get("http://" + sc_ip + ":8080/status")
     print("SC STATUS: ", response, "\n")
 
-if len(sys.argv) == 3:
+if len(sys.argv) == 4:
     sc_acc_address = sys.argv[1]
     sfp_file_path = sys.argv[2]
+    sfp_id = sys.argv[3]
 else:
-    print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: Manager.py SC_ACC_ADDRESS SFP_FILE_PATH]")
+    print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: Manager.py SC_ACC_ADDRESS SFP_FILE_PATH SFP_ID]")
     exit()
 
 if not isIP(sc_acc_address):
@@ -54,3 +60,5 @@ while True:
         start(sc_acc_address)
     elif action == "status":
         status(sc_acc_address)
+    elif action == "delete":
+        delete(sc_acc_address, sfp_id)

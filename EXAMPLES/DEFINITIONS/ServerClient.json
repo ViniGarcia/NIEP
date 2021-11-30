@@ -1,0 +1,47 @@
+{
+	"ID": "ServerClient",
+	"VMS":[],
+	"VNFS":[],
+	"SFCS":[],
+	"MININET":{
+		"HOSTS":[
+			{
+				"ID":"CLIENT",
+				"INTERFACES":[
+					{"IP":"192.168.122.01/24", "MAC":"00:00:00:00:01:01"}
+				]
+			},
+			{
+				"ID":"NF",
+				"INTERFACES":[
+					{"IP":null, "MAC":"00:00:00:00:01:03"},
+					{"IP":null, "MAC":"00:00:00:00:01:04"}
+				]
+			},
+			{
+				"ID":"SERVER",
+				"INTERFACES":[
+					{"IP":"192.168.122.02/24", "MAC":"00:00:00:00:01:02"}
+				]
+			}
+
+		],
+		"SWITCHES":[],
+		"CONTROLLERS":[],
+		"OVSWITCHES":[]
+	},
+	"CONNECTIONS":[
+		{
+			"IN/OUT":"CLIENT",
+			"IN/OUTIFACE":"00:00:00:00:01:01",
+			"OUT/IN":"NF",
+			"OUT/INIFACE":"00:00:00:00:01:03"
+		},
+		{
+			"IN/OUT":"SERVER",
+			"IN/OUTIFACE":"00:00:00:00:01:02",
+			"OUT/IN":"NF",
+			"OUT/INIFACE":"00:00:00:00:01:04"
+		}
+	]
+}
