@@ -15,8 +15,9 @@ class SC:
 
 	__default_port = 12000
 	__default_sc_ip = None
+	__default_net_ip = None
+
 	interface_inc_access = None
-	interface_out_access = None
 	interface_sc_access = None
 
 	sff_addresses = None
@@ -27,20 +28,17 @@ class SC:
 	nsh_processor = None
 
 	incoming_server = None
-	outgoing_server = None
 
 
-	def __init__(self, interface_net_inc_iface, interface_net_out_iface, interface_sc_access_ip):
+	def __init__(self, interface_net_inc_ip, interface_sc_access_ip):
 		
-		self.interface_inc_access = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3))
-		self.interface_inc_access.bind((interface_net_inc_iface, 0))
-
-		self.interface_out_access = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3))
-		self.interface_out_access.bind((interface_net_out_iface, 0))
+		self.interface_inc_access = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
+		self.interface_inc_access.bind((interface_net_inc_ip, self.__default_port))
 
 		self.interface_sc_access = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
 		self.interface_sc_access.bind((interface_sc_access_ip, self.__default_port))
 
+		self.__default_net_ip = interface_net_inc_ip
 		self.__default_sc_ip = interface_sc_access_ip
 
 		self.sff_addresses = {}
@@ -55,11 +53,8 @@ class SC:
 
 		if self.incoming_server != None:
 			self.incoming_server.terminate()
-		if self.outgoing_server != None:
-			self.outgoing_server.terminate()
 
 		self.interface_inc_access.close()
-		self.interface_out_access.close()
 		self.interface_sc_access.close()
 
 
@@ -82,7 +77,7 @@ class SC:
 		return 0
 
 
-	def deleteSFP(self, sfp_id):
+	def deleteSFP(self, sfp_id, sff_configure):
 
 		try:
 			sfp_id = int(sfp_id)
@@ -99,16 +94,17 @@ class SC:
 			self.sfp_routing.pop(sfp_id)
 
 		if sfp_id in self.sfp_sffs:
-			for sff in self.sfp_sffs[sfp_id]:
-				reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/delete", {"service_path":sfp_id})
-				if reg_result.status_code != 200:
-					res_code = -2
+			if sff_configure:
+				for sff in self.sfp_sffs[sfp_id]:
+					reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/delete", {"service_path":sfp_id})
+					if reg_result.status_code != 200:
+						res_code = -2
 			self.sfp_sffs.pop(sfp_id)
 
 		return res_code
 
 
-	def registerSFP(self, sfp_id, sf_addresses, sf_mapping, sfp_routing, sfp_destinations):
+	def registerSFP(self, sfp_id, sf_addresses, sf_mapping, sfp_routing, sfp_destinations, sff_configure):
 
 		if not isinstance(sfp_id, int):
 			return -1
@@ -159,54 +155,55 @@ class SC:
 				return -18
 
 		if sfp_id in self.sfp_routing:
-			self.deleteSFP(sfp_id)
+			self.deleteSFP(sfp_id, sff_configure)
 
-		for sf in sf_mapping[1]:
-			reg_result = requests.post("http://" + self.sff_addresses[sf] + ":8080/entity", {"service_path":sfp_id, "service_index":0, "ip_address":self.__default_sc_ip})		
-			if reg_result.status_code != 200:
-				return -19
-
-		none_si = max([si for si in list(sfp_routing.values()) + list(sfp_routing.keys()) if si != None]) + 1
-		for none_key in [key for (key, value) in sfp_routing.items() if value == None]:
-			sfp_routing[none_key] = none_si
-			for sff in sf_mapping[none_key]:
-				reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":none_si, "ip_address":self.__default_sc_ip})
+		if sff_configure:
+			for sf in sf_mapping[1]:
+				reg_result = requests.post("http://" + self.sff_addresses[sf] + ":8080/entity", {"service_path":sfp_id, "service_index":0, "ip_address":self.__default_sc_ip})		
 				if reg_result.status_code != 200:
 					return -19
 
-		for sf in sf_addresses:
-			for sff in sf_mapping[sf]:
-				for instance in sf_addresses[sf]:
-					reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":sf, "ip_address":instance})
+			none_si = max([si for si in list(sfp_routing.values()) + list(sfp_routing.keys()) if si != None]) + 1
+			for none_key in [key for (key, value) in sfp_routing.items() if value == None]:
+				sfp_routing[none_key] = none_si
+				for sff in sf_mapping[none_key]:
+					reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":none_si, "ip_address":None})
 					if reg_result.status_code != 200:
 						return -19
 
-				if sfp_routing[sf] != none_si:
-					if not sff in sf_mapping[sfp_routing[sf]]:
-						reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":sfp_routing[sf], "ip_address":self.sff_addresses[sff_route]})		
-						if reg_result.status_code != 200:
-							return -19
-						reg_result = requests.post("http://" + self.sff_addresses[sff_route] + ":8080/entity", {"service_path":sfp_id, "service_index":sf, "ip_address":self.sff_addresses[sff]})		
+			for sf in sf_addresses:
+				for sff in sf_mapping[sf]:
+					for instance in sf_addresses[sf]:
+						reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":sf, "ip_address":instance})
 						if reg_result.status_code != 200:
 							return -19
 
-		for sff in sf_mapping[1]:
-			reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/route", {"service_path":sfp_id, "service_index":0, "next_destination":1})		
-			if reg_result.status_code != 200:
-				return -20
+					if sfp_routing[sf] != none_si:
+						if not sff in sf_mapping[sfp_routing[sf]]:
+							reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/entity", {"service_path":sfp_id, "service_index":sfp_routing[sf], "ip_address":self.sff_addresses[sff_route]})		
+							if reg_result.status_code != 200:
+								return -19
+							reg_result = requests.post("http://" + self.sff_addresses[sff_route] + ":8080/entity", {"service_path":sfp_id, "service_index":sf, "ip_address":self.sff_addresses[sff]})		
+							if reg_result.status_code != 200:
+								return -19
 
-		for sf in sfp_routing:
-			for sff in sf_mapping[sf]:
-				reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/route", {"service_path":sfp_id, "service_index":sf, "next_destination":sfp_routing[sf]})		
+			for sff in sf_mapping[1]:
+				reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/route", {"service_path":sfp_id, "service_index":0, "next_destination":1})		
 				if reg_result.status_code != 200:
 					return -20
 
-				if sfp_routing[sf] != none_si:
-					for sff_route in sf_mapping[sfp_routing[sf]]:
-						if sff != sff_route:
-							reg_result = requests.post("http://" + self.sff_addresses[sff_route] + ":8080/route", {"service_path":sfp_id, "service_index":sf, "next_destination":sfp_routing[sf]})
-							if reg_result.status_code != 200:
-								return -20
+			for sf in sfp_routing:
+				for sff in sf_mapping[sf]:
+					reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/route", {"service_path":sfp_id, "service_index":sf, "next_destination":sfp_routing[sf]})		
+					if reg_result.status_code != 200:
+						return -20
+
+					if sfp_routing[sf] != none_si:
+						for sff_route in sf_mapping[sfp_routing[sf]]:
+							if sff != sff_route:
+								reg_result = requests.post("http://" + self.sff_addresses[sff_route] + ":8080/route", {"service_path":sfp_id, "service_index":sf, "next_destination":sfp_routing[sf]})
+								if reg_result.status_code != 200:
+									return -20
 
 
 		self.sfp_sffs[sfp_id] = list(set(sum(sf_mapping.values(), [])))
@@ -217,7 +214,7 @@ class SC:
 
 		return 0
 
-	def setupSFP(self, sfp_yaml):
+	def setupSFP(self, sfp_yaml, sff_configure):
 		
 		try:
 			sfp_data = yaml.safe_load(sfp_yaml)
@@ -236,20 +233,22 @@ class SC:
 			return (-6,)
 		if not "sfp_destinations" in sfp_data:
 			return (-7,)
+		if not isinstance(sff_configure, bool):
+			return (-8,)
 
 		for sff in sfp_data["sff"]:
 			reg_result = self.registerSFF(sff, sfp_data["sff"][sff])
 			if reg_result != 0:
-				return (-8, reg_result) 
+				return (-9, reg_result) 
 
-		reg_result = self.registerSFP(sfp_data["id"], sfp_data["sf"], sfp_data["sf_sff"], sfp_data["sfp"], sfp_data["sfp_destinations"])
+		reg_result = self.registerSFP(sfp_data["id"], sfp_data["sf"], sfp_data["sf_sff"], sfp_data["sfp"], sfp_data["sfp_destinations"], sff_configure)
 		if reg_result != 0:
-			return (-9, reg_result)
+			return (-10, reg_result)
 
 		return (0,)
 
 
-	def incomingServer(self):
+	def scServer(self):
 
 		while True:
 			incoming_data = self.interface_inc_access.recv(65535)
@@ -270,43 +269,25 @@ class SC:
 			for sff in self.sfp_routing[self.sfp_destinations[destination_ip]]:
 				self.interface_sc_access.sendto(outgoing_data, (self.sff_addresses[sff], self.__default_port))
 
-
-	def outgoingServer(self):
-
-		while True:
-			outgoing_data = self.interface_sc_access.recv(65535)
-
-			try:
-				outgoing_data = outgoing_data[:-len(outgoing_data) + 14] + outgoing_data[38:]
-			except:
-				pass
-
-			self.interface_out_access.send(outgoing_data)
-
-
 	def startServers(self):
 
-		self.incoming_server = multiprocessing.Process(target=self.incomingServer)
-		self.incoming_server.start()
-
-		self.outgoing_server = multiprocessing.Process(target=self.outgoingServer)
-		self.outgoing_server.start()		
+		self.incoming_server = multiprocessing.Process(target=self.scServer)
+		self.incoming_server.start()	
 
 
 ###############################################################################################################
 
 ################################################# SERVER AREA #################################################
 
-if len(sys.argv) == 4:
-	default_net_inc_iface = sys.argv[1]
-	default_net_out_iface = sys.argv[2]
-	default_sc_acc_address = sys.argv[3]
+if len(sys.argv) == 3:
+	default_net_inc_address = sys.argv[1]
+	default_sc_acc_address = sys.argv[2]
 else:
-	print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: SC.py INCOMING_IFACE OUTGOING_IFACE IP_ADDRESS]")
+	print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: SC.py EXT_IP_ADDRESS INT_IP_ADDRESS]")
 	exit()
 
 default_http_acc_port = 8080
-service_classifier = SC(default_net_inc_iface, default_net_out_iface, default_sc_acc_address)
+service_classifier = SC(default_net_inc_address, default_sc_acc_address)
 
 @bottle.route('/status', method='GET')
 def statusSC():
@@ -322,7 +303,12 @@ def setupSFP():
 	except:
 		return bottle.HTTPResponse(status=400, body="ERROR: SFP YAML NOT PROVIDED!")
 
-	resp_code = service_classifier.setupSFP(sfp_yaml)
+	try:
+		sff_configure = eval(bottle.request.forms.get("sff_configure"))
+	except:
+		sff_configure = False
+
+	resp_code = service_classifier.setupSFP(sfp_yaml, sff_configure)
 	if resp_code[0] == -1:
 		return bottle.HTTPResponse(status=400, body="ERROR: INAVLID YAML STRUCTURE!")
 	elif resp_code[0] == -2:
@@ -338,8 +324,10 @@ def setupSFP():
 	elif resp_code[0] == -7:
 		return bottle.HTTPResponse(status=400, body="ERROR: NO SFP DESTINATIONS IN YAML!")
 	elif resp_code[0] == -8:
-		return bottle.HTTPResponse(status=400, body="ERROR: ERROR ON REGISTERING SFF (" + str(resp_code[1]) +  ")!")
+		return bottle.HTTPResponse(status=400, body="ERROR: INVALID SFF CONFIGURE DATA PROVIDED!")
 	elif resp_code[0] == -9:
+		return bottle.HTTPResponse(status=400, body="ERROR: ERROR ON REGISTERING SFF (" + str(resp_code[1]) +  ")!")
+	elif resp_code[0] == -10:
 		return bottle.HTTPResponse(status=400, body="ERROR: ERROR ON REGISTERING SFP (" + str(resp_code[1]) +  ")!")
 
 	return "SUCCESS: SFP SUCCESSFULLY REGISTERED!"

@@ -4,7 +4,6 @@ import re
 
 import NSH
 
-
 def isIP(potential_ip):
     return re.match("[0-9]+(?:\\.[0-9]+){3}", potential_ip.lower())
 
@@ -19,13 +18,22 @@ if not isIP(nf_acc_address):
     print("ERROR: INVALID IP PROVIDED!")
     exit()
 
+packet_control = {}
+
 nsh_processor = NSH.NSH()
 interface_access = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
 interface_access.bind((nf_acc_address, 12000))
 while True:
     pkt_data, sff_addr = interface_access.recvfrom(10240)
     
-    print("RECV DATA: ", pkt_data, len(pkt_data), "\n")
+    origin_id = int.from_bytes(pkt_data[58:62], "big")
+    message_id = int.from_bytes(pkt_data[-4:], "big")
+    if origin_id in packet_control:
+        if packet_control[origin_id] >= message_id:
+            continue
+    packet_control[origin_id] = message_id
+
+    print("PROCESSED DATA: ", pkt_data, len(pkt_data), "\n")
 
     nsh_processor.fromHeader(pkt_data[14:][:-len(pkt_data)+38])
     nsh_processor.service_si += 1

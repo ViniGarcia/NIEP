@@ -12,26 +12,33 @@ import NSH
 class SFF:
 
 	__default_port = 12000
-	interface_access = None
-	
+	int_interface_access = None
+	ext_interface_access = None
+
 	data_manager = None
 	entity_addresses = None
 	traffic_routes = None
 
 	nsh_processor = None
 
-	incoming_server = None
+	sff_server = None
 
 	packet_control = None
+	ft_checking = None
 
 
-	def __init__(self, interface_access_ip):
+	def __init__(self, int_interface_access_ip, ext_interface_access_id, ft_checking):
 		
-		self.interface_access = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
-		if interface_access_ip != None:
-			self.interface_access.bind((interface_access_ip, self.__default_port))
+		self.int_interface_access = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
+		if int_interface_access_ip != None:
+			self.int_interface_access.bind((int_interface_access_ip, self.__default_port))
 		else:
-			self.interface_access.bind((self.getIP(), self.__default_port))
+			self.int_interface_access.bind((self.getIP(), self.__default_port))
+
+		self.ext_interface_access = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(3))
+		self.ext_interface_access.bind((ext_interface_access_id, 0))
+
+		self.ft_checking = ft_checking
 
 		self.data_manager = multiprocessing.Manager()
 		self.entity_addresses = self.data_manager.dict()
@@ -43,10 +50,10 @@ class SFF:
 
 	def __del__(self):
 
-		if self.incoming_server != None:
-			self.incoming_server.terminate()
+		if self.sff_server != None:
+			self.sff_server.terminate()
 
-		self.interface_access.close()
+		self.int_interface_access.close()
 
 
 	def __isIP(self, potential_ip):
@@ -84,12 +91,12 @@ class SFF:
 		except:
 			return -2
 		try:
-			ip_address = str(ip_address)
+			if ip_address != None:
+				ip_address = str(ip_address)
+				if not self.__isIP(ip_address):
+					return -4
 		except:
 			return -3
-
-		if not self.__isIP(ip_address):
-			return -4
 
 		if not service_path in self.entity_addresses:
 			self.entity_addresses[service_path] = {}
@@ -147,11 +154,10 @@ class SFF:
 			#self.entity_addresses = {**self.entity_addresses}
 		return 0
 
-
-	def incomingServer(self):
+	def sffServer(self):
 
 		while True:
-			incoming_data = self.interface_access.recv(65535)
+			incoming_data = self.int_interface_access.recv(65535)
 
 			try:
 				self.nsh_processor.fromHeader(incoming_data[14:][:-len(incoming_data) + 38])
@@ -161,36 +167,58 @@ class SFF:
 			origin_id = int.from_bytes(incoming_data[58:62], "big")
 			message_id = int.from_bytes(incoming_data[-4:], "big")
 			if origin_id in self.packet_control:
-				if self.packet_control[origin_id][0] >= message_id and self.packet_control[origin_id][1] >= self.nsh_processor.service_si:
+				if self.packet_control[origin_id][0] > message_id:
 					continue
-			self.packet_control[origin_id] = (message_id, self.nsh_processor.service_si)
+				if self.packet_control[origin_id][0] == message_id and self.packet_control[origin_id][1] == self.nsh_processor.service_si:
+					if not self.packet_control[origin_id][2]:
+						continue
+					for index in range(3, len(self.packet_control[origin_id])):
+						if incoming_data == self.packet_control[origin_id][index][0]:
+							self.packet_control[origin_id] = self.packet_control[origin_id][:index] + [[self.packet_control[origin_id][index][0], self.packet_control[origin_id][index][1] + 1]] + self.packet_control[origin_id][index+1:]
+							break
+					if index == len(self.packet_control[origin_id]):
+						self.packet_control[origin_id] = self.packet_control[origin_id] + [[incoming_data, 1]]
+				else:
+					self.packet_control[origin_id] = [message_id, self.nsh_processor.service_si, True, [incoming_data, 1]]
+					index = -1
+			else:
+				self.packet_control[origin_id] = [message_id, self.nsh_processor.service_si, True, [incoming_data, 1]]
+				index = -1
+			
+			if self.packet_control[origin_id][index][1] == self.ft_checking:
+				self.packet_control[origin_id] =  self.packet_control[origin_id][:2] + [False] + self.packet_control[origin_id][3:]
 
-			target_entity = self.traffic_routes[self.nsh_processor.service_spi][self.nsh_processor.service_si]
-			for target_address in self.entity_addresses[self.nsh_processor.service_spi][target_entity]:
-				self.interface_access.sendto(incoming_data, (target_address, self.__default_port))
+			if not self.packet_control[origin_id][2]:
+				target_entity = self.traffic_routes[self.nsh_processor.service_spi][self.nsh_processor.service_si]
+				for target_address in self.entity_addresses[self.nsh_processor.service_spi][target_entity]:
+					if target_address != None:
+						self.int_interface_access.sendto(incoming_data, (target_address, self.__default_port))
+					else:
+						self.ext_interface_access.send(incoming_data[:-len(incoming_data) + 14] + incoming_data[38:])
 
 	def startServers(self):
 
-		self.incoming_server = multiprocessing.Process(target=self.incomingServer)
-		self.incoming_server.start()
+		self.sff_server = multiprocessing.Process(target=self.sffServer)
+		self.sff_server.start()
 
 ###############################################################################################################
 
 ################################################# SERVER AREA #################################################
 
-if len(sys.argv) == 1:
-	sf_forwarder = SFF()
-	default_sff_acc_ip = sf_forwarder.getIP()
-elif len(sys.argv) == 2:
+if len(sys.argv) == 3:
+	sf_forwarder = SFF(None, sys.argv[1], int(sys.argv[2]))
+	ft_checking = int(sys.argv[2])
+	default_sff_int_acc_ip = sf_forwarder.getIP()
+elif len(sys.argv) == 4:
 	if not re.match("[0-9]+(?:\\.[0-9]+){3}", sys.argv[1]):
 		print("ERROR: INVALID IP ADDRESS PROVIDED!")
 		exit()
-	sf_forwarder = SFF(sys.argv[1])
-	default_sff_acc_ip = sys.argv[1]
+	sf_forwarder = SFF(sys.argv[1], sys.argv[2], int(sys.argv[3]))
+	default_sff_int_acc_ip = sys.argv[1]
 else:
-	print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: SFF.py IP_ADDRESS]")
+	print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: SFF.py [INT_IP_ADDRESS] EXT_IFACE_ID FT_CHECKING]")
 	exit()
-	 
+
 default_http_acc_port = 8080
 
 
@@ -277,12 +305,12 @@ def stopSFF():
 
 def startHTTP():
 
-	global default_sff_acc_ip
+	global default_sff_int_acc_ip
 	global default_http_acc_port
 	global http_server_lock
 
 	http_server_lock.acquire()
-	http_server_process = multiprocessing.Process(target=bottle.run, kwargs=dict(host=default_sff_acc_ip, port=default_http_acc_port, debug=True))
+	http_server_process = multiprocessing.Process(target=bottle.run, kwargs=dict(host=default_sff_int_acc_ip, port=default_http_acc_port, debug=True))
 	http_server_process.start()
 
 	return http_server_process

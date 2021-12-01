@@ -6,7 +6,7 @@ import re
 def isIP(potential_ip):
     return re.match("[0-9]+(?:\\.[0-9]+){3}", potential_ip.lower())
 
-def configure(sfp_yaml, sc_ip):
+def configure(sfp_yaml, sc_ip, sff_configure):
 
     try:
         yaml_file = open(sfp_yaml, "r")
@@ -21,8 +21,8 @@ def configure(sfp_yaml, sc_ip):
         exit()
         
 
-    response = requests.post("http://" + sc_ip + ":8080/setup", {"sfp_yaml": yaml.dump(yaml_data)})
-    print("SC SETUP: ", response, "\n")
+    response = requests.post("http://" + sc_ip + ":8080/setup", {"sfp_yaml": yaml.dump(yaml_data), "sff_configure":sff_configure})
+    print("SC SETUP: ", response, response.content, "\n")
 
 
 def delete(sc_ip, sfp_id):
@@ -54,8 +54,10 @@ if not isIP(sc_acc_address):
 
 while True:
     action = input("Enter action: ")
-    if action == "configure":
-        configure(sfp_file_path, sc_acc_address)
+    if action == "configure1":
+        configure(sfp_file_path, sc_acc_address, True)
+    if action == "configure2":
+        configure(sfp_file_path, sc_acc_address, False)
     elif action == "start":
         start(sc_acc_address)
     elif action == "status":
