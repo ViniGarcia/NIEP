@@ -188,7 +188,6 @@ class SFF:
 			if self.packet_control[origin_id][index][1] == self.ft_checking:
 				self.packet_control[origin_id] =  self.packet_control[origin_id][:2] + [False] + self.packet_control[origin_id][3:]
 
-			if not self.packet_control[origin_id][2]:
 				target_entity = self.traffic_routes[self.nsh_processor.service_spi][self.nsh_processor.service_si]
 				for target_address in self.entity_addresses[self.nsh_processor.service_spi][target_entity]:
 					if target_address != None:

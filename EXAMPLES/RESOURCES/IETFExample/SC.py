@@ -3,6 +3,7 @@ import threading
 import requests
 import bottle
 import socket
+import math
 import yaml
 import sys
 import re
@@ -20,6 +21,9 @@ class SC:
 	interface_inc_access = None
 	interface_sc_access = None
 
+	neighbor_sc_addresses = None
+	neighbor_sc_majority = None
+
 	sff_addresses = None
 	sfp_sffs = None
 	sfp_routing = None
@@ -30,7 +34,7 @@ class SC:
 	incoming_server = None
 
 
-	def __init__(self, interface_net_inc_ip, interface_sc_access_ip):
+	def __init__(self, interface_net_inc_ip, interface_sc_access_ip, neighbor_sc_addresses):
 		
 		self.interface_inc_access = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
 		self.interface_inc_access.bind((interface_net_inc_ip, self.__default_port))
@@ -40,6 +44,9 @@ class SC:
 
 		self.__default_net_ip = interface_net_inc_ip
 		self.__default_sc_ip = interface_sc_access_ip
+
+		self.neighbor_sc_addresses = neighbor_sc_addresses
+		self.neighbor_sc_majority = math.ceil((len(neighbor_sc_addresses) + 1) / 2 + 0.1)
 
 		self.sff_addresses = {}
 		self.sfp_sffs = {}
@@ -250,18 +257,43 @@ class SC:
 
 	def scServer(self):
 
+		packet_control = {}
+		packet_higher = -1
 		while True:
-			incoming_data = self.interface_inc_access.recv(65535)
+			incoming_data, incoming_address = self.interface_inc_access.recvfrom(65535)
 
-			try:
-				destination_ip = incoming_data[30:][:-len(incoming_data) + 34]
-				destination_ip = str(destination_ip[0]) + "." + str(destination_ip[1]) + "." + str(destination_ip[2]) + "." + str(destination_ip[3])
-			except:
-				self.interface_out_access.send(incoming_data)
-				continue
+			origin_id = int.from_bytes(incoming_data[34:38], "big")
+			message_id = int.from_bytes(incoming_data[-4:], "big")
+			if origin_id in packet_control:
+				if message_id <= packet_higher:
+					continue
+				if not message_id in packet_control[origin_id]:
+					packet_control[origin_id][message_id] = [[incoming_data, 1]]
+					index = -1
+				else:
+					for index in range(len(packet_control[origin_id][message_id])):
+						if packet_control[origin_id][message_id][index][0] == incoming_data:
+							packet_control[origin_id][message_id][index][1] += 1
+							break
+					if index == len(packet_control[origin_id][message_id]):
+						packet_control[origin_id][message_id].append([incoming_data, 1])
+			else:
+				packet_control[origin_id] = {}
+				packet_control[origin_id][message_id] = [[incoming_data, 1]]
+				index = -1
+
+			if packet_control[origin_id][message_id][index][1] < self.neighbor_sc_majority:
+				if not incoming_address[0] in self.neighbor_sc_addresses:
+					for address in self.neighbor_sc_addresses:
+						self.interface_sc_access.sendto(incoming_data, (address, self.__default_port))
+			else:
+				packet_higher = message_id
+				packet_control[origin_id].pop(message_id)
+
+			destination_ip = incoming_data[30:][:-len(incoming_data) + 34]
+			destination_ip = str(destination_ip[0]) + "." + str(destination_ip[1]) + "." + str(destination_ip[2]) + "." + str(destination_ip[3])
 
 			if not destination_ip in self.sfp_destinations:
-				self.interface_out_access.send(incoming_data)
 				continue
 
 			new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[destination_ip], 0, bytearray(16))
@@ -279,15 +311,18 @@ class SC:
 
 ################################################# SERVER AREA #################################################
 
-if len(sys.argv) == 3:
+if len(sys.argv) >= 3:
 	default_net_inc_address = sys.argv[1]
 	default_sc_acc_address = sys.argv[2]
+	neighbor_sc_addresses = []
+	for index in range(3, len(sys.argv)):
+		neighbor_sc_addresses.append(sys.argv[index])
 else:
-	print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: SC.py EXT_IP_ADDRESS INT_IP_ADDRESS]")
+	print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: SC.py EXT_IP_ADDRESS INT_IP_ADDRESS NGH_SC_IP_1 .. NGH_SC_IP_N]")
 	exit()
 
 default_http_acc_port = 8080
-service_classifier = SC(default_net_inc_address, default_sc_acc_address)
+service_classifier = SC(default_net_inc_address, default_sc_acc_address, neighbor_sc_addresses)
 
 @bottle.route('/status', method='GET')
 def statusSC():
@@ -343,7 +378,12 @@ def deleteSFP():
 	except:
 		return bottle.HTTPResponse(status=400, body="ERROR: SFP ID NOT PROVIDED!")
 
-	resp_code = service_classifier.deleteSFP(sfp_id)
+	try:
+		sff_configure = eval(bottle.request.forms.get("sff_configure"))
+	except:
+		sff_configure = False
+
+	resp_code = service_classifier.deleteSFP(sfp_id, sff_configure)
 	if resp_code == -1:
 		return bottle.HTTPResponse(status=400, body="ERROR: INAVLID SFP ID PROVIDED!")
 	elif resp_code == -2:
