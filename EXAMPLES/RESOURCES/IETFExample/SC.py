@@ -1,25 +1,20 @@
 import multiprocessing
-import threading
 import requests
 import bottle
-import socket
 import math
 import yaml
 import sys
 import re
 
 import NSH
+import NM
 
 ################################################### SC AREA ###################################################
-
 class SC:
 
 	__default_port = 12000
 	__default_sc_ip = None
 	__default_net_ip = None
-
-	interface_inc_access = None
-	interface_sc_access = None
 
 	neighbor_sc_addresses = None
 	neighbor_sc_majority = None
@@ -31,16 +26,18 @@ class SC:
 
 	nsh_processor = None
 
-	incoming_server = None
+	data_manager = None
+	data_queue = None
+	data_mutex = None
+	data_semaphore = None
 
+	ft_manager = None
+	clients_manager = None
+
+	processing_server = None
+	
 
 	def __init__(self, interface_net_inc_ip, interface_sc_access_ip, neighbor_sc_addresses):
-		
-		self.interface_inc_access = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
-		self.interface_inc_access.bind((interface_net_inc_ip, self.__default_port))
-
-		self.interface_sc_access = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_IP)
-		self.interface_sc_access.bind((interface_sc_access_ip, self.__default_port))
 
 		self.__default_net_ip = interface_net_inc_ip
 		self.__default_sc_ip = interface_sc_access_ip
@@ -55,19 +52,35 @@ class SC:
 
 		self.nsh_processor = NSH.NSH()
 
+		self.data_manager = multiprocessing.Manager()
+		self.data_queue = self.data_manager.list()
+		self.data_mutex = self.data_manager.Lock()
+		self.data_semaphore = self.data_manager.Semaphore(0)
 
-	def __del__(self):
+		self.ft_manager = NM.NET_MANAGER(self.__default_sc_ip, self.data_queue, self.data_mutex, self.data_semaphore, False)
+		self.clients_manager = NM.NET_MANAGER(self.__default_net_ip, self.data_queue, self.data_mutex, self.data_semaphore, False)
 
-		if self.incoming_server != None:
-			self.incoming_server.terminate()
-
-		self.interface_inc_access.close()
-		self.interface_sc_access.close()
+		self.clients_manager.startServer()
+		self.ft_manager.startServer()
 
 
 	def __isIP(self, potential_ip):
 
 		return re.match("[0-9]+(?:\\.[0-9]+){3}", potential_ip.lower())
+
+
+	def shutdownSC(self):
+
+		if self.ft_manager != None:
+			self.ft_manager.shutdownManager()
+
+		if self.clients_manager != None:
+			self.clients_manager.shutdownManager()
+
+		self.data_mutex.acquire()
+
+		if self.processing_server != None:
+			self.processing_server.terminate()
 
 
 	def registerSFF(self, sff_id, sff_address):
@@ -164,12 +177,12 @@ class SC:
 		if sfp_id in self.sfp_routing:
 			self.deleteSFP(sfp_id, sff_configure)
 
-		if sff_configure:
-			for sf in sf_mapping[1]:
-				reg_result = requests.post("http://" + self.sff_addresses[sf] + ":8080/entity", {"service_path":sfp_id, "service_index":0, "ip_address":self.__default_sc_ip})		
-				if reg_result.status_code != 200:
-					return -19
+		for sf in sf_mapping[1]:
+			reg_result = requests.post("http://" + self.sff_addresses[sf] + ":8080/entity", {"service_path":sfp_id, "service_index":0, "ip_address":self.__default_sc_ip})		
+			if reg_result.status_code != 200:
+				return -19
 
+		if sff_configure:
 			none_si = max([si for si in list(sfp_routing.values()) + list(sfp_routing.keys()) if si != None]) + 1
 			for none_key in [key for (key, value) in sfp_routing.items() if value == None]:
 				sfp_routing[none_key] = none_si
@@ -255,56 +268,67 @@ class SC:
 		return (0,)
 
 
-	def scServer(self):
+	def processingServer(self):
 
-		packet_control = {}
-		packet_higher = -1
+		client_control = {}
 		while True:
-			incoming_data, incoming_address = self.interface_inc_access.recvfrom(65535)
+			self.data_semaphore.acquire()
+			self.data_mutex.acquire()
+			recv_data = self.data_queue.pop(0)
+			self.data_mutex.release()
 
-			origin_id = int.from_bytes(incoming_data[34:38], "big")
-			message_id = int.from_bytes(incoming_data[-4:], "big")
-			if origin_id in packet_control:
-				if message_id <= packet_higher:
-					continue
-				if not message_id in packet_control[origin_id]:
-					packet_control[origin_id][message_id] = [[incoming_data, 1]]
-					index = -1
-				else:
-					for index in range(len(packet_control[origin_id][message_id])):
-						if packet_control[origin_id][message_id][index][0] == incoming_data:
-							packet_control[origin_id][message_id][index][1] += 1
-							break
-					if index == len(packet_control[origin_id][message_id]):
-						packet_control[origin_id][message_id].append([incoming_data, 1])
-			else:
-				packet_control[origin_id] = {}
-				packet_control[origin_id][message_id] = [[incoming_data, 1]]
-				index = -1
-
-			if packet_control[origin_id][message_id][index][1] < self.neighbor_sc_majority:
-				if not incoming_address[0] in self.neighbor_sc_addresses:
-					for address in self.neighbor_sc_addresses:
-						self.interface_sc_access.sendto(incoming_data, (address, self.__default_port))
-			else:
-				packet_higher = message_id
-				packet_control[origin_id].pop(message_id)
-
-			destination_ip = incoming_data[30:][:-len(incoming_data) + 34]
-			destination_ip = str(destination_ip[0]) + "." + str(destination_ip[1]) + "." + str(destination_ip[2]) + "." + str(destination_ip[3])
-
-			if not destination_ip in self.sfp_destinations:
+			if recv_data[2] == -1:
+				if recv_data[3] in client_control:
+					del client_control[recv_data[3]]
+				continue
+			
+			if not recv_data[4] in self.sfp_destinations:
 				continue
 
-			new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[destination_ip], 0, bytearray(16))
-			outgoing_data = incoming_data[:-len(incoming_data) + 14] + new_nsh + incoming_data[14:]
-			for sff in self.sfp_routing[self.sfp_destinations[destination_ip]]:
-				self.interface_sc_access.sendto(outgoing_data, (self.sff_addresses[sff], self.__default_port))
+			if not recv_data[3] in client_control:
+				if self.neighbor_sc_majority > 1:
+					client_control[recv_data[3]] = {'control':-1}
+				else:
+					new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[recv_data[4]], 0, bytearray(16))
+					for sff in self.sfp_routing[self.sfp_destinations[recv_data[4]]]:
+						self.ft_manager.sendMessage(self.sff_addresses[sff], (len(recv_data[0]) + len(new_nsh)).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0]) + 14] + new_nsh + recv_data[0][14:])
+					continue
+
+			if client_control[recv_data[3]]['control'] >= recv_data[2]:
+				continue
+
+			if not recv_data[1] in self.neighbor_sc_addresses:
+				for neighbor_ip in self.neighbor_sc_addresses:
+					self.ft_manager.sendMessage(neighbor_ip, len(recv_data[0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0]) 
+
+			if not recv_data[2] in client_control[recv_data[3]]:
+				client_control[recv_data[3]][recv_data[2]] = [[recv_data[0], 1]]
+				continue
+
+			for index in range(len(client_control[recv_data[3]][recv_data[2]])):
+				if client_control[recv_data[3]][recv_data[2]][index][0] == recv_data[0]:
+					client_control[recv_data[3]][recv_data[2]][index][1] += 1
+					break
+
+			if index == len(client_control[recv_data[3]][recv_data[2]]):
+				client_control[recv_data[3]][recv_data[2]].append([recv_data[0], 1])
+				continue
+
+			if client_control[recv_data[3]][recv_data[2]][index][1] == self.neighbor_sc_majority:
+				new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[recv_data[4]], 0, bytearray(16))
+				for sff in self.sfp_routing[self.sfp_destinations[recv_data[4]]]:
+					self.ft_manager.sendMessage(self.sff_addresses[sff], (len(recv_data[0]) + len(new_nsh)).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0]) + 14] + new_nsh + recv_data[0][14:])
+				client_control[recv_data[3]]["control"] = recv_data[2]
+				del client_control[recv_data[3]][recv_data[2]]
+
 
 	def startServers(self):
 
-		self.incoming_server = multiprocessing.Process(target=self.scServer)
-		self.incoming_server.start()	
+		self.processing_server = multiprocessing.Process(target=self.processingServer)
+		self.processing_server.start()
+		
+		self.ft_manager.requestConnections(self.neighbor_sc_addresses)
+		self.ft_manager.requestConnections(list(set(self.sff_addresses.values())))
 
 
 ###############################################################################################################
@@ -408,7 +432,7 @@ def stopSC():
 	global service_classifier
 	global http_server_lock
 
-	del service_classifier
+	service_classifier.shutdownSC()
 	http_server_lock.release()
 
 	return "SUCCESS: SC SUCCESSFULLY OFF"
@@ -426,7 +450,7 @@ def stopEnvironment():
 		except:
 			continue
 
-	del service_classifier
+	service_classifier.shutdownSC()
 	http_server_lock.release()
 
 	return "SUCCESS: SC SUCCESSFULLY OFF"

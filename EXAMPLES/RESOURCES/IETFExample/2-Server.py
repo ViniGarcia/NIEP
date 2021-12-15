@@ -20,6 +20,7 @@ while True:
     # FILTER COMPONENT - BEGIN #
     origin_id = int.from_bytes(pkt_data[34:38], "big")
     message_id = int.from_bytes(pkt_data[-4:], "big")
+    print(message_id)
     if origin_id in packet_control:
         if packet_control[origin_id] >= message_id:
             continue

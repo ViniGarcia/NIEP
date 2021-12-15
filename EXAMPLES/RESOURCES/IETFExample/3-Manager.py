@@ -57,6 +57,13 @@ def status(sc_ip):
     print("SC STATUS: ", response, "\n")
 
 
+#Function that tries to turn off a given SC instance
+# - sc_ip: IPv4 address of the target SC instance
+def stop(sc_ip):
+
+    response = requests.post("http://" + sc_ip + ":8080/stop")
+    print("SC STATUS: ", response, "\n")
+
 #Main function that read arguments from the standard input and start the manager's server
 #Available operations in the server:
 # - configure_std: configure the SFP into the SC instance and related SFFs
@@ -91,3 +98,5 @@ while True:
         delete(sc_acc_address, sfp_id, True)
     elif action == "delete_solo":
         delete(sc_acc_address, sfp_id, False)
+    elif action == "stop":
+        stop(sc_acc_address)
