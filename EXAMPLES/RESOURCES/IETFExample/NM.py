@@ -68,6 +68,7 @@ class NET_MANAGER:
 			if len(client_metedata) == 6:
 				data_length = int.from_bytes(client_metedata[:2], "big")
 				data_mark = int.from_bytes(client_metedata[2:], "big")
+				print("r:", data_length, data_mark) #TODO: test
 
 				client_data = client_connection.recv(data_length)
 				if len(client_data) == data_length:
@@ -126,14 +127,36 @@ class NET_MANAGER:
 		if not server_ip in self.__connection_sockets:
 			return -1
 
-		self.__connection_sockets[server_ip].send(message_data)
-
+		try:
+			print("i:", server_ip)
+			self.__connection_sockets[server_ip].send(message_data)
+			print("s:", len(message_data)) #TODO: test
+		except:
+			if server_ip in self.__connection_processes:
+				self.__connection_processes[server_ip].terminate()
+				del self.__connection_processes[server_ip]
+			self.__connection_sockets[server_ip].close()
+			del self.__connection_sockets[server_ip]
 
 	def broadcastMessage(self, message_data):
 
 		sockets_list = self.__connection_sockets.keys()
+		
+		eliminate_server = []
 		for server_ip in sockets_list:
-			self.__connection_sockets[server_ip].send(message_data)
+			try:
+				self.__connection_sockets[server_ip].send(message_data)
+				print("s:", len(message_data)) #TODO: test
+			except:
+				eliminate_server.append(server_ip)
+
+		if len(eliminate_server) > 0:
+			for server_ip in eliminate_server:
+				if server_ip in self.__connection_processes:
+					self.__connection_processes[server_ip].terminate()
+					del self.__connection_processes[server_ip]
+				self.__connection_sockets[server_ip].close()
+				del self.__connection_sockets[server_ip]
 
 
 	def startServer(self):

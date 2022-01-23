@@ -1,4 +1,5 @@
 import socket
+import time
 import sys
 import re
 
@@ -6,6 +7,7 @@ import re
 message_identifier = 0
 #VARIABLE: TCP connections with the target service classifiers
 destination_conns = []
+
 
 '''
 FUNCTION: this function sends a dummy packet to the connections in "destination_conns". It inserts the message length (2 bytes)
@@ -32,8 +34,44 @@ def send_packet(packet_length):
     dummy_packet = len(dummy_packet).to_bytes(2, byteorder='big') + message_identifier.to_bytes(4, byteorder='big') + dummy_packet
     message_identifier += 1
 
+    eliminate = []
     for conn in destination_conns:
-        conn.sendall(dummy_packet)
+        try:
+            conn.sendall(dummy_packet)
+        except:
+            eliminate.append(conn)
+
+    if len(eliminate) > 0:
+        for conn in eliminate:
+            conn.close()
+            destination_conns.remove(conn)
+
+'''
+FUNCTION:
+'''
+def measure_packet(packet_length, n_packets):
+    global message_identifier
+
+    time_sheet = open("time_sheet_client.csv", "w+")
+
+    for pkt in range(n_packets):
+        send_time = time.time()
+        send_packet(packet_length)
+        time_sheet.write(str(message_identifier-1) + ";" + str(round(send_time, 3)) + "\n")
+        time.sleep(0.1)
+
+    time_sheet.close()
+
+
+'''
+FUNCTION:
+'''
+def exit_client():
+    global destination_conns
+
+    for conn in destination_conns:
+        conn.close()
+
 
 '''
 PROGRAM STANDARD ARGUMENTS: this program expects a sequence of IP addresses to which it will open TCP connections. So,
@@ -52,6 +90,7 @@ else:
     print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: Client.py SC_IP_1 SC_IP_2 .. SC_IP_N]")
     exit()
 
+
 '''
 PROGRAM MAIN LOOP: this program provides a very simple interface for the user. Through this interface, the user can
                    request the action "send" to trigger a packet sending for the destination connections.
@@ -65,9 +104,38 @@ while True:
                 packet_length = int(args[1])
             except:
                 print("ERROR: INVALID ARGUMENT PROVIDED (REQUIRE AN INTEGER NUMBER)\n")
-                continue    
+                continue
         else:
             print("ERROR: THIS ACTION REQUIRE ONE ARGUMENT (send packet_length)\n")
             continue
 
         send_packet(packet_length)
+
+    elif action.startswith("measure"):
+        args = action.split(" ")
+        if len(args) == 3:
+            try:
+                packet_length = int(args[1])
+            except:
+                print("ERROR: INVALID ARGUMENT PROVIDED (packet_length REQUIRES AN INTEGER NUMBER)\n")
+                continue
+
+            try:
+                n_packets = int(args[2])
+            except:
+                print("ERROR: INVALID ARGUMENT PROVIDED (n_packets REQUIRES AN INTEGER NUMBER)\n")
+                continue
+
+        else:
+            print("ERROR: THIS ACTION REQUIRE TWO ARGUMENTS (measure packet_length n_packets)\n")
+            continue
+
+        measure_packet(packet_length, n_packets)
+
+    elif action.startswith("exit"):
+
+        exit_client()
+        exit()
+
+    else:
+        print("ERROR: INAVLID OPERATION\n")

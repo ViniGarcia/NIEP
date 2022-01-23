@@ -211,7 +211,7 @@ class SFF:
 				if index == len(client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si]):
 					client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si].append([recv_data[0], 1])	
 
-			ft_parameter = math.ceil((len(self.entity_addresses[self.nsh_processor.service_spi][self.nsh_processor.service_si]) + 1) / 2 + 0.1)
+			ft_parameter = math.ceil(len(self.entity_addresses[self.nsh_processor.service_spi][self.nsh_processor.service_si]) / 2 + 0.1)
 
 			if client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][1] == ft_parameter:
 
