@@ -178,6 +178,8 @@ class SFF:
 			recv_data = self.data_queue.pop(0)
 			self.data_mutex.release()
 
+			#print("RECV MESSAGE N#" + str(recv_data[2]), "(" + str(len(recv_data[0])) + ")")
+
 			if recv_data[2] == -1:
 				if recv_data[3] in client_control:
 					del client_control[recv_data[3]]
@@ -204,23 +206,31 @@ class SFF:
 				client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si] = [[recv_data[0], 1]]
 				index = 0
 			else:
+				found_flag = False
 				for index in range(len(client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si])):
 					if recv_data[0] == client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][0]:
 						client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][1] += 1
+						found_flag = True
+						break
 
-				if index == len(client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si]):
-					client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si].append([recv_data[0], 1])	
+				if not found_flag:
+					client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si].append([recv_data[0], 1])
+					index += 1
 
 			ft_parameter = math.ceil(len(self.entity_addresses[self.nsh_processor.service_spi][self.nsh_processor.service_si]) / 2 + 0.1)
 
+
+			#print("PARAM MESSAGE N#" + str(recv_data[2]), "(" + str(index) + ")", "(" + str(client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][1]) + ")", "(" + str(len(client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si])) + "," + str(self.nsh_processor.service_si) + ")")
 			if client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][1] == ft_parameter:
 
 				target_entity = self.traffic_routes[self.nsh_processor.service_spi][self.nsh_processor.service_si]
 				if self.entity_addresses[self.nsh_processor.service_spi][target_entity][0] == None:
+					#print("SENT MESSAGE FINAL N#" + str(recv_data[2]), "(" + str(len(recv_data[0])) + ")")
 					self.data_ext_socket.send(recv_data[0][:-len(recv_data[0]) + 14] + recv_data[0][38:] + recv_data[2].to_bytes(4, byteorder='big'))
 					del client_control[recv_data[3]][recv_data[2]]
 					client_control[recv_data[3]]['control'] = recv_data[2]
 				else:
+					#print("SENT MESSAGE MID N#" + str(recv_data[2]), "(" + str(len(recv_data[0])) + ")")
 					for target_address in self.entity_addresses[self.nsh_processor.service_spi][target_entity]:
 						self.ft_manager.sendMessage(target_address, len(recv_data[0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0])
 					del client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si]

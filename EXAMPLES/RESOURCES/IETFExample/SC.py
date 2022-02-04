@@ -277,6 +277,8 @@ class SC:
 			recv_data = self.data_queue.pop(0)
 			self.data_mutex.release()
 
+			#print("RECV MESSAGE N#" + str(recv_data[2]), "(" + str(len(recv_data[0])) + ")", "(" + str(recv_data[1]) + ")")
+
 			if recv_data[2] == -1:
 				if recv_data[3] in client_control:
 					del client_control[recv_data[3]]
@@ -305,17 +307,20 @@ class SC:
 				client_control[recv_data[3]][recv_data[2]] = [[recv_data[0], 1]]
 				continue
 
+			found_flag = False
 			for index in range(len(client_control[recv_data[3]][recv_data[2]])):
 				if client_control[recv_data[3]][recv_data[2]][index][0] == recv_data[0]:
 					client_control[recv_data[3]][recv_data[2]][index][1] += 1
+					found_flag = True
 					break
 
-			if index == len(client_control[recv_data[3]][recv_data[2]]):
+			if not found_flag:
 				client_control[recv_data[3]][recv_data[2]].append([recv_data[0], 1])
 				continue
 
 			if client_control[recv_data[3]][recv_data[2]][index][1] == self.neighbor_sc_majority:
 				new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[recv_data[4]], 0, bytearray(16))
+				#print("SENT MESSAGE N#" + str(recv_data[2]), "(" + str(len(recv_data[0])+len(new_nsh)) + ")")
 				for sff in self.sfp_routing[self.sfp_destinations[recv_data[4]]]:
 					self.ft_manager.sendMessage(self.sff_addresses[sff], (len(recv_data[0]) + len(new_nsh)).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0]) + 14] + new_nsh + recv_data[0][14:])
 				client_control[recv_data[3]]["control"] = recv_data[2]

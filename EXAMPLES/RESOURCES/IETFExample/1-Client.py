@@ -55,10 +55,38 @@ def measure_packet(packet_length, n_packets):
     time_sheet = open("time_sheet_client.csv", "w+")
 
     for pkt in range(n_packets):
+        print(message_identifier)
         send_time = time.time()
         send_packet(packet_length)
         time_sheet.write(str(message_identifier-1) + ";" + str(round(send_time, 3)) + "\n")
         time.sleep(0.1)
+
+    time_sheet.close()
+
+
+'''
+FUNCTION:
+'''
+def fail_test():
+    global message_identifier
+
+    time_sheet = open("time_sheet_client.csv", "w+")
+
+    moments = [("ALL WORKING", 1), ("FAIL NF01", 10), ("FAIL SC", 10), ("FAIL SFF", 10), ("FAIL NF02", 10), ("FAIL NF01 AND NF02", 15), ("FAIL SC AND SFF", 15)]
+
+
+    for m in moments:
+        print(m[0])
+        time_sheet.write(m[0] + "\n")
+        time.sleep(m[1])
+        print("\nSTART")
+        for pkt in range(100):
+            send_time = time.time()
+            send_packet(1024)
+            time_sheet.write(str(message_identifier-1) + ";" + str(round(send_time, 3)) + "\n")
+            time.sleep(0.1)
+        print("\nEND")
+
 
     time_sheet.close()
 
@@ -131,6 +159,9 @@ while True:
             continue
 
         measure_packet(packet_length, n_packets)
+
+    elif action.startswith("fail"):
+        fail_test()
 
     elif action.startswith("exit"):
 

@@ -63,14 +63,16 @@ class NET_MANAGER:
 	def recvServer(self, client_connection, client_ip):
 		
 		while True:
-			client_metedata = client_connection.recv(6)
+			client_metadata = client_connection.recv(6)
 			
-			if len(client_metedata) == 6:
-				data_length = int.from_bytes(client_metedata[:2], "big")
-				data_mark = int.from_bytes(client_metedata[2:], "big")
-				print("r:", data_length, data_mark) #TODO: test
+			if len(client_metadata) == 6:
+				data_length = int.from_bytes(client_metadata[:2], "big")
+				data_mark = int.from_bytes(client_metadata[2:], "big")
 
-				client_data = client_connection.recv(data_length)
+				client_data = b''
+				while len(client_data) != data_length:
+					client_data += client_connection.recv(data_length - len(client_data))
+				
 				if len(client_data) == data_length:
 					if not self.__nsh_flag:
 						data_origin_ip = client_data[34:][:-len(client_data) + 38]
@@ -88,7 +90,7 @@ class NET_MANAGER:
 					self.__data_semaphore.release()
 					self.__data_mutex.release()
 
-			if len(client_metedata) == 0:
+			if len(client_metadata) == 0:
 				self.__data_mutex.acquire()
 				self.__data_queue.append(('', client_ip, -1, client_ip, ''))
 				self.__data_semaphore.release()
@@ -128,9 +130,7 @@ class NET_MANAGER:
 			return -1
 
 		try:
-			print("i:", server_ip)
 			self.__connection_sockets[server_ip].send(message_data)
-			print("s:", len(message_data)) #TODO: test
 		except:
 			if server_ip in self.__connection_processes:
 				self.__connection_processes[server_ip].terminate()
@@ -146,7 +146,6 @@ class NET_MANAGER:
 		for server_ip in sockets_list:
 			try:
 				self.__connection_sockets[server_ip].send(message_data)
-				print("s:", len(message_data)) #TODO: test
 			except:
 				eliminate_server.append(server_ip)
 

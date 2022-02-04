@@ -31,6 +31,15 @@ def configure(sfp_yaml, sc_ip, sff_configure):
     print("SC SETUP: ", response, response.content, "\n")
 
 
+def test(sfp_yaml):
+
+    configure(sfp_yaml, "192.168.123.1", True)
+    start("192.168.123.1")
+    for ip in ["192.168.123.2", "192.168.123.3"]:#, "192.168.123.4", "192.168.123.5"]:
+        configure(sfp_yaml, ip, False)
+        start(ip)
+
+
 #Function that triggers the remotion of a given SFP from a particular SC
 #  - sc_ip: IPv4 address of the target SC instance
 #  - sfp_id: id of the target SFP to remove
@@ -100,3 +109,5 @@ while True:
         delete(sc_acc_address, sfp_id, False)
     elif action == "stop":
         stop(sc_acc_address)
+    elif action == "test":
+        test(sfp_file_path)
