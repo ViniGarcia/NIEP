@@ -1,0 +1,9 @@
+parameter;value
+ga_rounds;1000
+ga_population;50
+ga_crossover;0.6
+ga_mutation;0.1
+t_rounds;30
+
+mean_time;9.905
+stdev_time2.096

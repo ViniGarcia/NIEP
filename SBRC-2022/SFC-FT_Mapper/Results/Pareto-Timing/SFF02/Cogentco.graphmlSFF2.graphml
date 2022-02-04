@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='utf-8'?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+<key id="d0" for="node" attr.name="SFC#1" attr.type="string"/>
+<graph edgedefault="undirected"><node id="SFF#0">
+  <data key="d0">0</data>
+</node>
+<node id="SFF#1">
+  <data key="d0">1</data>
+</node>
+<node id="SFF#2">
+  <data key="d0">2</data>
+</node>
+<node id="SFF#3">
+  <data key="d0">3</data>
+</node>
+<node id="SFF#4">
+  <data key="d0">4</data>
+</node>
+<node id="SFF#5">
+  <data key="d0">0;1;2</data>
+</node>
+<node id="SFF#6">
+  <data key="d0">3;4</data>
+</node>
+<node id="SFF#7">
+  <data key="d0">0;1</data>
+</node>
+</graph></graphml>
