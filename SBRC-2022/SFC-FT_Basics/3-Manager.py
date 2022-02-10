@@ -22,7 +22,8 @@ def configure(sfp_yaml, sc_ip, sff_configure):
     
     try:
         yaml_data = yaml.safe_load(yaml_file)
-    except:
+    except Exception as e:
+        print(e)
         print("ERROR: INVALID SFP YAML STRUCTURE PROVIDED!")
         exit()
         
@@ -35,7 +36,7 @@ def test(sfp_yaml):
 
     configure(sfp_yaml, "192.168.123.1", True)
     start("192.168.123.1")
-    for ip in ["192.168.123.2", "192.168.123.3"]:#, "192.168.123.4", "192.168.123.5"]:
+    for ip in ["192.168.123.2", "192.168.123.3", "192.168.123.4"]:#, "192.168.123.4", "192.168.123.5"]:
         configure(sfp_yaml, ip, False)
         start(ip)
 

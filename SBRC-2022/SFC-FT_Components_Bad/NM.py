@@ -138,6 +138,7 @@ class NET_MANAGER:
 			self.__connection_sockets[server_ip].close()
 			del self.__connection_sockets[server_ip]
 
+
 	def broadcastMessage(self, message_data):
 
 		sockets_list = self.__connection_sockets.keys()
@@ -156,6 +157,11 @@ class NET_MANAGER:
 					del self.__connection_processes[server_ip]
 				self.__connection_sockets[server_ip].close()
 				del self.__connection_sockets[server_ip]
+
+
+	def getConnections(self):
+
+		return list(self.__connection_sockets.keys())
 
 
 	def startServer(self):

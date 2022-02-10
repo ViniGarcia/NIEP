@@ -1,4 +1,5 @@
 import multiprocessing
+import math
 import sys
 import re
 
@@ -10,15 +11,10 @@ def isIP(potential_ip):
     return re.match("[0-9]+(?:\\.[0-9]+){3}", potential_ip.lower())
 
 #Main segment that receives the NF ip as argument and validates it
-if len(sys.argv) == 3:
+if len(sys.argv) == 2:
     nf_acc_address = sys.argv[1]
-    try:
-        ft_checking = int(sys.argv[2])
-    except:
-        print("ERROR: INVALID ft_checking PROVIDED!")
-        exit()
 else:
-    print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: NF.py IP_ADDRESS FT_CHECKING]")
+    print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: NF.py IP_ADDRESS]")
     exit()
 if not isIP(nf_acc_address):
     print("ERROR: INVALID IP PROVIDED!")
@@ -50,8 +46,6 @@ while True:
             del client_control[recv_data[3]]
             continue
 
-    #print("RECV MESSAGE N#" + str(recv_data[2]), "(" + str(len(recv_data[0])) + ")", str(recv_data[0][-1]))
-
     try:
         nsh_processor.fromHeader(recv_data[0][14:][:-len(recv_data[0]) + 38])
     except:
@@ -64,15 +58,17 @@ while True:
         continue
 
     if not recv_data[2] in client_control[recv_data[3]]:
-        if ft_checking > 1:
-            client_control[recv_data[3]][recv_data[2]] = [[recv_data[0], 1]]
+        if len(ft_manager.getConnections()) > 3:
+            client_control[recv_data[3]][recv_data[2]] = [1, [recv_data[0], 1]]
         else:
             nsh_processor.service_si += 1
             ft_manager.broadcastMessage(len(recv_data[0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0])+14] + nsh_processor.toHeader() + recv_data[0][38:])
+            client_control[recv_data[3]]['control'] = recv_data[2]
+
         continue
 
     found_flag = False
-    for index in range(len(client_control[recv_data[3]][recv_data[2]])):
+    for index in range(1, len(client_control[recv_data[3]][recv_data[2]])):
         if client_control[recv_data[3]][recv_data[2]][index][0] == recv_data[0]:
             client_control[recv_data[3]][recv_data[2]][index][1] += 1
             found_flag = True
@@ -80,11 +76,24 @@ while True:
 
     if not found_flag:
         client_control[recv_data[3]][recv_data[2]].append([recv_data[0], 1])
-        continue
+        index += 1
 
-    if client_control[recv_data[3]][recv_data[2]][index][1] == ft_checking:
-        #print("SENT MESSAGE N#" + str(recv_data[2]), "(" + str(len(recv_data[0])) + ")")
-        nsh_processor.service_si += 1
-        ft_manager.broadcastMessage(len(recv_data[0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0])+14] + nsh_processor.toHeader() + recv_data[0][38:])
-        client_control[recv_data[3]]['control'] = recv_data[2]
-        del client_control[recv_data[3]][recv_data[2]]
+    client_control[recv_data[3]][recv_data[2]][0] += 1
+
+    faults_parameter = math.floor((len(ft_manager.getConnections()) - 1) / 3)
+    waiting_parameter = 2 * faults_parameter + 1
+    majority_parameter = faults_parameter + 1
+
+    if client_control[recv_data[3]][recv_data[2]][0] >= waiting_parameter:
+
+        print(recv_data[2], client_control[recv_data[3]][recv_data[2]])
+
+        for index in range(1, len(client_control[recv_data[3]][recv_data[2]])):
+
+            print(client_control[recv_data[3]][recv_data[2]][index][1], majority_parameter, faults_parameter)
+            if client_control[recv_data[3]][recv_data[2]][index][1] >= majority_parameter:
+                nsh_processor.service_si += 1
+                ft_manager.broadcastMessage(len(client_control[recv_data[3]][recv_data[2]][index][0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + client_control[recv_data[3]][recv_data[2]][index][0][:-len(client_control[recv_data[3]][recv_data[2]][index][0])+14] + nsh_processor.toHeader() + client_control[recv_data[3]][recv_data[2]][index][0][38:])
+                client_control[recv_data[3]]['control'] = recv_data[2]
+                del client_control[recv_data[3]][recv_data[2]]
+                break

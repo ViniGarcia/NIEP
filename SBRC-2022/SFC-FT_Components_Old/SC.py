@@ -16,6 +16,9 @@ class SC:
 	__default_sc_ip = None
 	__default_net_ip = None
 
+	neighbor_sc_addresses = None
+	neighbor_sc_majority = None
+
 	sff_addresses = None
 	sfp_sffs = None
 	sfp_routing = None
@@ -34,10 +37,13 @@ class SC:
 	processing_server = None
 	
 
-	def __init__(self, interface_net_inc_ip, interface_sc_access_ip):
+	def __init__(self, interface_net_inc_ip, interface_sc_access_ip, neighbor_sc_addresses):
 
 		self.__default_net_ip = interface_net_inc_ip
 		self.__default_sc_ip = interface_sc_access_ip
+
+		self.neighbor_sc_addresses = neighbor_sc_addresses
+		self.neighbor_sc_majority = math.ceil((len(neighbor_sc_addresses) + 1) / 2 + 0.1)
 
 		self.sff_addresses = {}
 		self.sfp_sffs = {}
@@ -270,20 +276,55 @@ class SC:
 			self.data_mutex.acquire()
 			recv_data = self.data_queue.pop(0)
 			self.data_mutex.release()
-			
-			if not recv_data[3] in client_control:
-				client_control[recv_data[3]] = -1
 
+			#print("RECV MESSAGE N#" + str(recv_data[2]), "(" + str(len(recv_data[0])) + ")", "(" + str(recv_data[1]) + ")")
+
+			if recv_data[2] == -1:
+				if recv_data[3] in client_control:
+					del client_control[recv_data[3]]
+				continue
+			
 			if not recv_data[4] in self.sfp_destinations:
 				continue
 
-			if client_control[recv_data[3]] >= recv_data[2]:
+			if not recv_data[3] in client_control:
+				if self.neighbor_sc_majority > 1:
+					client_control[recv_data[3]] = {'control':-1}
+				else:
+					new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[recv_data[4]], 0, bytearray(16))
+					for sff in self.sfp_routing[self.sfp_destinations[recv_data[4]]]:
+						self.ft_manager.sendMessage(self.sff_addresses[sff], (len(recv_data[0]) + len(new_nsh)).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0]) + 14] + new_nsh + recv_data[0][14:])
+					continue
+
+			if client_control[recv_data[3]]['control'] >= recv_data[2]:
 				continue
 
-			new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[recv_data[4]], 0, bytearray(16))
-			for sff in self.sfp_routing[self.sfp_destinations[recv_data[4]]]:
-				self.ft_manager.sendMessage(self.sff_addresses[sff], (len(recv_data[0]) + len(new_nsh)).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0]) + 14] + new_nsh + recv_data[0][14:-1] + b'1')
-			client_control[recv_data[3]] = recv_data[2]
+			if not recv_data[1] in self.neighbor_sc_addresses:
+				for neighbor_ip in self.neighbor_sc_addresses:
+					self.ft_manager.sendMessage(neighbor_ip, len(recv_data[0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0]) 
+
+			if not recv_data[2] in client_control[recv_data[3]]:
+				client_control[recv_data[3]][recv_data[2]] = [[recv_data[0], 1]]
+				continue
+
+			found_flag = False
+			for index in range(len(client_control[recv_data[3]][recv_data[2]])):
+				if client_control[recv_data[3]][recv_data[2]][index][0] == recv_data[0]:
+					client_control[recv_data[3]][recv_data[2]][index][1] += 1
+					found_flag = True
+					break
+
+			if not found_flag:
+				client_control[recv_data[3]][recv_data[2]].append([recv_data[0], 1])
+				continue
+
+			if client_control[recv_data[3]][recv_data[2]][index][1] == self.neighbor_sc_majority:
+				new_nsh = self.nsh_processor.newHeader(0, 63, 1, 1, self.sfp_destinations[recv_data[4]], 0, bytearray(16))
+				#print("SENT MESSAGE N#" + str(recv_data[2]), "(" + str(len(recv_data[0])+len(new_nsh)) + ")")
+				for sff in self.sfp_routing[self.sfp_destinations[recv_data[4]]]:
+					self.ft_manager.sendMessage(self.sff_addresses[sff], (len(recv_data[0]) + len(new_nsh)).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0]) + 14] + new_nsh + recv_data[0][14:])
+				client_control[recv_data[3]]["control"] = recv_data[2]
+				del client_control[recv_data[3]][recv_data[2]]
 
 
 	def startServers(self):
@@ -291,6 +332,7 @@ class SC:
 		self.processing_server = multiprocessing.Process(target=self.processingServer)
 		self.processing_server.start()
 		
+		self.ft_manager.requestConnections(self.neighbor_sc_addresses)
 		self.ft_manager.requestConnections(list(set(self.sff_addresses.values())))
 
 
@@ -301,12 +343,15 @@ class SC:
 if len(sys.argv) >= 3:
 	default_net_inc_address = sys.argv[1]
 	default_sc_acc_address = sys.argv[2]
+	neighbor_sc_addresses = []
+	for index in range(3, len(sys.argv)):
+		neighbor_sc_addresses.append(sys.argv[index])
 else:
-	print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: SC.py EXT_IP_ADDRESS INT_IP_ADDRESS]")
+	print("ERROR: INVALID ARGUMENTS PROVIDED! [EXPECTED: SC.py EXT_IP_ADDRESS INT_IP_ADDRESS NGH_SC_IP_1 .. NGH_SC_IP_N]")
 	exit()
 
 default_http_acc_port = 8080
-service_classifier = SC(default_net_inc_address, default_sc_acc_address)
+service_classifier = SC(default_net_inc_address, default_sc_acc_address, neighbor_sc_addresses)
 
 @bottle.route('/status', method='GET')
 def statusSC():
