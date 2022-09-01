@@ -25,6 +25,7 @@ class SFF:
 
 	entity_addresses = None
 	traffic_routes = None
+	traffic_destinations = None
 
 	nsh_processor = None
 
@@ -48,6 +49,7 @@ class SFF:
 
 		self.entity_addresses = self.data_manager.dict()
 		self.traffic_routes = self.data_manager.dict()
+		self.traffic_destinations = self.data_manager.dict()
 
 		self.nsh_processor = NSH.NSH()
 
@@ -155,6 +157,23 @@ class SFF:
 		return 0
 
 
+	def registerDestinations(self, service_path, destination_ip):
+		
+		try:
+			service_path = int(service_path)
+		except:
+			return -1
+
+		if not self.__isIP(destination_ip):
+			return -2
+
+		if not service_path in self.traffic_destinations:
+			self.traffic_destinations[service_path] = []
+		if not destination_ip in self.traffic_destinations[service_path]:
+			self.traffic_destinations[service_path] = self.traffic_destinations[service_path] + [destination_ip]
+		return 0
+
+
 	def deleteSFP(self, service_path):
 
 		try:
@@ -166,6 +185,8 @@ class SFF:
 			self.traffic_routes.pop(service_path)
 		if service_path in self.entity_addresses:
 			self.entity_addresses.pop(service_path)
+		if service_path in self.traffic_destinations:
+			self.traffic_destinations.pop(service_path)
 		return 0
 
 
@@ -223,7 +244,6 @@ class SFF:
 
 			if client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][0] >= waiting_parameter:
 
-				print(recv_data[2], self.nsh_processor.service_si, client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si])
 				for index in range(1, len(client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si])):
 					if client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][1] >= majority_parameter:
 
@@ -235,6 +255,19 @@ class SFF:
 						else:
 							for target_address in self.entity_addresses[self.nsh_processor.service_spi][target_entity]:
 								self.ft_manager.sendMessage(target_address, len(client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][0])
+							
+							#Checking for in-network computing
+							if target_entity in self.traffic_routes[self.nsh_processor.service_spi]:
+								if not self.traffic_routes[self.nsh_processor.service_spi][target_entity] in self.traffic_routes[self.nsh_processor.service_spi]:
+									if None in self.entity_addresses[self.nsh_processor.service_spi][self.traffic_routes[self.nsh_processor.service_spi][target_entity]]: 
+										for target_address in self.entity_addresses[self.nsh_processor.service_spi][target_entity]:
+											if target_address in self.traffic_destinations[self.nsh_processor.service_spi]:
+												del client_control[recv_data[3]][recv_data[2]]
+												client_control[recv_data[3]]['control'] = recv_data[2]
+												break
+										if not recv_data[2] in client_control[recv_data[3]]:
+											break
+
 							del client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si]
 							client_control[recv_data[3]][recv_data[2]]['control'] = self.nsh_processor.service_si
 						break
@@ -312,6 +345,26 @@ def registerRoute():
 		return bottle.HTTPResponse(status=400, body="ERROR: NEXT DESTINATION IS NOT REGISTERED!")
 
 	return "SUCCESS: ROUTE SUCCESSFULLY REGISTERED!"
+
+
+@bottle.route('/destination', method='POST')
+def registerDestination():
+
+	global sf_forwarder
+
+	try:
+		service_path = bottle.request.forms.get("service_path")
+		destination_ip = bottle.request.forms.get("destination_ip")
+	except:
+		return bottle.HTTPResponse(status=400, body="ERROR: INCOMPLETE FORM PROVIDED!")
+
+	resp_code = sf_forwarder.registerDestinations(service_path, destination_ip)
+	if resp_code == -1:
+		return bottle.HTTPResponse(status=400, body="ERROR: INAVLID SERVICE PATH PROVIDED!")
+	elif resp_code == -2:
+		return bottle.HTTPResponse(status=400, body="ERROR: INVALID DESTINATION IP PROVIDED!")
+
+	return "SUCCESS: DESTINATION SUCCESSFULLY REGISTERED!"
 
 
 @bottle.route('/delete', method='POST')

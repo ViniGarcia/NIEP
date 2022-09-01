@@ -86,11 +86,11 @@ while True:
 
     if client_control[recv_data[3]][recv_data[2]][0] >= waiting_parameter:
 
-        print(recv_data[2], client_control[recv_data[3]][recv_data[2]])
+        #print(recv_data[2], client_control[recv_data[3]][recv_data[2]])
 
         for index in range(1, len(client_control[recv_data[3]][recv_data[2]])):
 
-            print(client_control[recv_data[3]][recv_data[2]][index][1], majority_parameter, faults_parameter)
+            #print(client_control[recv_data[3]][recv_data[2]][index][1], majority_parameter, faults_parameter)
             if client_control[recv_data[3]][recv_data[2]][index][1] >= majority_parameter:
                 nsh_processor.service_si += 1
                 ft_manager.broadcastMessage(len(client_control[recv_data[3]][recv_data[2]][index][0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + client_control[recv_data[3]][recv_data[2]][index][0][:-len(client_control[recv_data[3]][recv_data[2]][index][0])+14] + nsh_processor.toHeader() + client_control[recv_data[3]][recv_data[2]][index][0][38:])

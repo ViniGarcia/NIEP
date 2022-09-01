@@ -75,12 +75,12 @@ class NET_MANAGER:
 				
 				if len(client_data) == data_length:
 					if not self.__nsh_flag:
-						data_origin_ip = client_data[34:][:-len(client_data) + 38]
+						data_origin_ip = client_data[26:][:-len(client_data) + 30]
 						data_origin_ip = str(data_origin_ip[0]) + "." + str(data_origin_ip[1]) + "." + str(data_origin_ip[2]) + "." + str(data_origin_ip[3])
 						data_destination_ip = client_data[30:][:-len(client_data) + 34]
 						data_destination_ip = str(data_destination_ip[0]) + "." + str(data_destination_ip[1]) + "." + str(data_destination_ip[2]) + "." + str(data_destination_ip[3])
 					else:
-						data_origin_ip = client_data[58:][:-len(client_data) + 62]
+						data_origin_ip = client_data[50:][:-len(client_data) + 54]
 						data_origin_ip = str(data_origin_ip[0]) + "." + str(data_origin_ip[1]) + "." + str(data_origin_ip[2]) + "." + str(data_origin_ip[3])
 						data_destination_ip = client_data[54:][:-len(client_data) + 58]
 						data_destination_ip = str(data_destination_ip[0]) + "." + str(data_destination_ip[1]) + "." + str(data_destination_ip[2]) + "." + str(data_destination_ip[3])

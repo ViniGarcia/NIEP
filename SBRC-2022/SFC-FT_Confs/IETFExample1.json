@@ -83,6 +83,10 @@
 			"IN/OUT":"SERVER01",
 			"IN/OUTIFACE":"00:00:00:00:02:07",
 			"OUT/IN":"SWITCH02"
+		},
+		{
+			"IN/OUT":"SWITCH01",
+			"OUT/IN":"SWITCH02"
 		}
 	]
 }

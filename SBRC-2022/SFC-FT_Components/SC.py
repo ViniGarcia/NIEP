@@ -219,6 +219,11 @@ class SC:
 								if reg_result.status_code != 200:
 									return -20
 
+			for sff in self.sff_addresses:
+				for destination in sfp_destinations:
+					reg_result = requests.post("http://" + self.sff_addresses[sff] + ":8080/destination", {"service_path":sfp_id, "destination_ip":destination})
+					if reg_result.status_code != 200:
+						return -21
 
 		self.sfp_sffs[sfp_id] = list(set(sum(sf_mapping.values(), [])))
 		self.sfp_routing[sfp_id] = sf_mapping[list(sfp_routing.keys())[0]]
