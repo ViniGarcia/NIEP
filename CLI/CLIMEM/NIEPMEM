@@ -1,43 +1,3 @@
-xtem SC01
-xterm SC01
-xterm SFF01
-xterm NF01-1
-xterm SERVER01
-exit
-xterm CLIENT01
-xterm SERVER01
-xterm NF01-1
-xterm NF02-1
-xterm SC01
-xterm SFF01
-xterm SC1
-xterm SC01
-xterm NF02-1
-exit
-xterm SC01
-xterm SFF01
-xterm NF01-1
-xterm NF02-1
-xterm CLIENT01
-xterm SERVER01
-xterm SC01
-xterm NF02
-xterm NF02-1
-xterm SFF01
-xterm SC01
-exit
-xterm SC01
-xterm SFF01
-xterm NF01-1
-xterm NF02-1
-xterm CLIENT01
-xterm SERVER
-xterm SERVER01
-xterm SFF01
-xterm SC01
-exit
-xterm SC01
-xterm SFF01
 xterm NF01-1
 xterm NF02-1
 xterm CLIENT
@@ -97,4 +57,44 @@ xterm SC01
 xterm SC04
 xterm SFF01
 xterm CLIENT01
+exit
+xterm SC01
+xterm SFF01
+xterm CLIENT01
+nodes
+xterm DNS
+xterm SC01
+xterm SFF01
+xterm DNS
+xterm CLIENT01
+xterm SFF01
+exit
+topodown
+exit
+xterm SC01
+xterm SFF01
+xterm CLIENT01
+xterm DNS
+xterm SC01
+xterm SFF01
+xterm NF01
+xterm DNS
+exit
+xterm SC01
+xterm SFF01
+xterm CLIENT01
+xtermDNS
+xterm DNS
+exit
+xterm SC01
+xterm SFF01
+xterm AUTH
+xterm DNS
+xterm CLIENT01
+xterm DNS
+xterm AUTH
+xterm SFF01
+xterm DNS
+xterm CLIENT01
+xterm AUTH
 exit
