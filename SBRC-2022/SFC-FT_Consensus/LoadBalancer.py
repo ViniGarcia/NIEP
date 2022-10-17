@@ -6,6 +6,20 @@ import re
 import NSH
 import NMC
 
+server_ips = [b'\xc0\xa8|\x02', b'\xc0\xa8|\x03']
+server_macs = [b'\x00\x00\x00\x00\x02\t', b'\x00\x00\x00\x00\x02\x10']
+round_robin = 0
+
+def selectDestination(recv_pckt):
+    global server_ips
+    global server_macs
+    global round_robin
+
+    new_pckt = server_macs[round_robin] + recv_pckt[6:54] + server_ips[round_robin] + recv_pckt[58:]
+    round_robin = (round_robin + 1) % len(server_ips)
+    
+    return new_pckt
+
 #Function that returns True if a given string represents and IPv4 without netmask, and return False otherwise
 def isIP(potential_ip):
     return re.match("[0-9]+(?:\\.[0-9]+){3}", potential_ip.lower())
@@ -61,8 +75,9 @@ while True:
         if len(ft_manager.getConnections()) > 3:
             client_control[recv_data[3]][recv_data[2]] = [1, [recv_data[0], 1]]
         else:
+            new_frame = selectDestination(recv_data[0])
             nsh_processor.service_si += 1
-            ft_manager.broadcastMessage(len(recv_data[0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + recv_data[0][:-len(recv_data[0])+14] + nsh_processor.toHeader() + recv_data[0][38:])
+            ft_manager.broadcastMessage(len(new_frame).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + new_frame[:-len(new_frame)+14] + nsh_processor.toHeader() + new_frame[38:])
             client_control[recv_data[3]]['control'] = recv_data[2]
 
         continue
@@ -86,14 +101,11 @@ while True:
 
     if client_control[recv_data[3]][recv_data[2]][0] >= waiting_parameter:
 
-        #print(recv_data[2], client_control[recv_data[3]][recv_data[2]])
-
         for index in range(1, len(client_control[recv_data[3]][recv_data[2]])):
-
-            #print(client_control[recv_data[3]][recv_data[2]][index][1], majority_parameter, faults_parameter)
             if client_control[recv_data[3]][recv_data[2]][index][1] >= majority_parameter:
+                new_frame = selectDestination(client_control[recv_data[3]][recv_data[2]][index][0])
                 nsh_processor.service_si += 1
-                ft_manager.broadcastMessage(len(client_control[recv_data[3]][recv_data[2]][index][0]).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + client_control[recv_data[3]][recv_data[2]][index][0][:-len(client_control[recv_data[3]][recv_data[2]][index][0])+14] + nsh_processor.toHeader() + client_control[recv_data[3]][recv_data[2]][index][0][38:])
+                ft_manager.broadcastMessage(len(new_frame).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + new_frame[:-len(new_frame)+14] + nsh_processor.toHeader() + new_frame[38:])
                 client_control[recv_data[3]]['control'] = recv_data[2]
                 del client_control[recv_data[3]][recv_data[2]]
                 break

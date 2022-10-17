@@ -1,16 +1,3 @@
-xterm SFF01
-xterm NF01-1
-xterm NF02-1
-xterm CLIENT01
-xterm SERVER01
-xterm SC01
-xterm CLIENT01
-xterm NF02-1
-exit
-xterm DNS
-exit
-nodes
-xterm DNS
 exit
 xterm DNS
 exit
@@ -96,5 +83,18 @@ xterm NF01-2
 xterm SERVER01
 xterm CLIENT01
 xterm SC01
+xterm SFF01
+exit
+xterm SC01
+xterm SFF01
+xterm LB01
+xterm LB02
+xterm LB03
+xterm LB04
+xterm SC01
+xterm CLIENT01
+xterm SERVER01
+xterm SERVER02
+xterm SERVER03
 xterm SFF01
 exit

@@ -31,7 +31,7 @@ class NET_MANAGER:
 
 	__nsh_flag = None
 
-	def __init__(self, default_net_ip, data_queue, data_mutex, data_semaphore, nsh_flag, consensus_elements_file = "/home/research/Desktop/NIEP/SBRC-2022/SFC-FT_Consensus/ConsensusTest.csv"):
+	def __init__(self, default_net_ip, data_queue, data_mutex, data_semaphore, nsh_flag, consensus_elements_file = "/home/research/Desktop/NIEP/SBRC-2022/SFC-FT_Consensus/ConsensusConf.csv"):
 
 		self.__default_net_ip = default_net_ip
 		self.__default_net_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -113,31 +113,30 @@ class NET_MANAGER:
 			data_key = (data_mark, data_origin, data_detination)
 
 			#PRE-PREPARE
+			self.__consensus_mutex.acquire()
 			if not data_key in self.__consensus_check:
 				if self.__consensus_elements[consensus_ip][0] == 0:
-					self.__consensus_mutex.acquire()
 					self.__consensus_check[data_key] = (2, [0, self.__consensus_id])
-					self.__consensus_mutex.release()
 					for element in self.__consensus_elements.keys():
 						self.__consensus_elements[element][1].send(consensus_msg)
 				else:
 					continue
 			#WEAK ACCEPT
 			else:
-				self.__consensus_mutex.acquire()
 				if not self.__consensus_elements[consensus_ip][0] in self.__consensus_check[data_key][1]:
 					self.__consensus_check[data_key] = (self.__consensus_check[data_key][0]+1, self.__consensus_check[data_key][1] + [self.__consensus_elements[consensus_ip][0]])
-				self.__consensus_mutex.release()
+			self.__consensus_mutex.release()
 
 			self.__consensus_mutex.acquire()
-			if self.__consensus_check[data_key][0] == len(self.__consensus_elements) + 1:
-				if data_key in self.__consensus_base:
-					self.__data_mutex.acquire()
-					self.__data_queue.append(self.__consensus_base[data_key])
-					self.__consensus_base.pop(data_key)
-					self.__consensus_check.pop(data_key)
-					self.__data_semaphore.release()
-					self.__data_mutex.release()
+			if data_key in self.__consensus_check:
+				if self.__consensus_check[data_key][0] == len(self.__consensus_elements) + 1:
+					if data_key in self.__consensus_base:
+						self.__data_mutex.acquire()
+						self.__data_queue.append(self.__consensus_base[data_key])
+						self.__consensus_base.pop(data_key)
+						self.__consensus_check.pop(data_key)
+						self.__data_semaphore.release()
+						self.__data_mutex.release()
 			self.__consensus_mutex.release()
 
 	def conConnectionServer(self):
@@ -161,6 +160,7 @@ class NET_MANAGER:
 				try:
 					consensus_socket.connect((ip, self.__consensus_port))
 				except:
+					print("WARNING: UNABLE TO CONNECT WITH " + ip + " TO ESTABLISH THE CONSENSUS CHAIN!")
 					consensus_socket.close()
 					continue
 				consensus_process = multiprocessing.Process(target = self.conRecvServer, kwargs = dict(consensus_connection=consensus_socket, consensus_ip=ip))
