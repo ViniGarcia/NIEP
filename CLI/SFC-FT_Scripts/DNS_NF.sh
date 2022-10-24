@@ -6,7 +6,7 @@ if [[ $curr_folder =~ (.+)"/CLI"(.*) ]];
 then
 	ifconfig $1 $2
 	ip route add default dev $1
-	cd ${BASH_REMATCH[1]}/SBRC-2022/SFC-FT_DNS/
+	cd ${BASH_REMATCH[1]}/DSN-2023/SFC-FT_DNS/
 	python3 DNS_NF.py $2
 else
 	python3 DNS_NF.py $2

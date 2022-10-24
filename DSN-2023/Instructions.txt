@@ -1,0 +1,63 @@
+PARTE 01: INICIALIZAR OS CONTROLADORES QUE SERÃO UTILIZADOS PELOS SWITCHES OVS
+	sudo ./pox.py openflow.of_01 --port=10001 --address=127.0.0.1 forwarding.l2_learning
+	sudo ./pox.py openflow.of_01 --port=10002 --address=127.0.0.1 forwarding.l2_learning
+
+PARTE 02: INICIALIZAR O NIEP (ESTEJA NA PASTA CLI), CONFIGURAR A TOPOLOGIA DESEJADA E LEVANTAR A MESMA
+	sudo python2 CLI.py
+	define ../DSN-2023/SFC-FT_Confs/DNS-NFT.json 			(Serviço de DNS, sem tolerância a falhas)
+	define ../DSN-2023/SFC-FT_Confs/DNS-FT1.json			(Serviço de DNS, tolera 1 falha em qualquer componente)
+	define ../DSN-2023/SFC-FT_Confs/DNSAuth-NFT.json 		(Serviço de DNS Sec., sem tolerância a falhas)
+	define ../DSN-2023/SFC-FT_Confs/DNSAuth-FT1.json		(Serviço de DNS Sec., tolera 1 falha em qualquer componente)
+	define ../DSN-2023/SFC-FT_Confs/LoadBalancer-NFT.json 	(Serviço de balanceameto de carga, sem tolerância a falhas)
+	define ../DSN-2023/SFC-FT_Confs/LoadBalancer-FT1.json	(Serviço de balanceamento de carga, tolera 1 falha em qualquer componente)
+	topoup
+	
+PARTE 03: ABRIR O TERMINAL MININET DO NIEP
+	mininet
+
+PARTE 04: PARA CADA ELEMENTO DA NOSSA TOPOLOGIA, VAMOS TER QUE CONFIGURAR SUAS ROTAS E INICIAR SEUS PROCESSOS
+	
+	PARTE 04.1: PARA CADA UM DOS N NÓS DE CLASSIFICADORES
+		xterm SC0#
+		source SFC-FT_Scripts/SC.sh SC0#-eth0 173.100.100.# 192.168.123.#
+
+	PARTE 04.2: PARA CADA UM DOS N NÓS DE ENCAMINHADORES
+		xterm SFF0#
+		source SFC-FT_Scripts/SFF.sh SFF0#-eth0 192.168.123.#
+
+	PARTE 04.3: PARA CADA UM DOS NÓS DE NF
+
+		PARTE 04.3.1: SE O SERVIÇO FOR DNS
+			xterm DNS0#
+			source SFC-FT_Scripts/DNS_NF.sh DNS0#-eth0 192.168.123.#
+
+		PARTE 04.3.1: SE O SERVIÇO FOR DNS SEC.
+			xterm AUTH0#
+			source SFC-FT_Scripts/Auth_NF.sh AUTH0#-eth0 192.168.123.# /home/research/Desktop/NIEP/DSN-2023/SFC-FT_DNS/Keys/server_private.pem
+
+			xterm DNS0#
+			source SFC-FT_Scripts/Auth_DNS_NF.sh /home/research/Desktop/NIEP/DSN-2023/SFC-FT_DNS/Keys/server_private.pem DNS0#-eth0 192.168.123.#
+
+		PARTE 04.3.1: SE O SERVIÇO FOR BALANCEAMENTO DE CARGA
+			xterm LB0#
+			source SFC-FT_Scripts/LB_NF.sh LB0#-eth0 192.168.123.# /home/research/Desktop/NIEP/DSN-2023/SFC-FT_LB/Consensus-(NFT|FT1) (Lembrar de atualizar a lista de IPs e MACs no código fonte -- LoadBalancer.py)
+
+	PARTE 04.4: ABRA UM NOVO TERMINAL DE QUALQUER UM DOS CLASSIFICADORES E CONFIGURE OS SCs E SFFs
+		xterm SC01
+		python3 3-Manager.py 192.168.123.1 ../SFC-FT_Confs/DNSSFP-NFT 1				(Serviço de DNS, sem tolerância a falhas)
+		python3 3-Manager.py 192.168.123.1 ../SFC-FT_Confs/DNSSFP-FT1 1				(Serviço de DNS, tolera 1 falha em qualquer componente)
+		python3 3-Manager.py 192.168.123.1 ../SFC-FT_Confs/DNSAuthSFP-NFT 1			(Serviço de DNS Sec., sem tolerância a falhas)
+		python3 3-Manager.py 192.168.123.1 ../SFC-FT_Confs/DNSAuthSFP-FT1 1			(Serviço de DNS Sec., tolera 1 falha em qualquer componente)
+		python3 3-Manager.py 192.168.123.1 ../SFC-FT_Confs/LoadBalancerSFP-NFT 1	(Serviço de balanceameto de carga, sem tolerância a falhas)
+		python3 3-Manager.py 192.168.123.1 ../SFC-FT_Confs/LoadBalancerSFP-FT1 1	(Serviço de balanceamento de carga, tolera 1 falha em qualquer componente)
+		test (Lembrar de atualizar a lista de IPs da função "test" no código fonte)
+
+PARTE 05: INICIAR OS SERVIDORES (SE O SERVIÇO FOR DE BALANCEAMENTO DE CARGA)
+	xterm SERVER0#
+	source SFC-FT_Scripts/LB_Server.sh SERVER0#-eth0 192.168.124.#
+
+PARTE 06: INICIAR OS CLIENTES (NOS CLIENTES, EXISTEM ALGUNS PARÂMETROS HARD-CODED)
+	xterm CLIENT0#
+	source SFC-FT_Scripts/Client_DNS.sh CLIENT0#-eth0 192.168.122.# # 173.100.100.# ... 173.100.100.#
+	source SFC-FT_Scripts/Client_Auth_DNS.sh /home/research/Desktop/NIEP/DSN-2023/SFC-FT_DNS/Keys/server_public.pem /home/research/Desktop/NIEP/DSN-2023/SFC-FT_DNS/Keys/client_private.pem CLIENT0#-eth0 192.168.122.# # 173.100.100.# ... 173.100.100.#
+	source SFC-FT_Scripts/Client_LB.sh CLIENT0#-eth0 192.168.122.# 173.100.100.# ... 173.100.100.#
