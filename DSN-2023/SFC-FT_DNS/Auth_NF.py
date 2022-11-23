@@ -106,13 +106,12 @@ while True:
 
     faults_parameter = math.floor((len(ft_manager.getConnections()) - 1) / 3)
     waiting_parameter = 2 * faults_parameter + 1
-    majority_parameter = faults_parameter + 1
 
     if client_control[recv_data[3]][recv_data[2]][0] >= waiting_parameter:
 
         for index in range(1, len(client_control[recv_data[3]][recv_data[2]])):
 
-            if client_control[recv_data[3]][recv_data[2]][index][1] >= majority_parameter:
+            if client_control[recv_data[3]][recv_data[2]][index][1] >= waiting_parameter:
 
 
                 signature = client_control[recv_data[3]][recv_data[2]][0][66:][-256:]

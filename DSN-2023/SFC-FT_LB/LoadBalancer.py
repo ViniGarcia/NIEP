@@ -7,7 +7,7 @@ import NSH
 import NMC
 
 server_ips = [b'\xc0\xa8|\x01', b'\xc0\xa8|\x02']
-server_macs = [b'\x00\x00\x00\x00\x02\x06', b'\x00\x00\x00\x00\x02\x07']
+server_macs = [b'\x00\x00\x00\x00\x02\x18', b'\x00\x00\x00\x00\x02\x19'] #BE AWARE OF THE MAC PROBLEM
 round_robin = 0
 
 def selectDestination(recv_pckt):
@@ -98,12 +98,11 @@ while True:
 
     faults_parameter = math.floor((len(ft_manager.getConnections()) - 1) / 3)
     waiting_parameter = 2 * faults_parameter + 1
-    majority_parameter = faults_parameter + 1
 
     if client_control[recv_data[3]][recv_data[2]][0] >= waiting_parameter:
 
         for index in range(1, len(client_control[recv_data[3]][recv_data[2]])):
-            if client_control[recv_data[3]][recv_data[2]][index][1] >= majority_parameter:
+            if client_control[recv_data[3]][recv_data[2]][index][1] >= waiting_parameter:
                 new_frame = selectDestination(client_control[recv_data[3]][recv_data[2]][index][0])
                 nsh_processor.service_si += 1
                 ft_manager.broadcastMessage(len(new_frame).to_bytes(2, byteorder='big') + recv_data[2].to_bytes(4, byteorder='big') + new_frame[:-len(new_frame)+14] + nsh_processor.toHeader() + new_frame[38:])

@@ -139,7 +139,7 @@ while True:
             print("ERROR: THIS ACTION REQUIRE ONE ARGUMENT (send packet_length)\n")
             continue
 
-        send_packet(packet_length, '00:00:00:00:02:07', "192.168.124.1")
+        send_packet(packet_length, '00:00:00:00:02:18', "192.168.124.1")
 
     elif action.startswith("measure"):
         args = action.split(" ")

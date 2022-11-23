@@ -28,10 +28,11 @@ class NET_MANAGER:
 	__consensus_check = None
 	__consensus_mutex = None
 	__consensus_semaphore = None
+	__consensus_instance = None
 
 	__nsh_flag = None
 
-	def __init__(self, default_net_ip, data_queue, data_mutex, data_semaphore, nsh_flag, consensus_elements_file = "/home/research/Desktop/NIEP/SBRC-2022/SFC-FT_Consensus/ConsensusConf.csv"):
+	def __init__(self, default_net_ip, data_queue, data_mutex, data_semaphore, nsh_flag, consensus_elements_file):
 
 		self.__default_net_ip = default_net_ip
 		self.__default_net_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -77,6 +78,7 @@ class NET_MANAGER:
 		self.__consensus_base = self.__connection_manager.dict()
 		self.__consensus_check = self.__connection_manager.dict()
 		self.__consensus_mutex = self.__connection_manager.Lock()
+		self.__consensus_instance = self.__connection_manager.Lock()
 
 		self.__nsh_flag = nsh_flag
 
@@ -105,25 +107,37 @@ class NET_MANAGER:
 	def conRecvServer(self, consensus_connection, consensus_ip):
 
 		while True:
-			consensus_msg = consensus_connection.recv(10)
+			consensus_msg = consensus_connection.recv(16)
 			
 			data_mark = int.from_bytes(consensus_msg[:2], "big")
 			data_origin = str(int(consensus_msg[2])) + "." + str(int(consensus_msg[3])) + "." + str(int(consensus_msg[4])) + "." + str(int(consensus_msg[5]))
 			data_detination = str(int(consensus_msg[6])) + "." + str(int(consensus_msg[7])) + "." + str(int(consensus_msg[8])) + "." + str(int(consensus_msg[9]))
-			data_key = (data_mark, data_origin, data_detination)
+			client_ip = str(int(consensus_msg[10])) + "." + str(int(consensus_msg[11])) + "." + str(int(consensus_msg[12])) + "." + str(int(consensus_msg[13]))
+			data_key = (data_mark, data_origin, data_detination, client_ip)
+
+			message_size = int.from_bytes(consensus_msg[-2:], "big")
+			if message_size > 0:
+				client_data = consensus_connection.recv(message_size)
+				self.__consensus_mutex.acquire()
+				self.__consensus_base[data_key] = (client_data, client_ip, data_mark, data_origin, data_detination)
+				self.__consensus_mutex.release()
+
+			consensus_msg = consensus_msg[:-2] + struct.pack(">H", 0)
 
 			#PRE-PREPARE
 			self.__consensus_mutex.acquire()
-			if not data_key in self.__consensus_check:
-				if self.__consensus_elements[consensus_ip][0] == 0:
+			if self.__consensus_elements[consensus_ip][0] == 0:
+				if not data_key in self.__consensus_check:
 					self.__consensus_check[data_key] = (2, [0, self.__consensus_id])
-					for element in self.__consensus_elements.keys():
-						self.__consensus_elements[element][1].send(consensus_msg)
-				else:
-					continue
+				elif not 0 in self.__consensus_check[data_key][1]:
+					self.__consensus_check[data_key] = (self.__consensus_check[data_key][0]+2, self.__consensus_check[data_key][1] + [0, self.__consensus_id])					
+				for element in self.__consensus_elements.keys():
+					self.__consensus_elements[element][1].send(consensus_msg)
 			#WEAK ACCEPT
 			else:
-				if not self.__consensus_elements[consensus_ip][0] in self.__consensus_check[data_key][1]:
+				if not data_key in self.__consensus_check:
+					self.__consensus_check[data_key] = (1, [self.__consensus_elements[consensus_ip][0]])
+				elif not self.__consensus_elements[consensus_ip][0] in self.__consensus_check[data_key][1]:
 					self.__consensus_check[data_key] = (self.__consensus_check[data_key][0]+1, self.__consensus_check[data_key][1] + [self.__consensus_elements[consensus_ip][0]])
 			self.__consensus_mutex.release()
 
@@ -137,6 +151,8 @@ class NET_MANAGER:
 						self.__consensus_check.pop(data_key)
 						self.__data_semaphore.release()
 						self.__data_mutex.release()
+						if self.__consensus_id == 0:
+							self.__consensus_instance.release()
 			self.__consensus_mutex.release()
 
 	def conConnectionServer(self):
@@ -169,29 +185,34 @@ class NET_MANAGER:
 				self.__consensus_processes[ip] = consensus_process
 
 
-	def conPropose(self, data_mark, data_origin_ip, data_destination_ip):
+	def conPropose(self, data_mark, data_origin_ip, data_destination_ip, client_ip):
 		
 		proposal_message = struct.pack(">H", data_mark)
 		for address_fragment in data_origin_ip.split("."):
 			proposal_message += int(address_fragment).to_bytes(1, "big")
 		for address_fragment in data_destination_ip.split("."):
 			proposal_message += int(address_fragment).to_bytes(1, "big")
+		for address_fragment in client_ip.split("."):
+			proposal_message += int(address_fragment).to_bytes(1, "big")
+		proposal_message += struct.pack(">H", len(self.__consensus_base[(data_mark, data_origin_ip, data_destination_ip, client_ip)][0]))
+		proposal_message += self.__consensus_base[(data_mark, data_origin_ip, data_destination_ip, client_ip)][0]
 
 		self.__consensus_mutex.acquire()
-		self.__consensus_check[(data_mark, data_origin_ip, data_destination_ip)] = (1, [self.__consensus_id])
+		self.__consensus_check[(data_mark, data_origin_ip, data_destination_ip, client_ip)] = (1, [self.__consensus_id])
 		self.__consensus_mutex.release()
 
 		if len(self.__consensus_elements) > 0:
 			for element in self.__consensus_elements.keys():
 				self.__consensus_elements[element][1].send(proposal_message)
 		else:
-			data_key = (data_mark, data_origin_ip, data_destination_ip)
+			data_key = (data_mark, data_origin_ip, data_destination_ip, client_ip)
 			self.__data_mutex.acquire()
 			self.__data_queue.append(self.__consensus_base[data_key])
 			self.__consensus_base.pop(data_key)
 			self.__consensus_check.pop(data_key)
 			self.__data_semaphore.release()
 			self.__data_mutex.release()
+			self.__consensus_instance.release()
 
 	def msgRecvServer(self, client_connection, client_ip):
 		
@@ -218,9 +239,13 @@ class NET_MANAGER:
 						data_destination_ip = client_data[54:][:-len(client_data) + 58]
 						data_destination_ip = str(data_destination_ip[0]) + "." + str(data_destination_ip[1]) + "." + str(data_destination_ip[2]) + "." + str(data_destination_ip[3])
 
-					self.__consensus_base[(data_mark, data_origin_ip, data_destination_ip)] = (client_data, client_ip, data_mark, data_origin_ip, data_destination_ip)
+					self.__consensus_mutex.acquire()
+					if not (data_mark, data_origin_ip, data_destination_ip, client_ip) in self.__consensus_base:
+						self.__consensus_base[(data_mark, data_origin_ip, data_destination_ip, client_ip)] = (client_data, client_ip, data_mark, data_origin_ip, data_destination_ip)
+					self.__consensus_mutex.release()
 					if self.__consensus_id == 0:
-						self.conPropose(data_mark, data_origin_ip, data_destination_ip)
+						self.__consensus_instance.acquire() #This lock may cause problems when the consesus is not succesfully done
+						self.conPropose(data_mark, data_origin_ip, data_destination_ip, client_ip)
 					
 			if len(client_metadata) == 0:
 				self.__data_mutex.acquire()

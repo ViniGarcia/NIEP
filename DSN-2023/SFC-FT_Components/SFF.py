@@ -240,12 +240,11 @@ class SFF:
 
 			faults_parameter = math.floor((len(self.entity_addresses[self.nsh_processor.service_spi][self.nsh_processor.service_si]) - 1) / 3)
 			waiting_parameter = 2 * faults_parameter + 1
-			majority_parameter = faults_parameter + 1
 
 			if client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][0] >= waiting_parameter:
 
 				for index in range(1, len(client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si])):
-					if client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][1] >= majority_parameter:
+					if client_control[recv_data[3]][recv_data[2]][self.nsh_processor.service_si][index][1] >= waiting_parameter:
 
 						target_entity = self.traffic_routes[self.nsh_processor.service_spi][self.nsh_processor.service_si]
 						if self.entity_addresses[self.nsh_processor.service_spi][target_entity][0] == None:
