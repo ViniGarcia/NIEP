@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import flask
 import signal
@@ -6,6 +7,7 @@ import psutil
 import shutil
 import zipfile
 import os.path
+import ipaddress
 import subprocess
 
 NIEPPROCESS = None
@@ -103,4 +105,14 @@ def kill():
 #########################################################################################################################################
 	
 if __name__ == '__main__':
-	APP.run(debug=True)
+
+	if len(sys.argv) == 1:
+		APP.run(debug=True)
+	else:
+		try:
+			ipaddress.ip_address(unicode(sys.argv[1]))
+		except Exception as e:
+			print(e)
+			print("INVALID IPV4 ADDRESS PROVIDED!")
+			exit(1)
+    	APP.run(debug=True, host=sys.argv[1])
