@@ -294,7 +294,7 @@ class SFC:
                             CONF.append({'ID':self.IP['LINK'], 'MAC':CONNECTION['ILL_MAC'], 'LINK_MAC':self.IP['LINK_MAC']})
                     else:
                         if CONNECTION['OLL'] == VNF['ID']:
-                            OP = filter(lambda OP : OP['ID'] == CONNECTION['ILL'], self.OPS)
+                            OP = list(filter(lambda OP : OP['ID'] == CONNECTION['ILL'], self.OPS))
                             CONF.append({'ID':OP[0]['LINK'], 'MAC':CONNECTION['OLL_MAC'], 'LINK_MAC':OP[0]['LINK_MAC']})
             self.SFC_VNFS_CONF.append(CONF)
 
