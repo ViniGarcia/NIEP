@@ -2,7 +2,7 @@ from Parser import *
 from subprocess import check_output
 from subprocess import call, Popen
 from subprocess import STDOUT
-from os import devnull
+from os import devnull, getenv
 from time import sleep
 from signal import signal, SIGINT, SIG_IGN
 from mininet.net import Mininet
@@ -20,6 +20,14 @@ FNULL = open(devnull, 'w')
 def pre_exec():
     signal(SIGINT, SIG_IGN)
 
+
+def check_output_text(cmd):
+    data = check_output(cmd)
+    if isinstance(data, bytes):
+        return data.decode("utf-8", "ignore")
+    return data
+
+
 class Executer:
     CONFIGURATION = None
     HOSTS = {}
@@ -31,11 +39,14 @@ class Executer:
     POX = None 
     NET = None
     STATUS = None
+    SWITCH_CONTROLLER_ID = None
+    LOCAL_POX_ENABLED = True
 
     def __init__(self, CONFIGURATION):
 
         if CONFIGURATION.STATUS == 0:
             self.CONFIGURATION = CONFIGURATION
+            self.LOCAL_POX_ENABLED = getenv("NIEP_DISABLE_LOCAL_POX", "0").lower() not in ("1", "true", "yes")
         else:
             self.STATUS = -4
 
@@ -56,7 +67,7 @@ class Executer:
     def interfacesMaping(self):
         ifacesDictionary = {}
 
-        ifacesData = check_output(['brctl', 'show']).split('\n')
+        ifacesData = check_output_text(['brctl', 'show']).split('\n')
         for iface in ifacesData[1:-1]:
             iface = iface.split('\t')
             ifacesDictionary[iface[0]] = iface[5]
@@ -79,11 +90,18 @@ class Executer:
             self.SWITCHES[SWITCH.ID] = SWITCH
 
         if self.SWITCHES:
-            self.POX = Popen(['python', '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT, preexec_fn=pre_exec)
-            sleep(3)
-            UNICTRL = MNController('UNICTRL', '127.0.0.1', 6633)
-            UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
-            self.CONTROLLERS['UNICTRL'] = UNICTRL
+            if self.LOCAL_POX_ENABLED:
+                self.POX = Popen(['python', '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT, preexec_fn=pre_exec)
+                sleep(3)
+                UNICTRL = MNController('UNICTRL', '127.0.0.1', 6633)
+                UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
+                self.CONTROLLERS['UNICTRL'] = UNICTRL
+                self.SWITCH_CONTROLLER_ID = 'UNICTRL'
+            elif self.CONFIGURATION.MNCONTROLLER:
+                self.SWITCH_CONTROLLER_ID = self.CONFIGURATION.MNCONTROLLER[0].ID
+            else:
+                self.STATUS = -4
+                return -4
 
         for CONTROLLER in self.CONFIGURATION.MNCONTROLLER:
             CONTROLLER.ELEM = self.NET.addController(CONTROLLER.ID, controller=RemoteController, ip=CONTROLLER.IP, port=CONTROLLER.PORT)
@@ -286,7 +304,7 @@ class Executer:
     def topologyUp(self):
 
         checked = False
-        ifacesData = check_output(['brctl', 'show']).split('\n')
+        ifacesData = check_output_text(['brctl', 'show']).split('\n')
         for iface in ifacesData:
             if iface.startswith('vbrNIEP'):
                 checked = True
@@ -296,7 +314,7 @@ class Executer:
         else:
             checked = False
 
-        netData = check_output(['virsh', 'net-list']).split('\n')
+        netData = check_output_text(['virsh', 'net-list']).split('\n')
         for net in netData:
             if net.startswith(' vnNIEP'):
                 checked = True
@@ -333,8 +351,12 @@ class Executer:
         for OVS in self.OVSSWITCHES:
             self.OVSSWITCHES[OVS].ELEM.start([self.CONTROLLERS[self.OVSSWITCHES[OVS].CONTROLLER].ELEM])
 
+        if self.SWITCHES and self.SWITCH_CONTROLLER_ID not in self.CONTROLLERS:
+            self.STATUS = -4
+            return -4
+
         for SWITCH in self.SWITCHES:
-            self.SWITCHES[SWITCH].ELEM.start([self.CONTROLLERS['UNICTRL'].ELEM])
+            self.SWITCHES[SWITCH].ELEM.start([self.CONTROLLERS[self.SWITCH_CONTROLLER_ID].ELEM])
 
         self.STATUS = 0
         return 0
@@ -355,7 +377,7 @@ class Executer:
         for SWITCH in self.SWITCHES:
             self.SWITCHES[SWITCH].ELEM.stop()
 
-        if type(self.POX) == Popen:
+        if self.POX is not None:
             self.POX.terminate()
 
         call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL, stderr=STDOUT)
