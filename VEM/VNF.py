@@ -222,7 +222,7 @@ class VNF:
 
         if self.VNF_OPERATOR == None:
             management = self.managementVNF()
-            if isinstance(management, basestring):
+            if isinstance(management, str):
                 self.VNF_OPERATOR = ClickOnOSv(management)
             else:
                 return -2
@@ -254,7 +254,7 @@ class VNF:
 
         if self.VNF_OPERATOR == None:
             management = self.managementVNF()
-            if isinstance(management, basestring):
+            if isinstance(management, str):
                 self.VNF_OPERATOR = ClickOnOSv(management)
             else:
                 return -2

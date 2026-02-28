@@ -102,7 +102,7 @@ class PlatformParser:
             self.STATUS = -1
             return
 
-        if isinstance(self.JSON['ID'], basestring):
+        if isinstance(self.JSON['ID'], str):
             self.ID = self.JSON['ID']
         else:
             self.STATUS = -2
@@ -144,7 +144,7 @@ class PlatformParser:
 
     def checkMAC(self, MAC):
 
-        if isinstance(MAC, basestring) and len(MAC) == 17:
+        if isinstance(MAC, str) and len(MAC) == 17:
             for i in range(2, 16, 3):
                 if MAC[i] != ':':
                     return -1
@@ -205,7 +205,7 @@ class PlatformParser:
     def VMSCheck(self):
 
         for VMPATH in self.JSON['VMS']:
-            if isinstance(VMPATH, basestring) and isfile(VMPATH):
+            if isinstance(VMPATH, str) and isfile(VMPATH):
                 instance = VM(VMPATH, None, None)
                 if instance.VM_STATUS < 0:
                     self.STATUS = -3
@@ -230,7 +230,7 @@ class PlatformParser:
 
         PATHINSTANCE = {}
         for VNFPATH in self.JSON['VNFS']:
-            if isinstance(VNFPATH, basestring) and isfile(VNFPATH):
+            if isinstance(VNFPATH, str) and isfile(VNFPATH):
                 instance = VNF(VNFPATH, None)
                 if instance.VNF_STATUS < 0:
                     self.STATUS = -3
@@ -269,7 +269,7 @@ class PlatformParser:
         SFCVNFS = {}
         SFCDIC = {}
         for SFCPATH in self.JSON['SFCS']:
-            if isinstance(SFCPATH, basestring) and isfile(SFCPATH):
+            if isinstance(SFCPATH, str) and isfile(SFCPATH):
                 instance = SFC(SFCPATH)
                 if instance.SFC_STATUS < 0:
                     self.STATUS = -5

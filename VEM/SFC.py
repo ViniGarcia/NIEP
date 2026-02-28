@@ -69,7 +69,7 @@ class SFC:
 #             -1 = invalid MAC
     def __checkMAC(self, MAC):
 
-        if isinstance(MAC, basestring) and len(MAC) == 17:
+        if isinstance(MAC, str) and len(MAC) == 17:
             for i in range(2, 16, 3):
                 if MAC[i] != ':':
                     return -1
@@ -486,7 +486,7 @@ class SFC:
         addressVNF = []
         for INSTANCE in self.SFC_VNF_INSTANCES:
             resultCheck = INSTANCE.managementVNF()
-            if isinstance(resultCheck, basestring):
+            if isinstance(resultCheck, str):
                 addressVNF.append(INSTANCE.ID + ' -> ' + resultCheck)
             else:
                 return -2

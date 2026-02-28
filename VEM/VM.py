@@ -77,7 +77,7 @@ class VM:
 #             -1 = invalid MAC
     def __checkMAC(self, MAC):
 
-        if isinstance(MAC, basestring) and len(MAC) == 17:
+        if isinstance(MAC, str) and len(MAC) == 17:
             for i in range(2, 16, 3):
                 if MAC[i] != ':':
                     return -1
