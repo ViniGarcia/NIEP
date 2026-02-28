@@ -19,6 +19,13 @@ STDPATH = '/'.join(path.abspath(__file__).split('/')[:-1]) + '/'
 #VIRT_CONNECTION: used to manage the virtual machines creation and exclusion
 VIRT_CONNECTION = libvirt.open("qemu:///system")
 
+
+def check_output_text(cmd):
+    data = check_output(cmd)
+    if isinstance(data, bytes):
+        return data.decode("utf-8", "ignore")
+    return data
+
 #VM: class for generic VMs management.
 #Assumptions:
 #   - Linux-like Environment
@@ -212,14 +219,14 @@ class VM:
                 self.VM_EXIST = True
                 break
 
-        upVMs = check_output(['virsh', 'list']).split('\n')
+        upVMs = check_output_text(['virsh', 'list']).split('\n')
         for index in range(2, len(upVMs)-2):
             if [VM for VM in upVMs[index].replace(' ', ',').split(',') if VM != ''][1] == self.ID:
                 self.VM_UP = True
                 break
 
         identicalVM = False
-        allVMs = check_output(['virsh', 'list', '--all']).split('\n')
+        allVMs = check_output_text(['virsh', 'list', '--all']).split('\n')
         for index in range(2, len(allVMs)-2):
             if [VM for VM in allVMs[index].replace(' ', ',').split(',') if VM != ''][1] == self.ID:
                 identicalVM = True
@@ -427,7 +434,7 @@ class VM:
             return -2
 
         if not self.VM_UP:
-            ifacesData = check_output(['brctl', 'show']).split('\n')
+            ifacesData = check_output_text(['brctl', 'show']).split('\n')
             ifacesCreate = copy(self.INTERFACES)
             for iface in self.INTERFACES:
                 for iface2 in ifacesData:
@@ -506,7 +513,7 @@ class VM:
 
         if self.VM_UP:
             for attempt in range(0,3):
-                arpData = check_output(['arp', '-n']).split('\n')
+                arpData = check_output_text(['arp', '-n']).split('\n')
                 for index in range(1,len(arpData)-1):
                     iface = [data for data in arpData[index].replace(' ', ',').split(',') if data != '']
                     if iface[2] == self.MANAGEMENT_MAC:
