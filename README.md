@@ -1,73 +1,93 @@
 NIEP: NFV Infrastructure Emulation Platform
 ========================================================
 
-*Status: Beta -- Version: 1.1*
+*Status: Beta -- Version: 1.1 -- Python 3 port*
 
 ### What is NIEP?
 
-NIEP uses the Mininet[1] and Click-on-OSv[2] to deploy a complete emulated 
-infrastructure based on full virtualization NFV paradigm. It can be used to
-define single VNFs instantiation as well as large SFCs linked to mininet hosts 
-and SDN switches. The NIEP is especially indicating to test the behavior of
-NFV topologies and collect results similar to a real scenario.<br/> 
+NIEP uses Mininet[1], libvirt/KVM, and Click-on-OSv[2] to deploy an emulated NFV infrastructure. It can instantiate single VNFs and larger SFCs connected to Mininet hosts and SDN switches. NIEP is useful for testing NFV topologies and collecting results in a controlled environment similar to a real deployment.<br/>
 
 The NIEP provides several elements to create your topology:
 
-1. Mininet Hosts - based on process virtualization, it emulates a functional host in the topology.<br/>
-2. Mininet Common Switches - adapted from Mininet OvSwitch, it creates a virtual switch with a controller
-that simulates the packet forwarding of a common switch.<br/>
-3. Mininet OvS - Open vSwitch emulation with an external controller (NIEP natively provides POX in the repository,
-but others can be also used).<br/>
-4. Mininet Links - used to connect mininet elements with other mininet elements.<br/>
-5. TinyCore 12 VMs - generic minimalist linux distribution, natively acessible using SSH (Username: tc / Password: NIEPvm00).<br/>
-5. Click-on-OSv VNFs - platform to execute Click functions, it natively provides an EMS to control the VNF lifecvyle.<br/>
-6. CLick-on-OSv Links - created to connect Click-on-OSv elements with other Click-on-OSv elements and Click-on-OSv 
-elements with Mininet elements.<br/>
+1. Mininet Hosts - based on process virtualization, they emulate functional hosts in the topology.<br/>
+2. Mininet Common Switches - adapted from Mininet OvSwitch, they create virtual switches with a controller that simulates common switch forwarding.<br/>
+3. Mininet OvS - Open vSwitch emulation with an external controller. NIEP ships a Python 3 compatible POX tree in the repository, but other controllers can also be used.<br/>
+4. Mininet Links - used to connect Mininet elements with other Mininet elements.<br/>
+5. TinyCore 12 VMs - generic minimalist Linux distribution, accessible over SSH (username: tc / password: NIEPvm00).<br/>
+6. Click-on-OSv VNFs - platform to execute Click functions. It provides an EMS to control the VNF lifecycle.<br/>
+7. Click-on-OSv Links - created to connect Click-on-OSv elements with other Click-on-OSv elements and Click-on-OSv elements with Mininet elements.<br/>
 
-NIEP topologies are created using a simple JSON model (some examples are in the 'EXAMPLES' folder), there are three components to be described:
+NIEP topologies are created using a simple JSON model. The maintained runnable examples are in the `tutorial/examples/` directory. There are three components to describe:
 
-1. VNFs - describe Click-on-OSv VM ID and requisites (memory, cpu, management interface and other interfaces), this description can be used both by SFC component and topology component.<br/>
-2. SFCs - describe the relationship between VNFs to compose a service with a incoming data point (IP) and outgoing data points (OPs) and VNFs connections (in this case, all the predefined VNFs interfaces are ignored except the management interface).<br/>
-3. Topologies - describe the mininet elements and their relationship with VNFs and SFCs.<br/>
+1. VNFs - describe Click-on-OSv VM ID and requirements such as memory, CPU, management interface, and data interfaces. This description can be used by both SFC and topology components.<br/>
+2. SFCs - describe the relationship between VNFs to compose a service with an incoming point (IP), outgoing points (OPs), and VNF connections. In this case, all predefined VNF interfaces are ignored except the management interface.<br/>
+3. Topologies - describe Mininet elements and their relationship with VNFs and SFCs.<br/>
 
-A installer for NIEP dependencies is available in the 'INSTALLATION' folder 
-named as 'installer.sh'. Please, make sure that your CPU has support for virtualization
-technology and it is enabled. <br/>
+### Quick Start
 
-For the platform execution, in NIEP folder, execute 'python CLI/CLI.py' (use
-'help' command in the NIEP CLI to show the platform functionalities).
+The recommended development environment is the Vagrant VM. It provisions the same Python 3 dependency set used by the manual installer.
 
-You can see a brief tutorial about NIEP installation and usage [HERE](https://docs.google.com/presentation/d/e/2PACX-1vSuS-3_7BMIaioXhqmlGuGkvf36IZvKu8GRQnOle1gYHUOwGxcnAroJi5Y5dJQ4oGABe7uf5RN5GzBw/pub?start=false&loop=false&delayms=3000).
+```bash
+make vm-up
+make vm-cli
+```
 
-### How does it was created?
+Inside the NIEP prompt, load a tutorial example:
 
-The NIEP platform was developed using python 2.7 language and many other
-applications below:
+```text
+niep> define ../tutorial/examples/mininet-ping.json
+niep> topoup
+niep> mininet
+mininet> pingall
+```
+
+Manual installation is also available:
+
+```bash
+sudo ./INSTALLATION/installer.sh --repo "$PWD" --user "$USER"
+```
+
+The installer delegates to `INSTALLATION/provision-vm.sh`, which is also used by Vagrant. Make sure your CPU supports hardware virtualization and that it is enabled in the host firmware.
+
+Run NIEP from the `CLI/` directory:
+
+```bash
+cd CLI
+sudo python3 CLI.py
+```
+
+See the sequential tutorial in [`tutorial/README.md`](tutorial/README.md).
+
+### How was it created?
+
+The original NIEP platform was developed for Python 2.7. This branch ports the core emulator to Python 3 and uses the applications below:
 
 1. General programs<br/>
 1.1 Sudoers (apt-get install sudo)<br/>
 1.2 Bridge Utils (apt-get install bridge-utils)<br/>
 1.3 IP Route 2 (apt-get install iproute2)<br/>
 1.4 Net Tools (apt-get install net-tools)<br/>
-1.5 SSH Pass (apt-get install sshpass) <br/>
+1.5 SSH Pass (apt-get install sshpass)<br/>
 1.6 Git (apt-get install git)<br/>
-1.7 Git LFS (http://arfc.github.io/manual/guides/git-lfs)<br/>
+1.7 Git LFS (https://git-lfs.com/)<br/>
 2. Python<br/>
-2.1 Python 2.7.9 (apt-get install python2.7)<br/>
-2.2 Pip (apt-get install python-pip)<br/>
-2.3 Requests (pip install requests)<br/>
+2.1 Python 3 (apt-get install python3 python3-venv python3-pip)<br/>
+2.2 Python libvirt bindings (apt-get install python3-libvirt)<br/>
+2.3 Requests, Flask, and psutil (installed from INSTALLATION/requirements-py3-min.txt)<br/>
 3. Hypervisor<br/>
-3.1 Qemu (apt-get install qemu-kvm qemu-system)<br/>
-3.2 Libvirt 1.2.9 (apt-get install libvirt-bin)<br/>
+3.1 Qemu (apt-get install qemu-kvm qemu-system qemu-utils)<br/>
+3.2 Libvirt (apt-get install libvirt-daemon-system libvirt-clients)<br/>
 3.3 Virt Manager - Optional - (apt-get install virt-manager)<br/>
 4. Mininet<br/>
-4.1 Mininet 2.3.0d1 (https://github.com/mininet/mininet.git)<br/> 
+4.1 Mininet (apt-get install mininet)<br/>
+5. OpenFlow controller<br/>
+5.1 POX, vendored in OFCONTROLLERS/pox and compatible with Python 3 in this branch<br/>
 
 ### Next Steps
 
 1. Native support to COVEN [3] VNF platform<br/>
 2. Native support to HoLMES [4] EMS solution<br/>
-3. Stable distributed mode (NIEP agent)<br/> 
+3. Stable distributed mode (NIEP agent)<br/>
 4. Assisted creation for NIEP Topologies, SFCs and VNFs<br/>
 5. Topology structure viewer<br/>
 6. NIEP working as an API (NIEP Module)<br/>
@@ -107,4 +127,4 @@ V. Fulber-Garcia, T. Tavares, L. Marcuzzo, G. Venâncio, M. Franco, L. Bondan, A
 <br/>
 [4] https://github.com/ViniGarcia/HoLMES
 <br/>
-[5] V. F. Garcia et al., "PyCOO: Uma API em Python para Plataforma Click-On-Osv", 2017 Escola Regional de Redes de Computadores (ERRC), Santa Maria, 2017, pp. 119-126. 
+[5] V. F. Garcia et al., "PyCOO: Uma API em Python para Plataforma Click-On-Osv", 2017 Escola Regional de Redes de Computadores (ERRC), Santa Maria, 2017, pp. 119-126.

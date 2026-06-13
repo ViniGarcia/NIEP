@@ -15,7 +15,7 @@ Vagrant.configure("2") do |config|
   config.vm.provision "shell", inline: <<-SHELL
     set -euo pipefail
     cd /home/vagrant/NIEP
-    chmod +x INSTALLATION/provision-vm.sh INSTALLATION/setup-py3-dev.sh
-    sudo INSTALLATION/provision-vm.sh --repo /home/vagrant/NIEP --user vagrant
+    chmod +x INSTALLATION/installer.sh INSTALLATION/provision-vm.sh INSTALLATION/setup-py3-dev.sh
+    sudo INSTALLATION/installer.sh --repo /home/vagrant/NIEP --user vagrant
   SHELL
 end
