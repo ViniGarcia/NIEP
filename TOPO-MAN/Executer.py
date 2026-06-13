@@ -3,6 +3,7 @@ from subprocess import check_output
 from subprocess import call, Popen
 from subprocess import STDOUT
 from os import devnull, getenv
+from sys import executable
 from time import sleep
 from signal import signal, SIGINT, SIG_IGN
 from mininet.net import Mininet
@@ -91,7 +92,7 @@ class Executer:
 
         if self.SWITCHES:
             if self.LOCAL_POX_ENABLED:
-                self.POX = Popen(['python', '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT, preexec_fn=pre_exec)
+                self.POX = Popen([executable, '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT, preexec_fn=pre_exec)
                 sleep(3)
                 UNICTRL = MNController('UNICTRL', '127.0.0.1', 6633)
                 UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
@@ -316,9 +317,10 @@ class Executer:
 
         netData = check_output_text(['virsh', 'net-list']).split('\n')
         for net in netData:
-            if net.startswith(' vnNIEP'):
+            netColumns = net.split()
+            if netColumns and netColumns[0] == 'vnNIEP':
                 checked = True
-                if not net.split('               ')[1].startswith('active'):
+                if len(netColumns) < 2 or netColumns[1] != 'active':
                     call(['virsh', 'net-start', 'vnNIEP'], stdout=FNULL, stderr=STDOUT)
                 break
         if not checked:
