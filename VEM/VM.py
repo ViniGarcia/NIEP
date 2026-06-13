@@ -397,7 +397,7 @@ class VM:
             configurationXML.find('devices/interface/mac').attrib['address'] = self.MANAGEMENT_MAC
             configurationXML.find('devices/disk/source').attrib['file'] = path.abspath(STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.qcow2')
 
-            slotID = bytearray(b'a')
+            slotID = 0x0a
             for iface in self.INTERFACES:
                 interfaceTag = ElementTree.SubElement(configurationXML.find('devices'), 'interface')
                 interfaceTag.attrib['type'] = 'bridge'
@@ -411,9 +411,9 @@ class VM:
                 interfaceConfig.attrib['type'] = 'pci'
                 interfaceConfig.attrib['domain'] = '0x0000'
                 interfaceConfig.attrib['bus'] = '0x00'
-                interfaceConfig.attrib['slot'] = '0x0' + str(slotID)
+                interfaceConfig.attrib['slot'] = '0x%02x' % slotID
                 interfaceConfig.attrib['function'] = '0x0'
-                slotID[0] += 1
+                slotID += 1
 
             configurationXML.write(STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.xml')
             return 0

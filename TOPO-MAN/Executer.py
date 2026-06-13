@@ -328,16 +328,34 @@ class Executer:
 
         if self.CONFIGURATION.VMS:
             for VMINSTANCE in self.CONFIGURATION.VMS:
-                if VMINSTANCE.createVM() == -1:
-                    VMINSTANCE.applyVM()
-                VMINSTANCE.upVM()
+                createStatus = VMINSTANCE.createVM()
+                if createStatus == -1:
+                    applyStatus = VMINSTANCE.applyVM()
+                    if applyStatus not in (0, None):
+                        self.STATUS = applyStatus
+                        return applyStatus
+                upStatus = VMINSTANCE.upVM()
+                if upStatus is None:
+                    upStatus = VMINSTANCE.VM_STATUS
+                if upStatus != 0:
+                    self.STATUS = upStatus
+                    return upStatus
                 self.VMS[VMINSTANCE.ID] = VMINSTANCE
 
         if self.CONFIGURATION.VNFS:
             for VNFINSTANCE in self.CONFIGURATION.VNFS:
-                if VNFINSTANCE.createVNF() == -1:
-                    VNFINSTANCE.applyVNF()
-                VNFINSTANCE.upVNF()
+                createStatus = VNFINSTANCE.createVNF()
+                if createStatus == -1:
+                    applyStatus = VNFINSTANCE.applyVNF()
+                    if applyStatus not in (0, None):
+                        self.STATUS = applyStatus
+                        return applyStatus
+                upStatus = VNFINSTANCE.upVNF()
+                if upStatus is None:
+                    upStatus = VNFINSTANCE.VNF_STATUS
+                if upStatus != 0:
+                    self.STATUS = upStatus
+                    return upStatus
                 self.VNFS[VNFINSTANCE.ID] = VNFINSTANCE
 
         if self.CONFIGURATION.SFCS:

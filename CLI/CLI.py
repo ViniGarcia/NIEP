@@ -145,6 +145,9 @@ class NIEPCLI(cmd.Cmd):
             NIEPPARSER = PlatformParser(args)
             if NIEPPARSER.STATUS != 0:
                 print("ERROR: " + PARSERERRORS[NIEPPARSER.STATUS] + " (DEFINE / PARSER / " + str(NIEPPARSER.STATUS) + ")")
+                detail = getattr(NIEPPARSER, 'DETAIL', '')
+                if detail:
+                    print("DETAIL: " + detail)
                 return
 
             self.NIEPEXE = Executer(NIEPPARSER)
@@ -500,7 +503,8 @@ class NIEPCLI(cmd.Cmd):
 
             upstatus = self.VNFEXEC.upVNF()
             if upstatus == None:
-                print('INVALID VNF STATUS')
+                vmstatus = getattr(getattr(self.VNFEXEC, 'VM', None), 'VM_STATUS', None)
+                print('INVALID VNF STATUS (VNF_STATUS=' + str(getattr(self.VNFEXEC, 'VNF_STATUS', None)) + ', VM_STATUS=' + str(vmstatus) + ')')
                 return
             if upstatus == -2:
                 print('VNF DOES NOT EXIST')

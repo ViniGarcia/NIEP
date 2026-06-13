@@ -48,6 +48,10 @@ class VNF:
             self.VNF_STATUS = -2
             return
 
+        if self.VM.VM_STATUS < 0:
+            self.VNF_STATUS = self.VM.VM_STATUS
+            return
+
 #__del__: restores the class to the fundamental state, avoiding same memory
 #         allocations problems.
     def __del__(self):

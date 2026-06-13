@@ -76,6 +76,7 @@ class PlatformParser:
     MNCONTROLLER = []
     MNOVSES = []
     CONNECTIONS = []
+    DETAIL = ""
 
     def __init__(self, jsonFilePath):
 
@@ -130,6 +131,7 @@ class PlatformParser:
         del self.MNCONTROLLER[:]
         del self.MNOVSES[:]
         del self.CONNECTIONS[:]
+        self.DETAIL = ""
 
 #------------------------------------------------------------------
 
@@ -233,6 +235,8 @@ class PlatformParser:
             if isinstance(VNFPATH, str) and isfile(VNFPATH):
                 instance = VNF(VNFPATH, None)
                 if instance.VNF_STATUS < 0:
+                    vm = getattr(instance, 'VM', None)
+                    self.DETAIL = 'VNF ' + str(getattr(instance, 'ID', VNFPATH)) + ' failed validation: VNF_STATUS=' + str(instance.VNF_STATUS) + ', VM_STATUS=' + str(getattr(vm, 'VM_STATUS', None)) + ', VM_EXIST=' + str(getattr(vm, 'VM_EXIST', None)) + ', VM_UP=' + str(getattr(vm, 'VM_UP', None))
                     self.STATUS = -3
                     return -3
                 self.VNFS.append(instance)
@@ -245,6 +249,8 @@ class PlatformParser:
             if isfile(VNFPATH):
                 instance = VNF(VNFPATH, VERIFIEDSFCVNFS[VNFPATH])
                 if instance.VNF_STATUS < 0:
+                    vm = getattr(instance, 'VM', None)
+                    self.DETAIL = 'VNF ' + str(getattr(instance, 'ID', VNFPATH)) + ' failed validation: VNF_STATUS=' + str(instance.VNF_STATUS) + ', VM_STATUS=' + str(getattr(vm, 'VM_STATUS', None)) + ', VM_EXIST=' + str(getattr(vm, 'VM_EXIST', None)) + ', VM_UP=' + str(getattr(vm, 'VM_UP', None))
                     self.STATUS = -3
                     return -3
                 self.VNFS.append(instance)
