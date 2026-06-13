@@ -1,5 +1,4 @@
 Vagrant.configure("2") do |config|
-  # Equivalent of a Dockerfile flow, but for full VMs.
   config.vm.box = "generic/ubuntu2204"
   config.vm.hostname = "niep-py3"
 
