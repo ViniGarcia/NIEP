@@ -55,9 +55,9 @@
 #======================================================================
 import struct
 import string
-from packet_utils import *
+from .packet_utils import *
 
-from packet_base import packet_base
+from .packet_base import packet_base
 import pox.lib.util as util
 from pox.lib.util import is_subclass
 from pox.lib.addresses import *
@@ -277,7 +277,7 @@ class dhcp(packet_base):
                 o += chr(dhcp.PAD_OPT)
             return o
 
-        for k,v in self.options.iteritems():
+        for k,v in self.options.items():
             if k == dhcp.END_OPT: continue
             if k == dhcp.PAD_OPT: continue
             if isinstance(v, DHCPOption):
@@ -310,6 +310,9 @@ class dhcp(packet_base):
 
         if isinstance(self.chaddr, EthAddr):
           chaddr = self.chaddr.toRaw() + (b'\x00' * 10)
+        else:
+          chaddr = self.chaddr
+          if chaddr is None:chaddr = b'\x00' * 16
         fmt = '!BBBBIHHiiii16s64s128s4s'
         return struct.pack(fmt, self.op, self.htype, self.hlen,
                            self.hops, self.xid, self.secs, self.flags,
@@ -333,6 +336,15 @@ class dhcp(packet_base):
             length = len(val)
         self._raw_options += chr(length)
         self._raw_options += val
+
+    @property
+    def msg_type (self):
+        """
+        DHCP message type or None
+        """
+        opt = self.options.get(self.MSG_TYPE_OPT)
+        if opt is None: return None
+        return opt.type
 
 
 def dhcp_option_def (msg_type):
@@ -416,7 +428,7 @@ class DHCPIPsOptionBase (DHCPOption):
   Superclass for options which are a list of IP addresses
   """
   def __init__ (self, addrs=[]):
-    if isinstance(addrs, (basestring,IPAddr)):
+    if isinstance(addrs, (str,bytes,IPAddr)):
       self.addrs = [IPAddr(addrs)]
     else:
       self.addrs = [IPAddr(a) for a in addrs]
@@ -588,7 +600,7 @@ class DHCPParameterRequestOption (DHCPOption):
       if n is None or not hasattr(n, 'im_self'):
         n = "Opt/" + str(o)
       else:
-        n = n.im_self.__name__
+        n = n.__self__.__name__
         if n.startswith("DHCP"): n = n[4:]
         if n.endswith("Option"): n = n[:-6]
         if n == "": n = "Opt"

@@ -1,4 +1,4 @@
-# Copyright 2011,2013 James McCauley
+# Copyright 2011,2013,2017 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,8 +12,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Wrapper for pcap packet capture
+
+This module was written because (at least at the time of writing), there was
+no other pcap wrapper for Python which worked on all of POX's supported
+platforms, could both capture and inject packets, had support for filters,
+and had halfway reasonable performance.
+
+The actual pcap interface is implemented as an extension module which works
+with both CPython and PyPy and must be built manually (there are scripts
+for building it under macOS, Linux, and Windows).
+
+Elsewhere in this package are utilities here for working with pcap files which
+work even without libpcap.
+"""
+
 enabled = False
+class _pcapc_warning (object):
+  """
+  Provide tips to users who need to build pxpcap's extension module
+
+  Some of pxpcap's features require building a C++ extension module.  This is
+  described in the manual, and this little class tries to point users in the
+  right direction to getting the module built successfully.
+  The short version is like:
+    cd pox/lib/pxpcap/pxpcap_c
+    ./build_linux # or ./build_mac or build_win.bat
+  """
+  def __getattr__ (self, *args):
+    raise RuntimeError("The pxpcap extension module is not available.  See "
+                       "the manual for how to build it.\nShort version: "
+                       "cd pox/lib/pxpcap/pxpcap_c ; ./build_linux # or "
+                       "./build_mac or build_win.bat")
+pcapc = _pcapc_warning()
 try:
+  # Try platform-specific module...
   import platform
   import importlib
   _module = 'pox.lib.pxpcap.%s.pxpcap' % (platform.system().lower(),)
@@ -29,17 +63,158 @@ except:
     pass
 
 from pox.lib.addresses import IPAddr, EthAddr, IPAddr6
-import parser
-from threading import Thread, Lock
+from . import parser
+from threading import Thread, Lock, RLock, Semaphore
 import pox.lib.packet as pkt
+import pox.lib.util
 import copy
 
 # pcap's filter compiling function isn't threadsafe, so we use this
 # lock when compiling filters.
 _compile_lock = Lock()
 
+
+class PCapSelectLoop (object):
+  """
+  Select loop for PCap objects
+
+  This juggles the select for *all* PCap objects using a single thread.  This
+  differs from the non-select behavior (and the *old* select behavior), which
+  creates a thread for each PCap.
+  """
+  _lock = RLock()
+  _quitting = False # Not super-common; usually wait for all PCaps to quit
+  _thread = None
+  _pinger = None
+
+  # Only modify in our thread
+  _filenos = {} # fileno -> PCap
+
+  # Only modify under lock:
+  _pend_add = []
+  _pend_remove = []
+
+  _idle_timeout = 2
+
+  def add (self, pcap):
+    with self._lock:
+      if pcap not in self._pend_add:
+        self._pend_add.append(pcap)
+        self._start_thread()
+        self._ping()
+      return self._thread
+
+  def _start_thread (self):
+    with self._lock:
+      if self._pinger is None:
+        self._pinger = pox.lib.util.make_pinger()
+      if self._thread is None:
+        # Start up the thread...
+        self._thread = Thread(target=self._thread_func)
+        self._thread.start()
+
+  def _ping (self):
+    """
+    Wakes the thread if it's sleeping in select()
+    """
+    self._pinger.ping()
+
+  def remove (self, pcap):
+    ping = False
+    with self._lock:
+      if pcap not in self._pend_remove:
+        self._pend_remove.append(pcap)
+        ping = True
+    if ping: self._ping()
+
+  def _thread_func (self):
+    def quit_pcap (pcap):
+      pcap._notify_quit()
+      del _filenos[pcap.fileno()]
+
+    import select
+    _filenos = self._filenos
+
+    reread = True
+
+    while not self._quitting:
+      if reread:
+        reread = False
+        with self._lock:
+          must_remove = []
+          for pcap in self._pend_add:
+            try:
+              _filenos[pcap.fileno()] = pcap
+            except:
+              must_remove.append(pcap)
+          for pcap in self._pend_remove:
+            try:
+              quit_pcap(pcap)
+            except:
+              must_remove.append(pcap)
+          del self._pend_remove[:]
+          del self._pend_add[:]
+          if must_remove:
+            backwards = dict([(v,k) for k,v in _filenos.items()])
+            for pcap in must_remove:
+              if pcap not in backwards: continue
+              del _filenos[backwards[pcap]]
+        fds = list(_filenos.keys())
+        fds.append(self._pinger)
+
+      if len(fds) <= 1:
+        # Everyone quit
+        break
+
+      rr,ww,xx = select.select(fds, [], fds, self._idle_timeout)
+      if self._quitting: break
+      if rr:
+        for r in rr:
+          pcap = _filenos.get(r)
+          if pcap:
+            if pcap._quitting:
+              quit_pcap(pcap)
+              reread = True
+            else:
+              r = pcap.next_packet(allow_threads = False)
+              if r[-1] == 0: continue
+              if r[-1] == 1:
+                pcap.callback(pcap, r[0], r[1], r[2], r[3])
+              else:
+                quit_pcap(pcap)
+                reread = True
+          else:
+            if isinstance(r, pox.lib.util.Pinger):
+              r.pong_all()
+              reread = True
+      elif not xx:
+        # Nothing!
+        quit = []
+        for pcap in _filenos.values():
+          if pcap._quitting: quit.append(pcap)
+        if quit:
+          reread = True
+          for pcap in quit:
+            quit_pcap(pcap)
+      if xx:
+        for x in xx:
+          pcap = _filenos.get(x)
+          if pcap:
+            quit_pcap(pcap)
+            reread = True
+          else:
+            reread = True
+
+    with self._lock:
+      self._quitting = False
+      self._thread = None
+
+
+pcap_select_loop = PCapSelectLoop() # It's basically a singleton
+
+
 class PCap (object):
-  use_select = False # Falls back to non-select
+  use_select = True # Falls back to non-select
 
   @staticmethod
   def get_devices ():
@@ -107,6 +282,7 @@ class PCap (object):
     self.packets_received = 0
     self.packets_dropped = 0
     self._thread = None
+    self._stop_semaphore = None # Used when use_select=True
     self.pcap = None
     self.promiscuous = promiscuous
     self.device = None
@@ -183,34 +359,6 @@ class PCap (object):
     """
     return pcapc.next_ex(self._pcap, bool(self.use_bytearray), allow_threads)
 
-  def _select_thread_func (self):
-    try:
-      import select
-      fd = [self.fileno()]
-    except:
-      # Fall back
-      self._thread_func()
-      return
-
-    self.blocking = False
-
-    while not self._quitting:
-      rr,ww,xx = select.select(fd, [], fd, 2)
-
-      if xx:
-        # Apparently we're done here.
-        break
-      if rr:
-        r = self.next_packet(allow_threads = False)
-        if r[-1] == 0: continue
-        if r[-1] == 1:
-          self.callback(self, r[0], r[1], r[2], r[3])
-        else:
-          break
-
-    self._quitting = False
-    self._thread = None
-
   def _thread_func (self):
     while not self._quitting:
       pcapc.dispatch(self.pcap,100,self.callback,self,bool(self.use_bytearray),True)
@@ -228,18 +376,39 @@ class PCap (object):
     core.addListeners(self, weak=True)
 
     if self.use_select:
-      self._thread = Thread(target=self._select_thread_func)
+      try:
+        import select
+      except:
+        # Fall back
+        self.use_select = False
+        # Log warning?
+
+    if self.use_select:
+      self.blocking = False
+      self._thread = pcap_select_loop.add(self)
     else:
       self._thread = Thread(target=self._thread_func)
-    #self._thread.daemon = True
-    self._thread.start()
+      self._thread.start()
 
   def stop (self):
     t = self._thread
     if t is not None:
-      self._quitting = True
-      pcapc.breakloop(self.pcap)
-      t.join()
+      if self.use_select:
+        self._quitting = True
+        self._stop_semaphore = Semaphore(0)
+        pcap_select_loop.remove(self)
+        pcapc.breakloop(self.pcap)
+        self._stop_semaphore.acquire()
+        self._stop_semaphore = None
+      else:
+        self._quitting = True
+        pcapc.breakloop(self.pcap)
+        t.join()
+      self._thread = None
+
+  def _notify_quit (self):
+    if self._stop_semaphore:
+      self._stop_semaphore.release()
 
   def close (self):
     if self.pcap is None: return
@@ -319,7 +488,7 @@ class Filter (object):
 
 try:
   _link_type_names = {}
-  for k,v in copy.copy(pcapc.__dict__).iteritems():
+  for k,v in copy.copy(pcapc.__dict__).items():
     if k.startswith("DLT_"):
       _link_type_names[v] = k
 except:
@@ -346,25 +515,25 @@ def test (interface = "en1"):
     nbd = bytes_real - bytes_got
     if nbd != bytes_diff:
       bytes_diff = nbd
-      print "lost bytes:",nbd
+      print("lost bytes:",nbd)
     if t > total:
       total = t + 500
-      print t,"total"
+      print(t,"total")
     if d > drop:
       drop = d
-      print d, "dropped"
+      print(d, "dropped")
     p = pkt.ethernet(data)
     ip = p.find('ipv4')
     if ip:
-      print ip.srcip,"\t",ip.dstip, p
+      print(ip.srcip,"\t",ip.dstip, p)
 
-  print "\n".join(["%i. %s" % x for x in
-                  enumerate(PCap.get_device_names())])
+  print("\n".join(["%i. %s" % x for x in
+                  enumerate(PCap.get_device_names())]))
 
   if interface.startswith("#"):
     interface = int(interface[1:])
     interface = PCap.get_device_names()[interface]
-  print "Interface:",interface
+  print("Interface:",interface)
 
   p = PCap(interface, callback = cb,
            filter = "icmp")
@@ -416,11 +585,11 @@ def interfaces (verbose = False):
   Show interfaces
   """
   if not verbose:
-    print "\n".join(["%i. %s" % x for x in
-                    enumerate(PCap.get_device_names())])
+    print("\n".join(["%i. %s" % x for x in
+                    enumerate(PCap.get_device_names())]))
   else:
     import pprint
-    print pprint.pprint(PCap.get_devices())
+    print(pprint.pprint(PCap.get_devices()))
 
   from pox.core import core
   core.quit()
@@ -432,7 +601,7 @@ def launch (interface, no_incoming=False, no_outgoing=False):
   """
   def cb (obj, data, sec, usec, length):
     p = pkt.ethernet(data)
-    print p.dump()
+    print(p.dump())
 
   if interface.startswith("#"):
     interface = int(interface[1:])

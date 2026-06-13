@@ -89,10 +89,10 @@
 #   General cleaup/rewrite (code is/has gotten pretty bad)
 
 import struct
-from packet_utils import *
-from packet_utils import TruncatedException as Trunc
+from .packet_utils import *
+from .packet_utils import TruncatedException as Trunc
 
-from packet_base import packet_base
+from .packet_base import packet_base
 
 from pox.lib.addresses import IPAddr,IPAddr6,EthAddr
 
@@ -298,7 +298,7 @@ class dns(packet_base):
         for i in range(0,total_questions):
             try:
                 query_head = self.next_question(raw, query_head)
-            except Exception, e:
+            except Exception as e:
                 self._exc(e, 'parsing questions')
                 return None
 
@@ -306,7 +306,7 @@ class dns(packet_base):
         for i in range(0,total_answers):
             try:
                 query_head = self.next_rr(raw, query_head, self.answers)
-            except Exception, e:
+            except Exception as e:
                 self._exc(e, 'parsing answers')
                 return None
 
@@ -314,7 +314,7 @@ class dns(packet_base):
         for i in range(0,total_auth_rr):
             try:
                 query_head = self.next_rr(raw, query_head, self.authorities)
-            except Exception, e:
+            except Exception as e:
                 self._exc(e, 'parsing authoritative name servers')
                 return None
 
@@ -322,7 +322,7 @@ class dns(packet_base):
         for i in range(0,total_add_rr):
             try:
                 query_head = self.next_rr(raw, query_head, self.additional)
-            except Exception, e:
+            except Exception as e:
                 self._exc(e, 'parsing additional resource records')
                 return None
 
@@ -463,7 +463,7 @@ class dns(packet_base):
 
     # Utility classes for questions and RRs
 
-    class question:
+    class question (object):
 
         def __init__(self, name, qtype, qclass):
             self.name   = name
@@ -475,11 +475,11 @@ class dns(packet_base):
             if self.qtype in rrtype_to_str:
                 s += " " + rrtype_to_str[self.qtype]
             else:
-                s += " ??? "
+                s += " #"+str(self.qtype)
             if self.qclass in rrclass_to_str:
                 s += " " + rrclass_to_str[self.qclass]
             else:
-                s += " ??? "
+                s += " #"+str(self.qclass)
 
             return s
 
@@ -515,11 +515,11 @@ class dns(packet_base):
             if self.qtype in rrtype_to_str:
                 s += " " + rrtype_to_str[self.qtype]
             else:
-                s += " ??? "
+                s += " #" + str(self.qtype)
             if self.qclass in rrclass_to_str:
                 s += " " + rrclass_to_str[self.qclass]
             else:
-                s += " ??? "
+                s += " #" + str(self.qclass)
             s += " ttl:"+str(self.ttl)
             s += " rdlen:"+str(self.rdlen)
             s += " datalen:" + str(len(self.rddata))

@@ -29,10 +29,10 @@
 #======================================================================
 import struct
 
-from packet_base import packet_base
-from ethernet import ethernet
+from .packet_base import packet_base
+from .ethernet import ethernet
 
-from packet_utils import *
+from .packet_utils import *
 
 
 class mpls(packet_base):
@@ -56,7 +56,7 @@ class mpls(packet_base):
 
     def __str__(self):
         s = "[MPLS " + str(self.label)
-        if self.tc: s += " " + str(self.tC)
+        if self.tc: s += " " + str(self.tc)
         if self.s: s += " bos"
         s += " ttl=" + str(self.ttl) + "]"
         return s

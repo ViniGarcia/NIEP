@@ -1,4 +1,4 @@
-# Copyright 2011-2014 James McCauley
+# Copyright 2011-2020 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,15 +48,37 @@ def getLogger (name=None, moreFrames=0):
   """
   if name is None:
     s = inspect.stack()[1+moreFrames]
+    # Should we always use __name__ instead?
+    fname = s[0].f_globals.get('__file__')
+    matching = False
     name = s[1]
     if name.endswith('.py'):
+      matching = name == fname
       name = name[0:-3]
+    elif name.endswith('.pyo'):
+      matching = name == (fname + "o")
+      name = name[0:-4]
     elif name.endswith('.pyc'):
+      matching = name == (fname + "c")
       name = name[0:-4]
     if name.startswith(_path):
       name = name[len(_path):]
     elif name.startswith(_ext_path):
       name = name[len(_ext_path):]
+    elif not matching:
+      # This may not work right across platforms, so be cautious.
+      n = s[0].f_globals.get('__name__')
+      if n:
+        if n.startswith("pox."): n = n[4:]
+        if n.startswith("ext."): n = n[4:]
+      else:
+        try:
+          n = os.path.basename(name)
+        except Exception:
+          n = ""
+        n = n.replace('\\','/').replace(os.path.sep,'/')
+      if n: name = n
+
     name = name.replace('/', '.').replace('\\', '.') #FIXME: use os.path or whatever
 
     # Remove double names ("topology.topology" -> "topology")
@@ -128,7 +150,8 @@ pox.lib.revent.revent.handleEventException = _revent_exception_hook
 
 class GoingUpEvent (Event):
   """ Fired when system is going up. """
-  pass
+  def get_deferral (self):
+    return self.source._get_go_up_deferral()
 
 class GoingDownEvent (Event):
   """ Fired when system is going down. """
@@ -187,8 +210,8 @@ class POXCore (EventMixin):
     RereadConfiguration,
   ])
 
-  version = (0,5,0)
-  version_name = "eel"
+  version = (0,7,0)
+  version_name = "gar"
 
   def __init__ (self, threaded_selecthub=True, epoll_selecthub=False,
                 handle_signals=True):
@@ -196,6 +219,8 @@ class POXCore (EventMixin):
     self.running = True
     self.starting_up = True
     self.components = {'core':self}
+
+    self._go_up_deferrals = set()
 
     self._openflow_wanted = False
     self._handle_signals = handle_signals
@@ -213,7 +238,7 @@ class POXCore (EventMixin):
 
   @property
   def banner (self):
-    return "{0} / Copyright 2011-2014 James McCauley, et al.".format(
+    return "{0} / Copyright 2011-2020 James McCauley, et al.".format(
      self.version_string)
 
   @property
@@ -221,6 +246,10 @@ class POXCore (EventMixin):
     return "POX %s (%s)" % ('.'.join(map(str,self.version)),self.version_name)
 
   def callDelayed (_self, _seconds, _func, *args, **kw):
+    """ Deprecated """
+    return _self.call_delayed(_seconds, _func, *args, **kw)
+
+  def call_delayed (_self, _seconds, _func, *args, **kw):
     """
     Calls the function at a later time.
     This is just a wrapper around a recoco timer.
@@ -230,6 +259,10 @@ class POXCore (EventMixin):
     return t
 
   def callLater (_self, _func, *args, **kw):
+    """ Deprecated """
+    return _self.call_later(_func, *args, **kw)
+
+  def call_later (_self, _func, *args, **kw):
     # first arg is `_self` rather than `self` in case the user wants
     # to specify self as a keyword argument
     """
@@ -293,7 +326,10 @@ class POXCore (EventMixin):
     log.info("Going down...")
     import gc
     gc.collect()
-    self.raiseEvent(GoingDownEvent())
+    try:
+      self.raiseEvent(GoingDownEvent())
+    except:
+      log.exception("While running GoingDownEvent")
     self.callLater(self.scheduler.quit)
     for i in range(50):
       if self.scheduler._hasQuit: break
@@ -357,17 +393,48 @@ class POXCore (EventMixin):
       vers = '.'.join(platform.python_version().split(".")[:2])
     except:
       vers = 'an unknown version'
-    if vers != "2.7":
+    def vwarn (*args):
       l = logging.getLogger("version")
       if not l.isEnabledFor(logging.WARNING):
         l.setLevel(logging.WARNING)
-      l.warn("POX requires Python 2.7. You're running %s.", vers)
-      l.warn("If you run into problems, try using Python 2.7 or PyPy.")
+      l.warn(*args)
+    good_versions = ("3.6", "3.7", "3.8", "3.9")
+    if vers not in good_versions:
+      vwarn("POX requires one of the following versions of Python: %s",
+             " ".join(good_versions))
+      vwarn("You're running Python %s.", vers)
+      vwarn("If you run into problems, try using a supported version.")
+    else:
+      vwarn("Support for Python 3 is experimental.")
 
     self.starting_up = False
     self.raiseEvent(GoingUpEvent())
 
     self._add_signal_handlers()
+
+    if not self._go_up_deferrals:
+      self._goUp_stage2()
+
+  def _get_go_up_deferral (self):
+    """
+    Get a GoingUp deferral
+
+    By doing this, we are deferring progress starting at the GoingUp stage.
+    The return value should be called to allow progress again.
+    """
+    o = object()
+    self._go_up_deferrals.add(o)
+    def deferral ():
+      if o not in self._go_up_deferrals:
+        raise RuntimeError("This deferral has already been executed")
+      self._go_up_deferrals.remove(o)
+      if not self._go_up_deferrals:
+        log.debug("Continuing to go up")
+        self._goUp_stage2()
+
+    return deferral
+
+  def _goUp_stage2 (self):
 
     self.raiseEvent(UpEvent())
 
@@ -445,7 +512,7 @@ class POXCore (EventMixin):
     if callback is None:
       callback = lambda:None
       callback.__name__ = "<None>"
-    if isinstance(components, basestring):
+    if isinstance(components, str):
       components = [components]
     elif isinstance(components, set):
       components = list(components)
@@ -457,12 +524,12 @@ class POXCore (EventMixin):
         components = [components]
     if name is None:
       #TODO: Use inspect here instead
-      name = getattr(callback, 'func_name')
+      name = getattr(callback, '__name__')
       if name is None:
         name = str(callback)
       else:
         name += "()"
-        if hasattr(callback, 'im_class'):
+        if hasattr(callback, '__self__'):
           name = getattr(callback.__self__.__class__,'__name__','')+'.'+name
       if hasattr(callback, '__module__'):
         # Is this a good idea?  If not here, we should do it in the
@@ -539,7 +606,7 @@ class POXCore (EventMixin):
     """
     if components is None:
       components = set()
-    elif isinstance(components, basestring):
+    elif isinstance(components, str):
       components = set([components])
     else:
       components = set(components)
@@ -553,7 +620,7 @@ class POXCore (EventMixin):
     if None in listen_args:
       # This means add it to all...
       args = listen_args.pop(None)
-      for k,v in args.iteritems():
+      for k,v in args.items():
         for c in components:
           if c not in listen_args:
             listen_args[c] = {}

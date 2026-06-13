@@ -1,6 +1,6 @@
 #!/bin/sh -
 
-# Copyright 2011,2012,2013 James McCauley
+# Copyright 2011,2012,2013,2017 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,23 +22,6 @@
 
 #TODO: Make runnable by itself (paths need adjusting, etc.).
 
-''''true
-export OPT="-u -O"
-export FLG=""
-if [ "$(basename $0)" = "debug-pox.py" ]; then
-  export OPT=""
-  export FLG="--debug"
-fi
-
-if [ -x pypy/bin/pypy ]; then
-  exec pypy/bin/pypy $OPT "$0" $FLG "$@"
-fi
-
-if type python2.7 > /dev/null; then
-  exec python2.7 $OPT "$0" $FLG "$@"
-fi
-exec python $OPT "$0" $FLG "$@"
-'''
 
 from __future__ import print_function
 
@@ -56,7 +39,7 @@ import pox.core
 core = None
 
 import pox.openflow
-from pox.lib.util import str_to_bool
+from pox.lib.util import str_to_bool, first_of
 
 # Function to run on main thread
 _main_thread_function = None
@@ -71,6 +54,7 @@ def _do_import (name):
   Try to import the named component.
   Returns its module name if it was loaded or False on failure.
   """
+  #TODO: Update to use the Python 3 import facilities
 
   def show_fail ():
     traceback.print_exc()
@@ -89,7 +73,7 @@ def _do_import (name):
     try:
       __import__(name, level=0)
       return name
-    except ImportError:
+    except ModuleNotFoundError as exc:
       # There are two cases why this might happen:
       # 1. The named module could not be found
       # 2. Some dependent module (import foo) or some dependent
@@ -101,22 +85,19 @@ def _do_import (name):
       # print a stack trace so that it can be fixed.
       # Sorting out the two cases is an ugly hack.
 
-      message = str(sys.exc_info()[1].args[0])
-      s = message.rsplit(" ", 1)
-
-      # Sadly, PyPy isn't consistent with CPython here.
-      #TODO: Check on this behavior in pypy 2.0.
-      if s[0] == "No module named" and (name.endswith(s[1]) or __pypy__):
+      if exc.name and name.endswith(exc.name):
         # It was the one we tried to import itself. (Case 1)
         # If we have other names to try, try them!
         return do_import2(base_name, names_to_try)
-      elif message == "Import by filename is not supported.":
-        print(message)
+      elif name.endswith(".py"):
+        print("Import by filename is not supported.")
         import os.path
         n = name.replace("/", ".").replace("\\", ".")
         n = n.replace( os.path.sep, ".")
         if n.startswith("pox.") or n.startswith("ext."):
           n = n[4:]
+        if n.endswith(".py"):
+          n = n[:-3]
         print("Maybe you meant to run '%s'?" % (n,))
         return False
       else:
@@ -152,7 +133,7 @@ def _do_imports (components):
   return done
 
 
-def _do_launch (argv):
+def _do_launch (argv, skip_startup=False):
   component_order = []
   components = {}
 
@@ -161,9 +142,13 @@ def _do_launch (argv):
 
   for arg in argv:
     if not arg.startswith("-"):
+      if "=" in arg:
+        arg,first_arg = arg.split("=", 1)
+        curargs = {None:first_arg}
+      else:
+        curargs = {}
       if arg not in components:
         components[arg] = []
-      curargs = {}
       components[arg].append(curargs)
       component_order.append(arg)
     else:
@@ -172,18 +157,20 @@ def _do_launch (argv):
       if len(arg) == 1: arg.append(True)
       curargs[arg[0]] = arg[1]
 
-  _options.process_options(pox_options)
-  global core
-  if pox.core.core is not None:
-    core = pox.core.core
-    core.getLogger('boot').debug('Using existing POX core')
-  else:
-    core = pox.core.initialize(_options.threaded_selecthub,
-                               _options.epoll_selecthub,
-                               _options.handle_signals)
+  if not skip_startup:
+    _options.process_options(pox_options)
+    global core
+    if pox.core.core is not None:
+      core = pox.core.core
+      core.getLogger('boot').debug('Using existing POX core')
+    else:
+      core = pox.core.initialize(_options.threaded_selecthub,
+                                 _options.epoll_selecthub,
+                                 _options.handle_signals)
 
-  _pre_startup()
-  modules = _do_imports(n.split(':')[0] for n in component_order)
+    _pre_startup()
+
+  modules = _do_imports(n.split("=")[0].split(':')[0] for n in component_order)
   if modules is False:
     return False
 
@@ -195,6 +182,7 @@ def _do_launch (argv):
     name = name.split(":", 1)
     launch = name[1] if len(name) == 2 else "launch"
     name = name[0]
+    first_arg = params.pop(None, None)
 
     name,module,members = modules[name]
 
@@ -207,7 +195,7 @@ def _do_launch (argv):
 
       if getattr(f, '_pox_eval_args', False):
         import ast
-        for k,v in params.items():
+        for k,v in list(params.items()):
           if isinstance(v, str):
             try:
               params[k] = ast.literal_eval(v)
@@ -240,7 +228,11 @@ def _do_launch (argv):
         return False
 
       try:
-        if f(**params) is False:
+        if first_arg is not None:
+          pparams = (first_arg,)
+        else:
+          pparams = ()
+        if f(*pparams, **params) is False:
           # Abort startup
           return False
       except TypeError as exc:
@@ -261,7 +253,7 @@ def _do_launch (argv):
           code = f.__code__
           argcount = code.co_argcount
           argnames = code.co_varnames[:argcount]
-          defaults = list((f.func_defaults) or [])
+          defaults = list((f.__defaults__) or [])
           defaults = [EMPTY] * (argcount - len(defaults)) + defaults
           args = {}
           for n, a in enumerate(argnames):
@@ -293,15 +285,15 @@ def _do_launch (argv):
                                                 "Active"))
             print(" {0:25} {0:25} {0:25}".format("-" * 15))
 
-            for k,v in args.iteritems():
+            for k,v in args.items():
               print(" {0:25} {1:25} {2:25}".format(k,str(v[0]),
                     str(v[1] if v[1] is not EMPTY else v[0])))
 
           if len(params):
             print("This component does not have a parameter named "
-                  + "'{0}'.".format(params.keys()[0]))
+                  + "'{0}'.".format(first_of(params.keys())))
             return False
-          missing = [k for k,x in args.iteritems()
+          missing = [k for k,x in args.items()
                      if x[1] is EMPTY and x[0] is EMPTY]
           if len(missing):
             print("You must specify a value for the '{0}' "
@@ -312,7 +304,7 @@ def _do_launch (argv):
         else:
           # Error is inside the function
           raise
-    elif len(params) > 0 or launch is not "launch":
+    elif len(params) > 0 or launch != "launch":
       print("Module %s has no %s(), but it was specified or passed " \
             "arguments" % (name, launch))
       return False
@@ -343,7 +335,7 @@ class Options (object):
     return True
 
   def process_options (self, options):
-    for k,v in options.iteritems():
+    for k,v in options.items():
       if self.set(k, v) is False:
         # Bad option!
         sys.exit(1)

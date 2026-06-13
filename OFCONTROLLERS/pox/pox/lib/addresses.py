@@ -1,4 +1,4 @@
-# Copyright 2011,2012,2013,2014 James McCauley
+# Copyright 2011,2012,2013,2014,2018 James McCauley
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,13 +20,6 @@ from __future__ import print_function
 import struct
 import socket
 
-# Slightly tested attempt at Python 3 friendliness
-import sys
-if 'long' not in sys.modules['__builtin__'].__dict__:
-  long = int
-
-
-
 _eth_oui_to_name = {} # OUI (3 bytes) -> name
 
 def _load_oui_names ():
@@ -40,7 +33,7 @@ def _load_oui_names ():
   filename = os.path.join(os.path.dirname(inspect.stack()[0][1]), 'oui.txt')
   f = None
   try:
-    f = open(filename)
+    f = open(filename, "r", encoding = "latin-1")
     for line in f.readlines():
       if len(line) < 1:
         continue
@@ -50,7 +43,7 @@ def _load_oui_names ():
       if not '-' in split[0]:
         continue
       # grab 3-byte OUI
-      oui  = b''.join(chr(int(x,16)) for x in split[0].split('-'))
+      oui  = bytes(int(x,16) for x in split[0].split('-'))
       # strip off (hex) identifer and keep rest of name
       end = ' '.join(split[1:]).strip()
       end = end.split('\t')
@@ -65,8 +58,38 @@ def _load_oui_names ():
 _load_oui_names()
 
 
+def _compare_helper (self, other, f, rf):
+  t = type(self)
+  try:
+    if isinstance(other, t): ov = other._value
+    else: ov = t(other)._value
+    return getattr(self._value, f)(ov)
+  except Exception:
+    return getattr(other, rf)(self)
 
-class EthAddr (object):
+
+class _AddrBase (object):
+  def __eq__(self, other):
+    return _compare_helper(self, other, '__eq__', '__eq__')
+
+  def __ne__(self, other):
+    return _compare_helper(self, other, '__ne__', '__ne__')
+
+  def __lt__(self, other):
+    return _compare_helper(self, other, '__lt__', '__ge__')
+
+  def __gt__(self, other):
+    return _compare_helper(self, other, '__gt__', '__le__')
+
+  def __le__(self, other):
+    return _compare_helper(self, other, '__le__', '__gt__')
+
+  def __ge__(self, other):
+    return _compare_helper(self, other, '__ge__', '__lt__')
+
+
+
+class EthAddr (_AddrBase):
   """
   An Ethernet (MAC) address type.
 
@@ -79,27 +102,29 @@ class EthAddr (object):
     Understands Ethernet address is various forms.  Hex strings, raw byte
     strings, etc.
     """
-    if isinstance(addr, bytes) or isinstance(addr, basestring):
+    if isinstance(addr, str): addr = addr.encode()
+
+    if isinstance(addr, bytes):
       if len(addr) == 6:
         # raw
         pass
-      elif len(addr) == 17 or len(addr) == 12 or addr.count(':') == 5:
+      elif len(addr) == 17 or len(addr) == 12 or addr.count(b':') == 5:
         # hex
         if len(addr) == 17:
-          if addr[2::3] != ':::::' and addr[2::3] != '-----':
+          if addr[2::3] != b':::::' and addr[2::3] != b'-----':
             raise RuntimeError("Bad format for ethernet address")
           # Address of form xx:xx:xx:xx:xx:xx
           # Pick out the hex digits only
-          addr = ''.join((addr[x*3:x*3+2] for x in xrange(0,6)))
+          addr = b''.join((addr[x*3:x*3+2] for x in range(0,6)))
         elif len(addr) == 12:
           pass
         else:
           # Assume it's hex digits but they may not all be in two-digit
           # groupings (e.g., xx:x:x:xx:x:x). This actually comes up.
-          addr = ''.join(["%02x" % (int(x,16),) for x in addr.split(":")])
+          addr = b''.join([b"%02x" % (int(x,16),) for x in addr.split(b":")])
         # We should now have 12 hex digits (xxxxxxxxxxxx).
         # Convert to 6 raw bytes.
-        addr = b''.join((chr(int(addr[x*2:x*2+2], 16)) for x in range(0,6)))
+        addr = bytes(int(addr[x*2:x*2+2], 16) for x in range(0,6))
       else:
         raise RuntimeError("Expected ethernet address string to be 6 raw "
                            "bytes or some hex")
@@ -107,11 +132,11 @@ class EthAddr (object):
     elif isinstance(addr, EthAddr):
       self._value = addr.toRaw()
     elif isinstance(addr, (list,tuple,bytearray)):
-      self._value = b''.join( (chr(x) for x in addr) )
+      self._value = bytes(addr)
     elif (hasattr(addr, '__len__') and len(addr) == 6
           and hasattr(addr, '__iter__')):
       # Pretty much same as above case, but for sequences we don't know.
-      self._value = b''.join( (chr(x) for x in addr) )
+      self._value = bytes(addr)
     elif addr is None:
       self._value = b'\x00' * 6
     else:
@@ -126,12 +151,12 @@ class EthAddr (object):
     have a destination MAC address within this range are not relayed by
     bridges conforming to IEEE 802.1D
     """
-    return  ((ord(self._value[0]) == 0x01)
-    	and (ord(self._value[1]) == 0x80)
-    	and (ord(self._value[2]) == 0xC2)
-    	and (ord(self._value[3]) == 0x00)
-    	and (ord(self._value[4]) == 0x00)
-    	and (ord(self._value[5]) <= 0x0F))
+    return  ((self._value[0] == 0x01)
+         and (self._value[1] == 0x80)
+         and (self._value[2] == 0xC2)
+         and (self._value[3] == 0x00)
+         and (self._value[4] == 0x00)
+         and (self._value[5] <= 0x0F))
 
   @property
   def is_bridge_filtered (self):
@@ -147,7 +172,7 @@ class EthAddr (object):
     """
     Returns True if this is a locally-administered (non-global) address.
     """
-    return True if (ord(self._value[0]) & 2) else False
+    return True if (self._value[0] & 2) else False
 
   @property
   def is_local (self):
@@ -161,11 +186,15 @@ class EthAddr (object):
     """
     Returns True if this is a multicast address.
     """
-    return True if (ord(self._value[0]) & 1) else False
+    return True if (self._value[0] & 1) else False
 
   @property
   def is_multicast (self):
     return self.isMulticast()
+
+  @property
+  def is_broadcast (self):
+    return self == self.BROADCAST
 
   def toRaw (self):
     return self.raw
@@ -185,7 +214,7 @@ class EthAddr (object):
     Returns a 6-entry long tuple where each entry is the numeric value
     of the corresponding byte of the address.
     """
-    return tuple((ord(x) for x in self._value))
+    return tuple((x for x in self._value))
 
   def toStr (self, separator = ':', resolveNames  = False):
     return self.to_str(separator, resolveNames)
@@ -202,26 +231,13 @@ class EthAddr (object):
       # Don't even bother for local (though it should never match and OUI!)
       name = _eth_oui_to_name.get(self._value[:3])
       if name:
-        rest = separator.join('%02x' % (ord(x),) for x in self._value[3:])
+        rest = separator.join('%02x' % (x,) for x in self._value[3:])
         return name + separator + rest
 
-    return separator.join(('%02x' % (ord(x),) for x in self._value))
+    return separator.join(('%02x' % (x,) for x in self._value))
 
   def __str__ (self):
     return self.toStr()
-
-  def __cmp__ (self, other):
-    #TODO: Revisit this and other __cmp__ in Python 3.4
-    try:
-      if type(other) == EthAddr:
-        other = other._value
-      elif type(other) == bytes:
-        pass
-      else:
-        other = EthAddr(other)._value
-      return cmp(self._value, other)
-    except:
-      return -cmp(other, self)
 
   def __hash__ (self):
     return self._value.__hash__()
@@ -238,8 +254,11 @@ class EthAddr (object):
     object.__setattr__(self, a, v)
 
 
+EthAddr.BROADCAST = EthAddr(b"\xff\xff\xff\xff\xff\xff")
 
-class IPAddr (object):
+
+
+class IPAddr (_AddrBase):
   """
   Represents an IPv4 address.
 
@@ -257,20 +276,26 @@ class IPAddr (object):
     """
 
     # Always stores as a signed network-order int
-    if isinstance(addr, (basestring, bytes, bytearray)):
+    if isinstance(addr, (bytes, bytearray)):
       if len(addr) != 4:
         # dotted quad
-        self._value = struct.unpack('i', socket.inet_aton(addr))[0]
+        self._value = struct.unpack('i', socket.inet_aton(addr.decode()))[0]
       else:
         self._value = struct.unpack('i', addr)[0]
+    elif isinstance(addr, str):
+      self._value = struct.unpack('i', socket.inet_aton(addr))[0]
     elif isinstance(addr, IPAddr):
       self._value = addr._value
-    elif isinstance(addr, int) or isinstance(addr, long):
+    elif isinstance(addr, int):
       addr = addr & 0xffFFffFF # unsigned long
       self._value = struct.unpack("!i",
           struct.pack(('!' if networkOrder else '') + "I", addr))[0]
     else:
       raise RuntimeError("Unexpected IP address format")
+
+  @staticmethod
+  def parse_cidr (addr, infer=True, allow_host=False):
+    return parse_cidr(addr, infer, allow_host)
 
   def toSignedN (self):
     """ A shortcut """
@@ -301,10 +326,26 @@ class IPAddr (object):
     """
     Returns the address as an integer in either network or host (the
     default) byte order.
+
+    Deprecated.
     """
     if not networkOrder:
       return socket.htonl(self._value & 0xffFFffFF)
     return self._value & 0xffFFffFF
+
+  @property
+  def unsigned_h (self):
+    """
+    The address as an integer in host order.
+    """
+    return self.toUnsigned(networkOrder=False)
+
+  @property
+  def unsigned_n (self):
+    """
+    The address as an integer in network order.
+    """
+    return self.toUnsigned(networkOrder=True)
 
   def toStr (self):
     """ Return dotted quad representation """
@@ -333,6 +374,21 @@ class IPAddr (object):
 
     return (self.toUnsigned() & ~((1 << (32-b))-1)) == n.toUnsigned()
 
+  def get_network (self, netmask_or_bits):
+    """
+    Gets just the network part by applying a mask or prefix length
+
+    Returns (IPAddr,preifx_bits)
+    """
+    prefix = parse_cidr("255.255.255.255/" + str(netmask_or_bits),
+                        allow_host=True)[1]
+    netmask = cidr_to_netmask(prefix).unsigned_h
+    return (IPAddr(self.unsigned_h & netmask, networkOrder=False),prefix)
+
+  @property
+  def is_broadcast (self):
+    return self == IP_BROADCAST
+
   @property
   def is_multicast (self):
     return ((self.toSigned(networkOrder = False) >> 24) & 0xe0) == 0xe0
@@ -351,15 +407,6 @@ class IPAddr (object):
 
   def __str__ (self):
     return self.toStr()
-
-  def __cmp__ (self, other):
-    if other is None: return 1
-    try:
-      if not isinstance(other, IPAddr):
-        other = IPAddr(other)
-      return cmp(self.toUnsigned(), other.toUnsigned())
-    except:
-      return -other.__cmp__(self)
 
   def __hash__ (self):
     return self._value.__hash__()
@@ -381,7 +428,7 @@ IP_BROADCAST = IPAddr("255.255.255.255")
 
 
 
-class IPAddr6 (object):
+class IPAddr6 (_AddrBase):
   """
   Represents an IPv6 address.
 
@@ -399,11 +446,7 @@ class IPAddr6 (object):
     """
     Factory that creates an IPAddr6 from a large integer
     """
-    o = b''
-    for i in xrange(16):
-      o = chr(num & 0xff) + o
-      num >>= 8
-    return cls.from_raw(o)
+    return bytes( (num >> i) & 0xff for i in range(120,-8,-8) )
 
   def __init__ (self, addr = None, raw = False, network_order = False):
     """
@@ -429,7 +472,7 @@ class IPAddr6 (object):
     if addr is None:
       # Should we even allow this?  It's a weird case.
       self._value = self.UNDEFINED._value
-    elif isinstance(addr, unicode) or (isinstance(addr, bytes) and not raw):
+    elif isinstance(addr, str) or (isinstance(addr, bytes) and not raw):
       # A textual IPv6 representation
       ip4part = None
       if '.' in addr:
@@ -520,7 +563,7 @@ class IPAddr6 (object):
   def num (self):
     o = 0
     for b in self._value:
-      o = (o << 8) | ord(b)
+      o = (o << 8) | b
     return o
 
   @property
@@ -563,7 +606,7 @@ class IPAddr6 (object):
     of network bits.  e.g., 255.255.255.0 -> 24
     Raise exception if subnet mask is not CIDR-compatible.
     """
-    if isinstance(dq, basestring):
+    if isinstance(dq, str):
       dq = IPAddr6(dq)
     v = dq.num
     c = 0
@@ -655,8 +698,8 @@ class IPAddr6 (object):
     by passing ipv4=True; this probably only makes sense if .is_ipv4_compatible
     (or .is_ipv4_mapped, of course).
     """
-    o = [ord(lo) | (ord(hi)<<8) for hi,lo in
-         (self._value[i:i+2] for i in xrange(0,16,2))]
+    o = [lo | (hi<<8) for hi,lo in
+         (self._value[i:i+2] for i in range(0,16,2))]
 
     if (ipv4 is None and self.is_ipv4_mapped) or ipv4:
       ip4part = o[-2:]
@@ -702,15 +745,6 @@ class IPAddr6 (object):
   def __str__ (self):
     return self.to_str()
 
-  def __cmp__ (self, other):
-    if other is None: return 1
-    try:
-      if not isinstance(other, type(self)):
-        other = type(self)(other)
-      return cmp(self._value, other._value)
-    except:
-      return -cmp(other,self)
-
   def __hash__ (self):
     return self._value.__hash__()
 
@@ -729,7 +763,7 @@ class IPAddr6 (object):
     e = list(EthAddr(eth).toTuple())
     e[0] ^= 2
     e[3:3] = [0xff,0xfe]
-    e = ''.join(chr(b) for b in e)
+    e = bytes(e)
     return IPAddr6.from_raw(self._value[:8]+e)
 
 
@@ -750,7 +784,7 @@ def netmask_to_cidr (dq):
   of network bits.  e.g., 255.255.255.0 -> 24
   Raise exception if subnet mask is not CIDR-compatible.
   """
-  if isinstance(dq, basestring):
+  if isinstance(dq, str):
     dq = IPAddr(dq)
   v = dq.toUnsigned(networkOrder=False)
   c = 0

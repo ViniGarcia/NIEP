@@ -23,6 +23,15 @@ It'd be nice to factor the JSON-RPC stuff out so that it could
 be used with something besides just HTTP.
 
 Also, it has some capability for compatibility with Qooxdoo.
+
+See the openflow.webservice component for an example.
+
+IMPORTANT NOTE:
+Per the specifiction, JSON-RPC requests without an "id" field are
+*notifications* which do not require and should not receive responses.
+In other words, if you want to get a reply to a request, you must
+include an "id" member in the request.  You can, for example, just
+set it to 1 if you don't have anything better to set it to.
 """
 
 import json
@@ -93,7 +102,7 @@ class JSONRPCHandler (SplitRequestHandler):
     # Maybe the following arg-adding feature should just be part of
     # SplitRequestHandler?
 
-    for k,v in self.args.iteritems():
+    for k,v in self.args.items():
       setattr(self, "_arg_" + k, v)
 
     self.auth_function = self.args.get('auth', None)

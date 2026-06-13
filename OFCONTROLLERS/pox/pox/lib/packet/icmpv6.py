@@ -39,9 +39,8 @@ See RFCs 4443 and 4861 in particular.
 
 import struct
 import random
-import new
-from packet_utils import *
-from packet_base import packet_base
+from .packet_utils import *
+from .packet_base import packet_base
 
 from pox.lib.addresses import IPAddr6,EthAddr
 from pox.lib.util import hexdump, init_helper
@@ -159,7 +158,7 @@ class NDOptionBase (packet_base):
     ss = self._fields()
     if ss:
       s += ' '
-      s += " ".join(["%s:%s" % (k,v) for k,v in ss.iteritems()])
+      s += " ".join(["%s:%s" % (k,v) for k,v in ss.items()])
     return "[" + s + "]"
 
   @property
@@ -226,7 +225,7 @@ class NDOptionBase (packet_base):
   def pack (self):
     d = self._pack_body()
     while (len(d)+2) % 8: d += "\x00" # sloppy
-    return struct.pack("BB", self.TYPE, (len(d)+2)/8) + d
+    return struct.pack("BB", self.TYPE, (len(d)+2)//8) + d
 
   @classmethod
   def _unpack_new (cls, raw, offset, t, length, prev):
@@ -256,7 +255,7 @@ class NDOptionGeneric (NDOptionBase):
 
   def __repr__ (self):
     return "<NDP Option Type %s>" % (self.TYPE,)
- 
+
   def _init (self, *args, **kw):
     self.raw = b''
 
@@ -298,7 +297,7 @@ class NDOptLinkLayerAddress (NDOptionBase):
       self.address = None
     else:
       self.address = EthAddr(a)
-  
+
   def _fields (self):
     return {'addr':self.address}
 
@@ -309,7 +308,7 @@ class NDOptLinkLayerAddress (NDOptionBase):
 
   def _pack_body (self):
     return self.address.raw
-    
+
 
 @nd_option_def
 class NDOptSourceLinkLayerAddress (NDOptLinkLayerAddress):
@@ -410,7 +409,7 @@ class icmp_base (packet_base):
     ss = self._fields()
     if ss:
       s += ' '
-      s += " ".join(["%s:%s" % (k,v) for k,v in ss.iteritems()])
+      s += " ".join(["%s:%s" % (k,v) for k,v in ss.items()])
     return s + "]"
 
   def _fields (self):
@@ -678,7 +677,7 @@ class NDNeighborAdvertisement (icmp_base):
     if buf_len is None: buf_len = len(raw)
 
     try:
-      flags = ord(raw[offset])
+      flags = raw[offset]
       o.is_router = (flags & cls.ROUTER_FLAG) != 0
       o.is_solicited = (flags & cls.SOLICITED_FLAG) != 0
       o.is_override = (flags & cls.OVERRIDE_FLAG) != 0
@@ -910,7 +909,7 @@ class unreach (packet_base, unpack_new_adapter):
 
     self.parsed = True
 
-    import ipv6
+    from . import ipv6
     # xxx We're assuming this is IPv6!
     if dlen >= 8 + ipv6.MIN_LEN:
       self.next = ipv6.ipv6(raw=raw[unreach.MIN_LEN:],prev=self)

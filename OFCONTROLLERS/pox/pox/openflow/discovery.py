@@ -87,6 +87,10 @@ class LLDPSender (object):
       self.add_port(event.dpid, event.port, event.ofp.desc.hw_addr)
     elif event.deleted:
       self.del_port(event.dpid, event.port)
+    elif event.modified:
+      if event.ofp.desc.config & of.OFPPC_PORT_DOWN == 0:
+        # It's not down, so... try sending a discovery now
+        self.add_port(event.dpid, event.port, event.ofp.desc.hw_addr, False)
 
   def _handle_openflow_ConnectionUp (self, event):
     self.del_switch(event.dpid, set_timer = False)
@@ -117,9 +121,10 @@ class LLDPSender (object):
   def add_port (self, dpid, port_num, port_addr, set_timer = True):
     if port_num > of.OFPP_MAX: return
     self.del_port(dpid, port_num, set_timer = False)
-    self._next_cycle.append(LLDPSender.SendItem(dpid, port_num,
-          self.create_packet_out(dpid, port_num, port_addr)))
+    packet = self.create_packet_out(dpid, port_num, port_addr)
+    self._next_cycle.insert(0, LLDPSender.SendItem(dpid, port_num, packet))
     if set_timer: self._set_timer()
+    core.openflow.sendToDPID(dpid, packet) # Send one immediately
 
   def _set_timer (self):
     if self._timer: self._timer.cancel()
@@ -176,7 +181,7 @@ class LLDPSender (object):
     """
 
     chassis_id = pkt.chassis_id(subtype=pkt.chassis_id.SUB_LOCAL)
-    chassis_id.id = bytes('dpid:' + hex(long(dpid))[2:-1])
+    chassis_id.id = ('dpid:' + hex(int(dpid))[2:]).encode()
     # Maybe this should be a MAC.  But a MAC of what?  Local port, maybe?
 
     port_id = pkt.port_id(subtype=pkt.port_id.SUB_PORT, id=str(port_num))
@@ -184,7 +189,7 @@ class LLDPSender (object):
     ttl = pkt.ttl(ttl = ttl)
 
     sysdesc = pkt.system_description()
-    sysdesc.payload = bytes('dpid:' + hex(long(dpid))[2:-1])
+    sysdesc.payload = ('dpid:' + hex(int(dpid))[2:]).encode()
 
     discovery_packet = pkt.lldp()
     discovery_packet.tlvs.append(chassis_id)
@@ -230,6 +235,11 @@ class Link (namedtuple("LinkBase",("dpid1","port1","dpid2","port2"))):
     pairs = list(self.end)
     pairs.sort()
     return Link(pairs[0][0],pairs[0][1],pairs[1][0],pairs[1][1])
+
+  @property
+  def flipped (self):
+    pairs = self.end
+    return Link(pairs[1][0],pairs[1][1],pairs[0][0],pairs[0][1])
 
   @property
   def end (self):
@@ -286,7 +296,7 @@ class Discovery (EventMixin):
   def install_flow (self, con_or_dpid, priority = None):
     if priority is None:
       priority = self._flow_priority
-    if isinstance(con_or_dpid, (int,long)):
+    if isinstance(con_or_dpid, int):
       con = core.openflow.connections.get(con_or_dpid)
       if con is None:
         log.warn("Can't install flow for %s", dpid_to_str(con_or_dpid))
@@ -321,7 +331,7 @@ class Discovery (EventMixin):
     """
     now = time.time()
 
-    expired = [link for link,timestamp in self.adjacency.iteritems()
+    expired = [link for link,timestamp in self.adjacency.items()
                if timestamp + self._link_timeout < now]
     if expired:
       for link in expired:
@@ -375,7 +385,7 @@ class Discovery (EventMixin):
       for t in lldph.tlvs[3:]:
         if t.tlv_type == pkt.lldp.SYSTEM_DESC_TLV:
           # This is our favored way...
-          for line in t.payload.split('\n'):
+          for line in t.payload.decode().split('\n'):
             if line.startswith('dpid:'):
               try:
                 return int(line[5:], 16)
@@ -395,7 +405,7 @@ class Discovery (EventMixin):
     if originatorDPID == None:
       # We'll look in the CHASSIS ID
       if lldph.tlvs[0].subtype == pkt.chassis_id.SUB_LOCAL:
-        if lldph.tlvs[0].id.startswith('dpid:'):
+        if lldph.tlvs[0].id.startswith(b'dpid:'):
           # This is how NOX does it at the time of writing
           try:
             originatorDPID = int(lldph.tlvs[0].id[5:], 16)
@@ -472,6 +482,137 @@ class Discovery (EventMixin):
       if link.dpid2 == dpid and link.port2 == port:
         return False
     return True
+
+
+class DiscoveryGraph (object):
+  """
+  Keeps (and optionally exports) a NetworkX graph of the topology
+
+  A nice feature of this is that you can have it export the graph to a
+  GraphViz dot file, which you can then look at.  It's a bit easier than
+  setting up Gephi or POXDesk if all you want is something quick.  I
+  then a little bash script to create an image file from the dot.  If
+  you use an image viewer which automatically refreshes when the file
+  changes (e.g., Gnome Image Viewer), you have a low-budget topology
+  graph viewer.  I export the graph by running the POX component:
+
+    openflow.discovery:graph --export=foo.dot
+
+  And here's the script I use to generate the image:
+
+    touch foo.dot foo.dot.prev
+    while true; do
+      if [[ $(cmp foo.dot foo.dot.prev) ]]; then
+        cp foo.dot foo.dot.prev
+        dot -Tpng foo.dot -o foo.png
+      fi
+      sleep 2
+    done
+  """
+  use_names = True
+  def __init__ (self, auto_export_file=None, use_names=None,
+                auto_export_interval=2.0):
+    self.auto_export_file = auto_export_file
+    self.auto_export_interval = auto_export_interval
+    if use_names is not None: self.use_names = use_names
+    self._export_pending = False
+    import networkx as NX
+    self.g = NX.MultiDiGraph()
+    core.listen_to_dependencies(self)
+
+    self._write_dot = None
+    if hasattr(NX, 'write_dot'):
+      self._write_dot = NX.write_dot
+    else:
+      try:
+        self._write_dot = NX.drawing.nx_pydot.write_dot
+      except ImportError:
+        self._write_dot = NX.drawing.nx_agraph.write_dot
+
+    self._auto_export_interval()
+
+  def _auto_export_interval (self):
+    if self.auto_export_interval:
+      core.call_delayed(self.auto_export_interval,
+                        self._auto_export_interval)
+      self._do_auto_export()
+
+  def _handle_openflow_discovery_LinkEvent (self, event):
+    l = event.link
+    k = (l.end[0],l.end[1])
+    if event.added:
+      self.g.add_edge(l.dpid1, l.dpid2, key=k)
+      self.g.edges[l.dpid1,l.dpid2,k]['dead'] = False
+    elif event.removed:
+      self.g.edges[l.dpid1,l.dpid2,k]['dead'] = True
+      #self.g.remove_edge(l.dpid1, l.dpid2, key=k)
+
+    self._do_auto_export()
+
+  def _handle_openflow_PortStatus (self, event):
+    self._do_auto_export()
+
+  def _do_auto_export (self):
+    if not self.auto_export_file: return
+    if self._export_pending: return
+    self._export_pending = True
+    def do_export ():
+      self._export_pending = False
+      if not self.auto_export_file: return
+      self.export_dot(self.auto_export_file)
+    core.call_delayed(0.25, do_export)
+
+  def label_nodes (self):
+    for n,d in self.g.nodes(data=True):
+      c = core.openflow.connections.get(n)
+      name = dpid_to_str(n)
+      if self.use_names:
+        if c and of.OFPP_LOCAL in c.ports:
+          name = c.ports[of.OFPP_LOCAL].name
+          if name.startswith("ovs"):
+            if "_" in name and name[3:].split("_",1)[0].isdigit():
+              name = name.split("_", 1)[-1]
+      self.g.node[n]['label'] = name
+
+  def export_dot (self, filename):
+    if self._write_dot is None:
+      log.error("Can't export graph.  NetworkX has no dot writing.")
+      log.error("You probably need to install something.")
+      return
+
+    self.label_nodes()
+
+    for u,v,k,d in self.g.edges(data=True, keys=True):
+      (d1,p1),(d2,p2) = k
+      assert d1 == u
+      con1 = core.openflow.connections.get(d1)
+      con2 = core.openflow.connections.get(d2)
+      c = ''
+      if d.get('dead') is True: c += 'gray'
+      elif not con1: c += "gray"
+      elif p1 not in con1.ports: c += "gray" # Shouldn't happen!
+      elif con1.ports[p1].config & of.OFPPC_PORT_DOWN: c += "red"
+      elif con1.ports[p1].config & of.OFPPC_NO_FWD: c += "brown"
+      elif con1.ports[p1].config & of.OFPPC_NO_FLOOD: c += "blue"
+      else: c += "green"
+      d['color'] = c
+      d['taillabel'] = str(p1)
+      d['style'] = 'dashed' if d.get('dead') else 'solid'
+    #log.debug("Exporting discovery graph to %s", filename)
+    self._write_dot(self.g, filename)
+
+
+def graph (export = None, dpids_only = False, interval = "2.0"):
+  """
+  Keep (and optionally export) a graph of the topology
+
+  If you pass --export=<filename>, it will periodically save a GraphViz
+  dot file containing the graph.  Normally the graph will label switches
+  using their names when possible (based on the name of their "local"
+  interface).  If you pass --dpids_only, it will just use DPIDs instead.
+  """
+  core.registerNew(DiscoveryGraph, export, use_names = not dpids_only,
+                   auto_export_interval = float(interval))
 
 
 def launch (no_flow = False, explicit_drop = True, link_timeout = None,

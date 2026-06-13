@@ -40,13 +40,14 @@
 
 import struct
 import time
-from packet_utils       import *
-from tcp import *
-from udp import *
-from icmp import *
-from igmp import *
+from .packet_utils       import *
+from .tcp import *
+from .udp import *
+from .icmp import *
+from .igmp import *
+from .gre import *
 
-from packet_base import packet_base
+from .packet_base import packet_base
 
 from pox.lib.addresses import IPAddr, IP_ANY, IP_BROADCAST
 
@@ -60,6 +61,7 @@ class ipv4(packet_base):
     TCP_PROTOCOL  = 6
     UDP_PROTOCOL  = 17
     IGMP_PROTOCOL = 2
+    GRE_PROTOCOL  = gre.PROTOCOL
 
     DF_FLAG = 0x02
     MF_FLAG = 0x01
@@ -72,7 +74,7 @@ class ipv4(packet_base):
         self.prev = prev
 
         self.v     = 4
-        self.hl    = ipv4.MIN_LEN / 4
+        self.hl    = ipv4.MIN_LEN // 4
         self.tos   = 0
         self.iplen = ipv4.MIN_LEN
         ipv4.ip_id = (ipv4.ip_id + 1) & 0xffff
@@ -85,6 +87,7 @@ class ipv4(packet_base):
         self.srcip = IP_ANY
         self.dstip = IP_ANY
         self.next  = b''
+        self.raw_options = b''
 
         if raw is not None:
             self.parse(raw)
@@ -140,6 +143,7 @@ class ipv4(packet_base):
             self.msg('(ip parse) warning: IP header is truncated')
             return
 
+        self.raw_options = raw[self.MIN_LEN:self.hl*4]
         # At this point, we are reasonably certain that we have an IP
         # packet
         self.parsed = True
@@ -147,7 +151,10 @@ class ipv4(packet_base):
         length = self.iplen
         if length > dlen:
             length = dlen # Clamp to what we've got
-        if self.protocol == ipv4.UDP_PROTOCOL:
+        if self.frag != 0:
+            # We can't parse payloads!
+            self.next =  raw[self.hl*4:length]
+        elif self.protocol == ipv4.UDP_PROTOCOL:
             self.next = udp(raw=raw[self.hl*4:length], prev=self)
         elif self.protocol == ipv4.TCP_PROTOCOL:
             self.next = tcp(raw=raw[self.hl*4:length], prev=self)
@@ -155,6 +162,8 @@ class ipv4(packet_base):
             self.next = icmp(raw=raw[self.hl*4:length], prev=self)
         elif self.protocol == ipv4.IGMP_PROTOCOL:
             self.next = igmp(raw=raw[self.hl*4:length], prev=self)
+        elif self.protocol == ipv4.GRE_PROTOCOL:
+            self.next = gre(raw=raw[self.hl*4:length], prev=self)
         elif dlen < self.iplen:
             self.msg('(ip parse) warning IP packet data shorter than IP len: %u < %u' % (dlen, self.iplen))
         else:
@@ -168,7 +177,7 @@ class ipv4(packet_base):
                                  self.iplen, self.id,
                                  (self.flags << 13) | self.frag, self.ttl,
                                  self.protocol, 0, self.srcip.toUnsigned(),
-                                 self.dstip.toUnsigned())
+                                 self.dstip.toUnsigned()) + self.raw_options
         return checksum(data, 0)
 
 
@@ -179,4 +188,4 @@ class ipv4(packet_base):
                            self.iplen, self.id,
                            (self.flags << 13) | self.frag, self.ttl,
                            self.protocol, self.csum, self.srcip.toUnsigned(),
-                           self.dstip.toUnsigned())
+                           self.dstip.toUnsigned()) + self.raw_options

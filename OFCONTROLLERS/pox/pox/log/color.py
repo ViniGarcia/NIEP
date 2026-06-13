@@ -52,7 +52,7 @@ COLORS = {
 }
 
 # Add intense/bold colors (names it capitals)
-for _c in [_n for _n,_v in COLORS.items() if _v[0] == 0]:
+for _c in [_n for _n,_v in list(COLORS.items()) if _v[0] == 0]:
   COLORS[_c.upper()] = (1,COLORS[_c][1])
 
 COMMANDS = {
@@ -97,7 +97,7 @@ def _proc (msg, level_color = "DEBUG"):
     if cmd:
       best = None
       bestlen = 0
-      for k,v in COMMANDS.iteritems():
+      for k,v in COMMANDS.items():
         if len(k) > bestlen:
           if m.startswith(k):
             best = (k,v)
@@ -108,7 +108,7 @@ def _proc (msg, level_color = "DEBUG"):
         m = m[bestlen:]
         best = None
         bestlen = 0
-      for k,v in COLORS.iteritems():
+      for k,v in COLORS.items():
         if len(k) > bestlen:
           if m.startswith(k):
             best = (k,v)
