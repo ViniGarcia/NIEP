@@ -1,0 +1,8 @@
+{
+  "ID": "doc-tinycore",
+  "MEMORY": 300,
+  "VCPU": 1,
+  "DISK": "tinycore12",
+  "MANAGEMENT_MAC": "52:54:02:00:00:10",
+  "INTERFACES": []
+}

@@ -1,0 +1,6 @@
+GET_RUNNING
+POST_STOP
+POST_FUNCTION ../tutorial/examples/click/forward.click
+GET_FUNCTION
+POST_START
+GET_RUNNING

@@ -1,0 +1,15 @@
+{
+  "ID": "DocVMBasic",
+  "VMS": [
+    "../tutorial/examples/tinycore-vm.json"
+  ],
+  "VNFS": [],
+  "SFCS": [],
+  "MININET": {
+    "HOSTS": [],
+    "SWITCHES": [],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": []
+}

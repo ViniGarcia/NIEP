@@ -1,0 +1,19 @@
+{
+  "ID": "doc-click-forward",
+  "MEMORY": 300,
+  "VCPU": 1,
+  "DISK": "click-on-osv",
+  "MANAGEMENT_MAC": "52:54:02:00:30:00",
+  "INTERFACES": [
+    {
+      "ID": "br-click0",
+      "MAC": "52:54:02:00:30:01",
+      "LINK_MAC": "02:00:00:00:30:fe"
+    },
+    {
+      "ID": "br-click1",
+      "MAC": "52:54:02:00:30:02",
+      "LINK_MAC": "02:00:00:00:31:fe"
+    }
+  ]
+}
