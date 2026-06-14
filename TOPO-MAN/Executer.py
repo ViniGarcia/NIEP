@@ -1,4 +1,5 @@
 from Parser import *
+from Spec import MininetControllerSpec
 from subprocess import check_output
 from subprocess import call, Popen
 from subprocess import STDOUT
@@ -81,7 +82,7 @@ class Executer:
             if self.LOCAL_POX_ENABLED:
                 self.POX = Popen([executable, '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT, preexec_fn=pre_exec)
                 sleep(3)
-                UNICTRL = MNController('UNICTRL', '127.0.0.1', 6633)
+                UNICTRL = MininetControllerSpec('UNICTRL', '127.0.0.1', 6633)
                 UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
                 self.CONTROLLERS['UNICTRL'] = UNICTRL
                 self.SWITCH_CONTROLLER_ID = 'UNICTRL'

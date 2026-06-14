@@ -8,6 +8,7 @@ path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
 from VNF import VNF
 from SFC import SFC
 from VM import VM
+from Spec import MininetControllerSpec, MininetHostSpec, MininetOVSSwitchSpec, MininetSwitchSpec, TopologySpec
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # TO DO LIST
@@ -17,40 +18,6 @@ from VM import VM
 
 #Detect the usage of VMs with alias, and block the usage of the VM
 #original ID to other elements.
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-class MNHost:
-    def __init__(self, ID, INTERFACES):
-        self.ID = ID
-        self.INTERFACES = INTERFACES
-        self.ELEM = None
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-class MNSwitch:
-    def __init__(self, ID):
-        self.ID = ID
-        self.ELEM = None
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-class MNController:
-    def __init__(self, ID, IP, PORT):
-        self.ID = ID
-        self.IP = IP
-        self.PORT = PORT
-        self.ELEM = None
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-class MNOVSSwitch:
-    def __init__(self, ID, CONTROLLER):
-        self.ID = ID
-        self.CONTROLLER = CONTROLLER
-        self.ELEM = None
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 class PlatformParser:
     def __init__(self, jsonFilePath):
@@ -66,6 +33,7 @@ class PlatformParser:
         self.MNOVSES = []
         self.CONNECTIONS = []
         self.DETAIL = ""
+        self.SPEC = None
 
         if isfile(jsonFilePath):
             with open(jsonFilePath) as data:
@@ -103,6 +71,17 @@ class PlatformParser:
                     if self.VNFSCheck(SFCVNFS) == 0:
                         if self.mininetCheck() == 0:
                             if self.connectionsCheck() == 0:
+                                self.SPEC = TopologySpec(
+                                    id=self.ID,
+                                    vms=self.VMS,
+                                    vnfs=self.VNFS,
+                                    sfcs=self.SFCS,
+                                    mininet_hosts=self.MNHOSTS,
+                                    mininet_switches=self.MNSWITCHES,
+                                    mininet_controllers=self.MNCONTROLLER,
+                                    mininet_ovs_switches=self.MNOVSES,
+                                    connections=self.CONNECTIONS,
+                                )
                                 self.STATUS = 0
 
 #------------------------------------------------------------------
@@ -323,7 +302,7 @@ class PlatformParser:
                         self.STATUS = -7
                         return -7
 
-                    self.MNHOSTS.append(MNHost(HOST["ID"], HOST["INTERFACES"]))
+                    self.MNHOSTS.append(MininetHostSpec(HOST["ID"], HOST["INTERFACES"]))
             else:
                 self.STATUS = -7
                 return -7
@@ -337,7 +316,7 @@ class PlatformParser:
                     else:
                         IDLIST.append(SWITCH)
 
-                    self.MNSWITCHES.append(MNSwitch(SWITCH))
+                    self.MNSWITCHES.append(MininetSwitchSpec(SWITCH))
 
         if "CONTROLLERS" in MininetList:
             if isinstance(MininetList["CONTROLLERS"], list):
@@ -351,7 +330,7 @@ class PlatformParser:
                             return -9
                         CONTROLLERLIST.append(CONTROLLER["ID"])
 
-                    self.MNCONTROLLER.append(MNController(CONTROLLER["ID"], CONTROLLER["IP"], int(CONTROLLER["PORT"])))
+                    self.MNCONTROLLER.append(MininetControllerSpec(CONTROLLER["ID"], CONTROLLER["IP"], int(CONTROLLER["PORT"])))
 
         if "OVSWITCHES" in MininetList:
             if isinstance(MininetList["OVSWITCHES"], list):
@@ -370,7 +349,7 @@ class PlatformParser:
                         self.STATUS = -10
                         return -10
 
-                    self.MNOVSES.append(MNOVSSwitch(OVSSWITCH["ID"], OVSSWITCH["CONTROLLER"]))
+                    self.MNOVSES.append(MininetOVSSwitchSpec(OVSSWITCH["ID"], OVSSWITCH["CONTROLLER"]))
 
         return 0
 
