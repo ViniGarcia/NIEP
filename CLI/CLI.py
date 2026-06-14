@@ -8,6 +8,7 @@ import readline
 import rlcompleter
 
 path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['TOPO-MAN']))
+from Result import ResultCode
 from Service import TopologyService, VMService, VNFService, SFCService
 
 def PATHCOMPLETER(line, text):
@@ -71,6 +72,74 @@ class NIEPCLI(cmd.Cmd):
     def sync_executor(self):
         self.NIEPEXE = self.TOPOLOGY.executor
 
+    def print_result_error(self, result, include_status=False):
+        message = result.cli_message(include_status=include_status)
+        if message:
+            print(message)
+
+    def print_define_error(self, result):
+        if result.code == ResultCode.PARSER_ERROR:
+            print("ERROR: " + result.message + " (DEFINE / PARSER / " + str(result.status) + ")")
+            if result.detail:
+                print("DETAIL: " + result.detail)
+        else:
+            print("ERROR: " + result.message + " (DEFINE / EXECUTER /" + str(result.status) + ")")
+
+    def print_vnf_action_result(self, result, action):
+        if not result.ok:
+            self.print_result_error(result)
+            return
+
+        actionstatus = result.data
+        if action == 'list':
+            print('\n############# ACTION LIST #############')
+            actionkeys = list(actionstatus.keys())
+            actionkeys.sort()
+            for actionkey in actionkeys:
+                print(actionkey + " -> " + actionstatus[actionkey])
+            print('#######################################\n')
+            return
+
+        if actionstatus[0]:
+            if len(actionstatus) > 1:
+                print('SUCCESS [' + str(actionstatus[1]) + ']')
+            else:
+                print('SUCCESS')
+        else:
+            if len(actionstatus) > 1:
+                print('VNF PLATFORM ERROR [' + str(actionstatus[1]) + ']')
+            else:
+                print('VNF PLATFORM ERROR')
+
+    def print_script_result(self, result):
+        if not result.ok:
+            self.print_result_error(result)
+            return
+
+        script_result = result.data
+        print('\n############# EXECUTION SUMMARY #############')
+        if not script_result[0] or len(script_result[1]) == 2:
+            print('-> NORMAL SCRIPT (FAILED)')
+
+            if script_result[1][0][1] == -1:
+                print('VNF IS NOT UP')
+            elif script_result[1][0][1] == -2:
+                print('INVALID ACTION REQUESTED')
+            else:
+                print("FAILED AT LINE " + str(len(script_result[1][0][1])) + " " + str(script_result[1][0][1][-1]) )
+                if script_result[0]:
+                    print('\n-> ERROR RECOVERING SCRIPT (SUCCESS)')
+                    for index in range(len(script_result[1][1][1])):
+                        print('LINE ' + str(index + 1) + ': ' + str(script_result[1][1][1][index][1]))
+                elif len(script_result[1]) == 2:
+                    print('\n-> ERROR RECOVERING SCRIPT (FAILED)')
+                    print("FAILED AT LINE " + str(len(script_result[1][1][1])) + " " + str(script_result[1][1][1][-1]) )
+        else:
+            print('-> NORMAL SCRIPT (SUCCESS)')
+            for index in range(len(script_result[1][0][1])):
+                print('LINE ' + str(index + 1) + ': ' + str(script_result[1][0][1][index][1]))
+        print('#######################################\n')
+
 ##################################################################################################################################
 # NIEP INTERFACE
 
@@ -128,12 +197,7 @@ class NIEPCLI(cmd.Cmd):
             result = self.TOPOLOGY.define(args)
             self.sync_executor()
             if not result.ok:
-                if result.code == "parser_error":
-                    print("ERROR: " + result.message + " (DEFINE / PARSER / " + str(result.status) + ")")
-                    if result.detail:
-                        print("DETAIL: " + result.detail)
-                else:
-                    print("ERROR: " + result.message + " (DEFINE / EXECUTER /" + str(result.status) + ")")
+                self.print_define_error(result)
                 return
         else:
             print('NIEP PROMPT COMMAND')
@@ -152,11 +216,11 @@ class NIEPCLI(cmd.Cmd):
 
                 result = self.TOPOLOGY.up()
                 self.sync_executor()
-                if result.code == "already_executed":
+                if result.code == ResultCode.ALREADY_EXECUTED:
                     print(result.message + ' - CODE ' + str(result.status))
                     return
                 if not result.ok:
-                    print(result.message + ' (' + str(result.status) + ')')
+                    self.print_result_error(result, include_status=True)
                     return
             else:
                 print('NO TOPOLOGY DEFINED')
@@ -174,7 +238,7 @@ class NIEPCLI(cmd.Cmd):
                 result = self.TOPOLOGY.down()
                 self.sync_executor()
                 if not result.ok:
-                    print(result.message + ' (' + str(result.status) + ')')
+                    self.print_result_error(result, include_status=True)
                     return
             else:
                 print('NO TOPOLOGY DEFINED')
@@ -417,7 +481,7 @@ class NIEPCLI(cmd.Cmd):
 
             result = self.VMSERVICE.management(self.VMEXEC.ID)
             if not result.ok:
-                print(result.message)
+                self.print_result_error(result)
                 return
             print(result.data)
         else:
@@ -447,7 +511,7 @@ class NIEPCLI(cmd.Cmd):
 
             result = self.VNFSERVICE.management(self.VNFEXEC.ID)
             if not result.ok:
-                print(result.message)
+                self.print_result_error(result)
                 return
             print(result.data)
         else:
@@ -462,10 +526,10 @@ class NIEPCLI(cmd.Cmd):
 
             result = self.VNFSERVICE.up(self.VNFEXEC.ID)
             if not result.ok:
-                if result.code == "invalid_vnf_status" and isinstance(result.data, dict):
+                if result.code == ResultCode.INVALID_VNF_STATUS and isinstance(result.data, dict):
                     print('INVALID VNF STATUS (VNF_STATUS=' + str(result.data.get('VNF_STATUS')) + ', VM_STATUS=' + str(result.data.get('VM_STATUS')) + ')')
                 else:
-                    print(result.message)
+                    self.print_result_error(result)
                 return
         else:
             print('VNF PROMPT COMMAND')
@@ -479,7 +543,7 @@ class NIEPCLI(cmd.Cmd):
 
             result = self.VNFSERVICE.down(self.VNFEXEC.ID)
             if not result.ok:
-                print(result.message)
+                self.print_result_error(result)
                 return
         else:
             print('VNF PROMPT COMMAND')
@@ -491,34 +555,9 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 1 OR 2 ARGUMENTS EXPECTED')
                 return
 
-            actionstatus = None
             if len(splited_args) > 0:
                 result = self.VNFSERVICE.action(self.VNFEXEC.ID, splited_args[0], splited_args[1:])
-                actionstatus = result.data if result.ok else result
-
-            if hasattr(actionstatus, 'ok') and not actionstatus.ok:
-                print(actionstatus.message)
-                return
-
-            if splited_args[0] == 'list':
-                    print('\n############# ACTION LIST #############')
-                    actionkeys = list(actionstatus.keys())
-                    actionkeys.sort()
-                    for action in actionkeys:
-                        print(action + " -> " + actionstatus[action])
-                    print('#######################################\n')
-                    return
-
-            if actionstatus[0]:
-                if len(actionstatus) > 1:
-                    print('SUCCESS [' + str(actionstatus[1]) + ']')
-                else:
-                    print('SUCCESS')
-            else:
-                if len(actionstatus) > 1:
-                    print('VNF PLATFORM ERROR [' + str(actionstatus[1]) + ']')
-                else:
-                    print('VNF PLATFORM ERROR')
+                self.print_vnf_action_result(result, splited_args[0])
 
         else:
             print('VNF PROMPT COMMAND')
@@ -561,33 +600,7 @@ class NIEPCLI(cmd.Cmd):
             else:
                 result = self.VNFSERVICE.script(self.VNFEXEC.ID, splited_args[0], splited_args[1])
 
-            if not result.ok:
-                print(result.message)
-                return
-            script_result = result.data
-
-            print('\n############# EXECUTION SUMMARY #############')
-            if not script_result[0] or len(script_result[1]) == 2:
-                print('-> NORMAL SCRIPT (FAILED)')
-                
-                if script_result[1][0][1] == -1:
-                    print('VNF IS NOT UP')
-                elif script_result[1][0][1] == -2:
-                    print('INVALID ACTION REQUESTED')
-                else:
-                    print("FAILED AT LINE " + str(len(script_result[1][0][1])) + " " + str(script_result[1][0][1][-1]) )
-                    if script_result[0]:
-                        print('\n-> ERROR RECOVERING SCRIPT (SUCCESS)')
-                        for index in range(len(script_result[1][1][1])):
-                            print('LINE ' + str(index + 1) + ': ' + str(script_result[1][1][1][index][1]))
-                    elif len(script_result[1]) == 2:
-                        print('\n-> ERROR RECOVERING SCRIPT (FAILED)')
-                        print("FAILED AT LINE " + str(len(script_result[1][1][1])) + " " + str(script_result[1][1][1][-1]) )
-            else:
-                print('-> NORMAL SCRIPT (SUCCESS)')
-                for index in range(len(script_result[1][0][1])):
-                    print('LINE ' + str(index + 1) + ': ' + str(script_result[1][0][1][index][1]))
-            print('#######################################\n')
+            self.print_script_result(result)
 
         else:
             print('VNF PROMPT COMMAND')
@@ -614,7 +627,7 @@ class NIEPCLI(cmd.Cmd):
 
             result = self.SFCSERVICE.management(self.SFCEXEC.ID)
             if not result.ok:
-                print(result.message)
+                self.print_result_error(result)
                 return
             for managementData in result.data:
                 print(managementData)
@@ -630,7 +643,7 @@ class NIEPCLI(cmd.Cmd):
 
             result = self.SFCSERVICE.up(self.SFCEXEC.ID)
             if not result.ok:
-                print(result.message)
+                self.print_result_error(result)
                 return
         else:
             print('SFC PROMPT COMMAND')
@@ -644,7 +657,7 @@ class NIEPCLI(cmd.Cmd):
 
             result = self.SFCSERVICE.down(self.SFCEXEC.ID)
             if not result.ok:
-                print(result.message)
+                self.print_result_error(result)
                 return
         else:
             print('SFC PROMPT COMMAND')

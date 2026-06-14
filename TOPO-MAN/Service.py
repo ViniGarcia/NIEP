@@ -1,9 +1,9 @@
-from dataclasses import dataclass
 from os.path import abspath
 from shutil import rmtree
 
 from Executer import Executer
 from Parser import PlatformParser
+from Result import ResultCode, ServiceResult
 
 
 PARSERERRORS = {-1: "Invalid definition file path or invalid key included",
@@ -27,16 +27,6 @@ EXECUTERERRORS = {-1: "Mininet network interfaces mapping failed",
                   -4: "Parser error detected"}
 
 
-@dataclass
-class ServiceResult:
-    ok: bool
-    code: str
-    message: str = ""
-    data: object = None
-    status: int = None
-    detail: str = ""
-
-
 class TopologyService:
     def __init__(self):
         self.executor = None
@@ -46,7 +36,7 @@ class TopologyService:
         if parser.STATUS != 0:
             return ServiceResult(
                 ok=False,
-                code="parser_error",
+                code=ResultCode.PARSER_ERROR,
                 message=PARSERERRORS.get(parser.STATUS, "Parser error"),
                 data=parser,
                 status=parser.STATUS,
@@ -57,23 +47,23 @@ class TopologyService:
         if executor.STATUS is not None:
             return ServiceResult(
                 ok=False,
-                code="executer_error",
+                code=ResultCode.EXECUTER_ERROR,
                 message=EXECUTERERRORS.get(executor.STATUS, "Executer error"),
                 data=executor,
                 status=executor.STATUS,
             )
 
         self.executor = executor
-        return ServiceResult(ok=True, code="defined", data=executor)
+        return ServiceResult(ok=True, code=ResultCode.DEFINED, data=executor)
 
     def up(self):
         if self.executor is None:
-            return ServiceResult(ok=False, code="no_topology", message="NO TOPOLOGY DEFINED")
+            return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
         if self.executor.STATUS is not None:
             return ServiceResult(
                 ok=False,
-                code="already_executed",
+                code=ResultCode.ALREADY_EXECUTED,
                 message="THIS COMMAND WAS ALREADY EXECUTED FOR THIS TOPOLOGY",
                 status=self.executor.STATUS,
             )
@@ -84,16 +74,16 @@ class TopologyService:
             self.executor = None
             return ServiceResult(
                 ok=False,
-                code="topology_up_failed",
+                code=ResultCode.TOPOLOGY_UP_FAILED,
                 message="PROBLEMS ON TOPOLOGY DEFINITION ON UP PROCESS - TOPOLOGY UNDEFINED",
                 status=status,
             )
 
-        return ServiceResult(ok=True, code="topology_up", data=self.executor)
+        return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_UP, data=self.executor)
 
     def down(self):
         if self.executor is None:
-            return ServiceResult(ok=False, code="no_topology", message="NO TOPOLOGY DEFINED")
+            return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
         self.executor.topologyDown()
         if self.executor.STATUS is not None:
@@ -101,25 +91,25 @@ class TopologyService:
             self.executor = None
             return ServiceResult(
                 ok=False,
-                code="topology_down_failed",
+                code=ResultCode.TOPOLOGY_DOWN_FAILED,
                 message="PROBLEMS ON TOPOLOGY DEFINITION ON DOWN PROCESS - TOPOLOGY UNDEFINED",
                 status=status,
             )
 
-        return ServiceResult(ok=True, code="topology_down")
+        return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_DOWN)
 
     def clean(self):
         if self.executor is None:
-            return ServiceResult(ok=False, code="no_topology", message="NO TOPOLOGY DEFINED")
+            return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
         if self.executor.STATUS == 0:
             self.executor.topologyDown()
         self.executor = None
-        return ServiceResult(ok=True, code="topology_clean")
+        return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_CLEAN)
 
     def destroy(self):
         if self.executor is None:
-            return ServiceResult(ok=False, code="no_topology", message="NO TOPOLOGY DEFINED")
+            return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
         if self.executor.STATUS == 0:
             self.executor.topologyDown()
@@ -131,7 +121,7 @@ class TopologyService:
             rmtree(images_path + '/' + self.executor.VMS[vm_id].ID, ignore_errors=True)
 
         self.executor = None
-        return ServiceResult(ok=True, code="topology_destroyed")
+        return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_DESTROYED)
 
     def is_up(self):
         return self.executor is not None and self.executor.STATUS == 0
@@ -177,23 +167,23 @@ class VMService:
     def management(self, vm_id):
         vm = self.topology.get_vm(vm_id)
         if vm is None:
-            return ServiceResult(ok=False, code="vm_not_found", message="VM NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.VM_NOT_FOUND, message="VM NOT FOUND")
 
         management = vm.managementVM()
         if management is None:
-            return ServiceResult(ok=False, code="invalid_vm_status", message="INVALID VM STATUS")
+            return ServiceResult(ok=False, code=ResultCode.INVALID_VM_STATUS, message="INVALID VM STATUS")
         if management == -1:
-            return ServiceResult(ok=False, code="vm_not_up", message="VM IS NOT UP")
+            return ServiceResult(ok=False, code=ResultCode.VM_NOT_UP, message="VM IS NOT UP")
         if management == -2:
-            return ServiceResult(ok=False, code="arp_problems", message="ARP PROBLEMS")
-        return ServiceResult(ok=True, code="management_address", data=management)
+            return ServiceResult(ok=False, code=ResultCode.ARP_PROBLEMS, message="ARP PROBLEMS")
+        return ServiceResult(ok=True, code=ResultCode.MANAGEMENT_ADDRESS, data=management)
 
     def ssh(self, vm_id, user, passwd):
         vm = self.topology.get_vm(vm_id)
         if vm is None:
-            return ServiceResult(ok=False, code="vm_not_found", message="VM NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.VM_NOT_FOUND, message="VM NOT FOUND")
         result = vm.sshVM(user, passwd)
-        return ServiceResult(ok=(result == 0), code="vm_ssh", status=result)
+        return ServiceResult(ok=(result == 0), code=ResultCode.VM_SSH, status=result)
 
 
 class VNFService:
@@ -203,78 +193,78 @@ class VNFService:
     def management(self, vnf_id):
         vnf = self.topology.get_vnf(vnf_id)
         if vnf is None:
-            return ServiceResult(ok=False, code="vnf_not_found", message="VNF NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.VNF_NOT_FOUND, message="VNF NOT FOUND")
 
         management = vnf.managementVNF()
         if management is None:
-            return ServiceResult(ok=False, code="invalid_vnf_status", message="INVALID VNF STATUS")
+            return ServiceResult(ok=False, code=ResultCode.INVALID_VNF_STATUS, message="INVALID VNF STATUS")
         if management == -1:
-            return ServiceResult(ok=False, code="vnf_not_up", message="VNF IS NOT UP")
+            return ServiceResult(ok=False, code=ResultCode.VNF_NOT_UP, message="VNF IS NOT UP")
         if management == -2:
-            return ServiceResult(ok=False, code="arp_problems", message="ARP PROBLEMS")
-        return ServiceResult(ok=True, code="management_address", data=management)
+            return ServiceResult(ok=False, code=ResultCode.ARP_PROBLEMS, message="ARP PROBLEMS")
+        return ServiceResult(ok=True, code=ResultCode.MANAGEMENT_ADDRESS, data=management)
 
     def up(self, vnf_id):
         vnf = self.topology.get_vnf(vnf_id)
         if vnf is None:
-            return ServiceResult(ok=False, code="vnf_not_found", message="VNF NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.VNF_NOT_FOUND, message="VNF NOT FOUND")
         result = vnf.upVNF()
         if result is None:
             vmstatus = getattr(getattr(vnf, 'VM', None), 'VM_STATUS', None)
             return ServiceResult(
                 ok=False,
-                code="invalid_vnf_status",
+                code=ResultCode.INVALID_VNF_STATUS,
                 message="INVALID VNF STATUS",
                 data={'VNF_STATUS': getattr(vnf, 'VNF_STATUS', None), 'VM_STATUS': vmstatus},
             )
         if result == -2:
-            return ServiceResult(ok=False, code="vnf_does_not_exist", message="VNF DOES NOT EXIST")
+            return ServiceResult(ok=False, code=ResultCode.VNF_DOES_NOT_EXIST, message="VNF DOES NOT EXIST")
         if result == -1:
-            return ServiceResult(ok=False, code="vnf_already_up", message="VNF ALREADY UP")
-        return ServiceResult(ok=True, code="vnf_up", status=result)
+            return ServiceResult(ok=False, code=ResultCode.VNF_ALREADY_UP, message="VNF ALREADY UP")
+        return ServiceResult(ok=True, code=ResultCode.VNF_UP, status=result)
 
     def down(self, vnf_id):
         vnf = self.topology.get_vnf(vnf_id)
         if vnf is None:
-            return ServiceResult(ok=False, code="vnf_not_found", message="VNF NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.VNF_NOT_FOUND, message="VNF NOT FOUND")
         result = vnf.sleepVNF()
         if result is None:
-            return ServiceResult(ok=False, code="invalid_vnf_status", message="INVALID VNF STATUS")
+            return ServiceResult(ok=False, code=ResultCode.INVALID_VNF_STATUS, message="INVALID VNF STATUS")
         if result == -2:
-            return ServiceResult(ok=False, code="vnf_does_not_exist", message="VNF DOES NOT EXIST")
+            return ServiceResult(ok=False, code=ResultCode.VNF_DOES_NOT_EXIST, message="VNF DOES NOT EXIST")
         if result == -1:
-            return ServiceResult(ok=False, code="vnf_already_down", message="VNF ALREADY DOWN")
-        return ServiceResult(ok=True, code="vnf_down", status=result)
+            return ServiceResult(ok=False, code=ResultCode.VNF_ALREADY_DOWN, message="VNF ALREADY DOWN")
+        return ServiceResult(ok=True, code=ResultCode.VNF_DOWN, status=result)
 
     def action(self, vnf_id, action, args):
         vnf = self.topology.get_vnf(vnf_id)
         if vnf is None:
-            return ServiceResult(ok=False, code="vnf_not_found", message="VNF NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.VNF_NOT_FOUND, message="VNF NOT FOUND")
 
         result = vnf.controlVNF(action, args)
         if result is None:
-            return ServiceResult(ok=False, code="undefined_action", message="UNDEFINED ACTION")
+            return ServiceResult(ok=False, code=ResultCode.UNDEFINED_ACTION, message="UNDEFINED ACTION")
         if result == -1:
-            return ServiceResult(ok=False, code="vnf_not_up", message="VNF IS NOT UP")
+            return ServiceResult(ok=False, code=ResultCode.VNF_NOT_UP, message="VNF IS NOT UP")
         if result == -2:
-            return ServiceResult(ok=False, code="management_unreachable", message="VNF MANAGEMENT IS NOT ACCESIBLE")
+            return ServiceResult(ok=False, code=ResultCode.MANAGEMENT_UNREACHABLE, message="VNF MANAGEMENT IS NOT ACCESIBLE")
         if result == -3:
-            return ServiceResult(ok=False, code="action_not_found", message="VNF ACTION DOES NOT EXIST")
+            return ServiceResult(ok=False, code=ResultCode.ACTION_NOT_FOUND, message="VNF ACTION DOES NOT EXIST")
         if result == -4:
-            return ServiceResult(ok=False, code="invalid_action_args", message="INVALID ARGUMENTS FOR THE REQUESTED VNF ACTION")
-        return ServiceResult(ok=True, code="vnf_action", data=result)
+            return ServiceResult(ok=False, code=ResultCode.INVALID_ACTION_ARGS, message="INVALID ARGUMENTS FOR THE REQUESTED VNF ACTION")
+        return ServiceResult(ok=True, code=ResultCode.VNF_ACTION, data=result)
 
     def script(self, vnf_id, script_normal, script_error):
         vnf = self.topology.get_vnf(vnf_id)
         if vnf is None:
-            return ServiceResult(ok=False, code="vnf_not_found", message="VNF NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.VNF_NOT_FOUND, message="VNF NOT FOUND")
 
         result = vnf.scriptVNF(script_normal, script_error)
         if result == -1:
-            return ServiceResult(ok=False, code="vnf_not_up", message="VNF IS NOT UP")
+            return ServiceResult(ok=False, code=ResultCode.VNF_NOT_UP, message="VNF IS NOT UP")
         if result == -2:
-            return ServiceResult(ok=False, code="management_unreachable", message="VNF MANAGEMENT IS NOT ACCESIBLE")
-        return ServiceResult(ok=True, code="vnf_script", data=result)
+            return ServiceResult(ok=False, code=ResultCode.MANAGEMENT_UNREACHABLE, message="VNF MANAGEMENT IS NOT ACCESIBLE")
+        return ServiceResult(ok=True, code=ResultCode.VNF_SCRIPT, data=result)
 
 
 class SFCService:
@@ -284,38 +274,38 @@ class SFCService:
     def management(self, sfc_id):
         sfc = self.topology.get_sfc(sfc_id)
         if sfc is None:
-            return ServiceResult(ok=False, code="sfc_not_found", message="SFC NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.SFC_NOT_FOUND, message="SFC NOT FOUND")
         if not sfc.checkStatusSFC():
-            return ServiceResult(ok=False, code="sfc_not_ready", message="SFC IS NOT UP OR NOT TOTALLY UP")
+            return ServiceResult(ok=False, code=ResultCode.SFC_NOT_READY, message="SFC IS NOT UP OR NOT TOTALLY UP")
         result = sfc.managementSFC()
         if result is None:
-            return ServiceResult(ok=False, code="invalid_sfc_status", message="INVALID SFC STATUS")
+            return ServiceResult(ok=False, code=ResultCode.INVALID_SFC_STATUS, message="INVALID SFC STATUS")
         if result == -1:
-            return ServiceResult(ok=False, code="sfc_not_up", message="SFC IS NOT UP")
+            return ServiceResult(ok=False, code=ResultCode.SFC_NOT_UP, message="SFC IS NOT UP")
         if result == -2:
-            return ServiceResult(ok=False, code="arp_problems", message="ARP PROBLEMS")
-        return ServiceResult(ok=True, code="management_address", data=result)
+            return ServiceResult(ok=False, code=ResultCode.ARP_PROBLEMS, message="ARP PROBLEMS")
+        return ServiceResult(ok=True, code=ResultCode.MANAGEMENT_ADDRESS, data=result)
 
     def up(self, sfc_id):
         sfc = self.topology.get_sfc(sfc_id)
         if sfc is None:
-            return ServiceResult(ok=False, code="sfc_not_found", message="SFC NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.SFC_NOT_FOUND, message="SFC NOT FOUND")
         sfc.checkStatusSFC()
         result = sfc.wakeSFC()
         if result is None:
-            return ServiceResult(ok=False, code="invalid_sfc_status", message="INVALID SFC STATUS")
+            return ServiceResult(ok=False, code=ResultCode.INVALID_SFC_STATUS, message="INVALID SFC STATUS")
         if result == -1:
-            return ServiceResult(ok=False, code="sfc_already_up", message="SFC ALREADY UP")
-        return ServiceResult(ok=True, code="sfc_up", status=result)
+            return ServiceResult(ok=False, code=ResultCode.SFC_ALREADY_UP, message="SFC ALREADY UP")
+        return ServiceResult(ok=True, code=ResultCode.SFC_UP, status=result)
 
     def down(self, sfc_id):
         sfc = self.topology.get_sfc(sfc_id)
         if sfc is None:
-            return ServiceResult(ok=False, code="sfc_not_found", message="SFC NOT FOUND")
+            return ServiceResult(ok=False, code=ResultCode.SFC_NOT_FOUND, message="SFC NOT FOUND")
         sfc.checkStatusSFC()
         result = sfc.sleepSFC()
         if result is None:
-            return ServiceResult(ok=False, code="invalid_sfc_status", message="INVALID SFC STATUS")
+            return ServiceResult(ok=False, code=ResultCode.INVALID_SFC_STATUS, message="INVALID SFC STATUS")
         if result == -1:
-            return ServiceResult(ok=False, code="sfc_already_down", message="SFC ALREADY DOWN")
-        return ServiceResult(ok=True, code="sfc_down", status=result)
+            return ServiceResult(ok=False, code=ResultCode.SFC_ALREADY_DOWN, message="SFC ALREADY DOWN")
+        return ServiceResult(ok=True, code=ResultCode.SFC_DOWN, status=result)
