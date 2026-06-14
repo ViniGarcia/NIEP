@@ -4,24 +4,22 @@ from VNF import VNF
 from os import path
 
 class SFC:
-    ID = ''
-    VNFS = []
-    IP = {}
-    OPS = []
-    CONNECTIONS = []
-
-    SFC_VNFS_CONF = []
-    SFC_VNF_INSTANCES = []
-    SFC_LAST_INSTANCES = []
-
-    SFC_UP = False
-    SFC_PARCIAL_UP = False
-    SFC_STATUS = 0
-    SFC_JSON = ''
 
 #__init__: charges the SFC data if JSON exists and call for validation
 #          -12 = JSON file not found
     def __init__(self, configurationPath):
+        self.ID = ''
+        self.VNFS = []
+        self.IP = {}
+        self.OPS = []
+        self.CONNECTIONS = []
+        self.SFC_VNFS_CONF = []
+        self.SFC_VNF_INSTANCES = []
+        self.SFC_LAST_INSTANCES = []
+        self.SFC_UP = False
+        self.SFC_PARCIAL_UP = False
+        self.SFC_STATUS = 0
+        self.SFC_JSON = ''
 
         if path.isfile(configurationPath):
             self.SFC_JSON = configurationPath
@@ -44,25 +42,6 @@ class SFC:
 
         if self.structureValidation() == 0:
             self.graphValidation()
-
-#__del__: restores the class to the fundamental state, avoiding same memory
-#         allocations problems.
-    def __del__(self):
-
-        self.ID = ''
-        del self.VNFS[:]
-        self.IP.clear()
-        del self.OPS[:]
-        del self.CONNECTIONS[:]
-
-        del self.SFC_VNFS_CONF[:]
-        del self.SFC_VNF_INSTANCES[:]
-        del self.SFC_LAST_INSTANCES[:]
-
-        self.SFC_UP = False
-        self.SFC_PARCIAL_UP = False
-        self.SFC_STATUS = 0
-        self.SFC_JSON = ''
 
 #__checkMAC = verifies a given MAC address and return if it is valid or not.
 #              0 = valid MAC

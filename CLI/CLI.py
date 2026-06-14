@@ -81,12 +81,14 @@ def PATHCOMPLETER(line, text):
 
 class NIEPCLI(cmd.Cmd):
 
-    prompt = 'niep> '
-    NIEPEXE = None
-    VMEXEC = None
-    VNFEXEC = None
-    SFCEXEC = None
-    CLICOMP = None    
+    def __init__(self):
+        super().__init__()
+        self.prompt = 'niep> '
+        self.NIEPEXE = None
+        self.VMEXEC = None
+        self.VNFEXEC = None
+        self.SFCEXEC = None
+        self.CLICOMP = None
 
 ##################################################################################################################################
 # NIEP INTERFACE

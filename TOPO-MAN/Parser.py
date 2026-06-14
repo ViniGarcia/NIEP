@@ -21,64 +21,51 @@ from VM import VM
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 class MNHost:
-    ID = ""
-    INTERFACES = None
-    ELEM = None
-
     def __init__(self, ID, INTERFACES):
         self.ID = ID
         self.INTERFACES = INTERFACES
+        self.ELEM = None
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 class MNSwitch:
-    ID = ""
-    ELEM = None
-
     def __init__(self, ID):
         self.ID = ID
+        self.ELEM = None
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 class MNController:
-    ID = ""
-    IP = ""
-    PORT = None
-    ELEM = None
-
     def __init__(self, ID, IP, PORT):
         self.ID = ID
         self.IP = IP
         self.PORT = PORT
+        self.ELEM = None
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 class MNOVSSwitch:
-    ID = ""
-    CONTROLLER = None
-    ELEM = None
-
     def __init__(self, ID, CONTROLLER):
         self.ID = ID
         self.CONTROLLER = CONTROLLER
+        self.ELEM = None
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 class PlatformParser:
-    JSON = None
-    STATUS = None
-    ID = ""
-    VMS = []
-    VNFS = []
-    SFCS = []
-    MNHOSTS = []
-    MNSWITCHES = []
-    MNCONTROLLER = []
-    MNOVSES = []
-    CONNECTIONS = []
-    DETAIL = ""
-
     def __init__(self, jsonFilePath):
+        self.JSON = None
+        self.STATUS = None
+        self.ID = ""
+        self.VMS = []
+        self.VNFS = []
+        self.SFCS = []
+        self.MNHOSTS = []
+        self.MNSWITCHES = []
+        self.MNCONTROLLER = []
+        self.MNOVSES = []
+        self.CONNECTIONS = []
+        self.DETAIL = ""
 
         if isfile(jsonFilePath):
             with open(jsonFilePath) as data:
@@ -117,21 +104,6 @@ class PlatformParser:
                         if self.mininetCheck() == 0:
                             if self.connectionsCheck() == 0:
                                 self.STATUS = 0
-
-    def __del__(self):
-
-        self.JSON = None
-        self.STATUS = None
-        self.ID = ""
-        del self.VMS[:]
-        del self.VNFS[:]
-        del self.SFCS[:]
-        del self.MNHOSTS[:]
-        del self.MNSWITCHES[:]
-        del self.MNCONTROLLER[:]
-        del self.MNOVSES[:]
-        del self.CONNECTIONS[:]
-        self.DETAIL = ""
 
 #------------------------------------------------------------------
 

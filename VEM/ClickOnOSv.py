@@ -5,10 +5,6 @@ from json import loads
 
 class ClickOnOSv:
 
-    VNF_ADDRESS = ''
-    VNF_CATALOG = {}
-
-
 #__init__: gets the VNF instance management info and set the address
 #          for REST requests.
     def __init__(self, managementVNF):

@@ -16,17 +16,16 @@ from VM import *
 #NOTE: EXECUTE THIS SCRIPT IN SUPER USER MODE!!
 
 class VNF:
-    ID = ''
-    VM = None
-
-    VNF_OPERATOR = None
-    
-    VNF_UP = False
-    VNF_STATUS = 0
 
 # __init__: redirects to the correct function to initialize the class, for file interfaces use set 'interface'
 #          as None.
     def __init__(self, configurationPath, interfaces):
+        self.ID = ''
+        self.VM = None
+        self.VNF_OPERATOR = None
+        self.VNF_UP = False
+        self.VNF_STATUS = 0
+        self.VNF_JSON = ''
 
         if path.isfile(configurationPath):
             self.VNF_JSON = configurationPath
@@ -44,24 +43,13 @@ class VNF:
             else:
                 self.VM = VM(parsedVNF["VM"], self.ID, None)
 
-        if self.VM.__class__.__name__ != VM.__name__:
+        if self.VM is None or self.VM.__class__.__name__ != VM.__name__:
             self.VNF_STATUS = -2
             return
 
         if self.VM.VM_STATUS < 0:
             self.VNF_STATUS = self.VM.VM_STATUS
             return
-
-#__del__: restores the class to the fundamental state, avoiding same memory
-#         allocations problems.
-    def __del__(self):
-        self.ID = ''
-        self.VM = None
-
-        self.VNF_OPERATOR = None
-
-        self.VNF_UP = False
-        self.VNF_STATUS = 0
 
 #scriptExecution: execute defined tasks in a json script file.
 #                 -1 = Script file does not exist
@@ -71,14 +59,14 @@ class VNF:
 
         if not path.isfile(scriptPath):
             return(False, -1)
-        
+
         scriptTasks = []
         scriptFile = [[command.replace('\n', '') for command in line.split(' ')] for line in open(scriptPath).readlines()]
         for line in scriptFile:
             if not line[0] in self.VNF_OPERATOR.VNF_CATALOG:
                 return (False, -2)
             if len(line) - 1 != self.VNF_OPERATOR.VNF_CATALOG[line[0]][1]:
-                return (False, -3) 
+                return (False, -3)
 
         scriptResults = []
         for line in scriptFile:
@@ -99,7 +87,7 @@ class VNF:
             return
 
         return self.VM.createVM()
-        
+
 # modifyVNF: reads the VNF JSON to replace the actual configuration.
 #            -5 = VNF does not exist, you need create it before apply configurations
 #            -4 = problems in INTERFACES data
@@ -239,7 +227,7 @@ class VNF:
 
         if len(arguments) != self.VNF_OPERATOR.VNF_CATALOG[action][1]:
             return -4
-        
+
         return self.VNF_OPERATOR.VNF_CATALOG[action][0](*arguments)
 
 

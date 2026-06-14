@@ -1,6 +1,6 @@
 import json
 import random
-import libvirt 
+import libvirt
 from time import sleep
 from glob import glob
 from uuid import uuid4
@@ -17,7 +17,14 @@ FNULL = open(devnull, 'w')
 #STDPATH: standard path - added to be used in NIEP
 STDPATH = '/'.join(path.abspath(__file__).split('/')[:-1]) + '/'
 #VIRT_CONNECTION: used to manage the virtual machines creation and exclusion
-VIRT_CONNECTION = libvirt.open("qemu:///system")
+VIRT_CONNECTION = None
+
+
+def get_virt_connection():
+    global VIRT_CONNECTION
+    if VIRT_CONNECTION is None:
+        VIRT_CONNECTION = libvirt.open("qemu:///system")
+    return VIRT_CONNECTION
 
 
 def check_output_text(cmd):
@@ -37,47 +44,26 @@ def check_output_text(cmd):
 #NOTE: EXECUTE THIS SCRIPT IN SUPER USER MODE!!
 
 class VM:
-    ID = ''
-    MEMORY = 0
-    VCPU = 0
-    DISK = ''
-    MANAGEMENT_MAC = ''
-    INTERFACES = []
-
-    VM_EXIST = False
-    VM_UP = False
-    VM_STATUS = 0
-
-    VM_JSON = ''
-
-    VIRT_VM = None
 
 # __init__: redirects to the correct function to initialize the class, for file interfaces use set 'interface'
 #          as none.
     def __init__(self, configurationPath, alias, interfaces):
-
-        if interfaces != None:
-            self.outInterfaces(configurationPath, alias, interfaces)
-        else:
-            self.inInterfaces(configurationPath, alias)
-
-#__del__: restores the class to the fundamental state, avoiding same memory
-#         allocations problems.
-    def __del__(self):
         self.ID = ''
         self.MEMORY = 0
         self.VCPU = 0
         self.DISK = ''
         self.MANAGEMENT_MAC = ''
-        del self.INTERFACES[:]
-
+        self.INTERFACES = []
         self.VM_EXIST = False
         self.VM_UP = False
         self.VM_STATUS = 0
-
         self.VM_JSON = ''
-
         self.VIRT_VM = None
+
+        if interfaces != None:
+            self.outInterfaces(configurationPath, alias, interfaces)
+        else:
+            self.inInterfaces(configurationPath, alias)
 
 #__checkMAC = verifies a given MAC address and return if it is valid or not.
 #              0 = valid MAC
@@ -188,7 +174,7 @@ class VM:
 #           1 = valid configuration, VM already in the database
     def fullValidation(self):
 
-        if self.ID == '': 
+        if self.ID == '':
             self.VM_STATUS = -1
             return -1
         if self.MEMORY <= 0:
@@ -198,8 +184,10 @@ class VM:
             self.VM_STATUS = -3
             return -3
         if not self.DISK in ['tinycore12', 'click-on-osv']:
+            self.VM_STATUS = -4
             return -4
         if self.MANAGEMENT_MAC == '':
+            self.VM_STATUS = -5
             return -5
 
         for iface in self.INTERFACES:
@@ -261,7 +249,7 @@ class VM:
 #                   1 = valid configuration, VM ready for modification
     def modifyValidation(self):
 
-        if self.ID == '': 
+        if self.ID == '':
             self.VM_STATUS = -1
             return -1
         if self.MEMORY <= 0:
@@ -271,8 +259,10 @@ class VM:
             self.VM_STATUS = -3
             return -3
         if not self.DISK in ['tinycore12', 'click-on-osv']:
+            self.VM_STATUS = -4
             return -4
         if self.MANAGEMENT_MAC == '':
+            self.VM_STATUS = -5
             return -5
 
         for iface in self.INTERFACES:
@@ -438,7 +428,7 @@ class VM:
             ifacesCreate = copy(self.INTERFACES)
             for iface in self.INTERFACES:
                 for iface2 in ifacesData:
-                    if iface2.startswith(iface['ID']):    
+                    if iface2.startswith(iface['ID']):
                         ifacesCreate.remove(iface)
 
             for iface in ifacesCreate:
@@ -449,8 +439,9 @@ class VM:
 
             with open(STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.xml', 'r') as domainFile:
                 domainXML = domainFile.read()
-            VIRT_CONNECTION.defineXML(domainXML)
-            self.VIRT_VM = VIRT_CONNECTION.lookupByName(self.ID)
+            virtConnection = get_virt_connection()
+            virtConnection.defineXML(domainXML)
+            self.VIRT_VM = virtConnection.lookupByName(self.ID)
             self.VIRT_VM.create()
             self.VM_UP = True
             return 0

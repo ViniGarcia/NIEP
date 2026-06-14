@@ -30,38 +30,25 @@ def check_output_text(cmd):
 
 
 class Executer:
-    CONFIGURATION = None
-    HOSTS = {}
-    SWITCHES = {}
-    OVSSWITCHES = {}
-    CONTROLLERS = {}
-    VMS = {}
-    VNFS = {}
-    POX = None 
-    NET = None
-    STATUS = None
-    SWITCH_CONTROLLER_ID = None
-    LOCAL_POX_ENABLED = True
-
     def __init__(self, CONFIGURATION):
+        self.CONFIGURATION = None
+        self.HOSTS = {}
+        self.SWITCHES = {}
+        self.OVSSWITCHES = {}
+        self.CONTROLLERS = {}
+        self.VMS = {}
+        self.VNFS = {}
+        self.POX = None
+        self.NET = None
+        self.STATUS = None
+        self.SWITCH_CONTROLLER_ID = None
+        self.LOCAL_POX_ENABLED = True
 
         if CONFIGURATION.STATUS == 0:
             self.CONFIGURATION = CONFIGURATION
             self.LOCAL_POX_ENABLED = getenv("NIEP_DISABLE_LOCAL_POX", "0").lower() not in ("1", "true", "yes")
         else:
             self.STATUS = -4
-
-    def __del__(self):
-        
-        self.CONFIGURATION = None
-        self.HOSTS.clear()
-        self.SWITCHES.clear()
-        self.OVSSWITCHES.clear()
-        self.CONTROLLERS.clear()
-        self.VMS.clear()
-        self.VNFS.clear()
-        self.NET = None
-        self.STATUS = None
 
 #------------------------------------------------------------------
 
