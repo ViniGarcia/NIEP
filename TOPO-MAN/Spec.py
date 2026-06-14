@@ -152,6 +152,15 @@ class ConnectionSpec:
             data["OUT/INIFACE"] = self.outin_iface
         return data
 
+    def __contains__(self, key):
+        return key in self.to_dict()
+
+    def __getitem__(self, key):
+        return self.to_dict()[key]
+
+    def get(self, key, default=None):
+        return self.to_dict().get(key, default)
+
 
 @dataclass
 class TopologySpec:

@@ -8,7 +8,7 @@ path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
 from VNF import VNF
 from SFC import SFC
 from VM import VM
-from Spec import MininetControllerSpec, MininetHostSpec, MininetOVSSwitchSpec, MininetSwitchSpec, TopologySpec
+from Spec import ConnectionSpec, MininetControllerSpec, MininetHostSpec, MininetOVSSwitchSpec, MininetSwitchSpec, TopologySpec
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # TO DO LIST
@@ -425,5 +425,5 @@ class PlatformParser:
                 self.STATUS = -14
                 return -14
 
-        self.CONNECTIONS = ConnectionsList
+        self.CONNECTIONS = [ConnectionSpec.from_dict(CONNECTION) for CONNECTION in ConnectionsList]
         return 0
