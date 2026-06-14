@@ -16,6 +16,7 @@ sudo python3 CLI.py
 3. [TinyCore VM management test](02-vm-basic.md)
 4. [TinyCore VM connected to a Mininet host](03-vm-host-link.md)
 5. [Click-on-OSv VNF with forwarding policy](04-click-vnf-policy.md)
-6. [Troubleshooting and validation](99-troubleshooting.md)
+6. [Validation checklist](05-validation.md)
+7. [Troubleshooting](99-troubleshooting.md)
 
 The old `EXAMPLES/` directory is useful to understand the original project, but some examples may be stale or inconsistent. The examples in this tutorial are maintained independently under `tutorial/examples/`.

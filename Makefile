@@ -1,7 +1,7 @@
 VAGRANT_PROVIDER ?= libvirt
 NIEP_DIR ?= /home/vagrant/NIEP
 
-.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull
+.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static vm-test-static vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-all
 
 vm-up:
 	vagrant up --provider=$(VAGRANT_PROVIDER)
@@ -47,3 +47,21 @@ vm-check-images:
 lfs-pull:
 	git lfs install
 	git lfs pull --include='VEM/IMAGES/*.qcow2'
+
+test-static:
+	python3 tools/check_static.py
+
+vm-test-static: vm-sync
+	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_static.py"
+
+vm-smoke-mininet: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py mininet"
+
+vm-smoke-vm: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py vm"
+
+vm-smoke-click: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py click"
+
+vm-smoke-all: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py all"
