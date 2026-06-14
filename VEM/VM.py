@@ -1,6 +1,5 @@
 import json
 import random
-import libvirt
 from time import sleep
 from glob import glob
 from uuid import uuid4
@@ -11,20 +10,12 @@ from subprocess import call
 from subprocess import check_output
 from subprocess import STDOUT
 from xml.etree import ElementTree
+from LibvirtRuntime import DEFAULT_LIBVIRT_RUNTIME
 
 #FNULL: redirects the system call normal output
 FNULL = open(devnull, 'w')
 #STDPATH: standard path - added to be used in NIEP
 STDPATH = '/'.join(path.abspath(__file__).split('/')[:-1]) + '/'
-#VIRT_CONNECTION: used to manage the virtual machines creation and exclusion
-VIRT_CONNECTION = None
-
-
-def get_virt_connection():
-    global VIRT_CONNECTION
-    if VIRT_CONNECTION is None:
-        VIRT_CONNECTION = libvirt.open("qemu:///system")
-    return VIRT_CONNECTION
 
 
 def check_output_text(cmd):
@@ -59,6 +50,7 @@ class VM:
         self.VM_STATUS = 0
         self.VM_JSON = ''
         self.VIRT_VM = None
+        self.RUNTIME = DEFAULT_LIBVIRT_RUNTIME
 
         if interfaces != None:
             self.outInterfaces(configurationPath, alias, interfaces)
@@ -439,10 +431,7 @@ class VM:
 
             with open(STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.xml', 'r') as domainFile:
                 domainXML = domainFile.read()
-            virtConnection = get_virt_connection()
-            virtConnection.defineXML(domainXML)
-            self.VIRT_VM = virtConnection.lookupByName(self.ID)
-            self.VIRT_VM.create()
+            self.VIRT_VM = self.RUNTIME.define_and_create(self.ID, domainXML)
             self.VM_UP = True
             return 0
         else:
@@ -461,8 +450,8 @@ class VM:
             return -2
 
         if self.VM_UP:
-            self.VIRT_VM.destroy()
-            self.VIRT_VM.undefine()
+            self.RUNTIME.destroy(self.VIRT_VM)
+            self.RUNTIME.undefine(self.VIRT_VM)
             self.VIRT_VM = None
             self.VM_UP = False
             for iface in self.INTERFACES:
@@ -485,7 +474,7 @@ class VM:
             return -2
 
         if self.VM_UP:
-            self.VIRT_VM.destroy()
+            self.RUNTIME.destroy(self.VIRT_VM)
             self.VIRT_VM = None
             self.VM_UP = False
             return 0
