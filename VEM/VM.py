@@ -1,28 +1,14 @@
 import json
 import random
-from time import sleep
-from glob import glob
 from uuid import uuid4
 from os import path
-from os import devnull
-from copy import copy
-from subprocess import call
-from subprocess import check_output
-from subprocess import STDOUT
 from xml.etree import ElementTree
 from LibvirtRuntime import DEFAULT_LIBVIRT_RUNTIME
+from VMImageStore import VMImageStore
+from VMNetworkRuntime import DEFAULT_VM_NETWORK_RUNTIME
 
-#FNULL: redirects the system call normal output
-FNULL = open(devnull, 'w')
 #STDPATH: standard path - added to be used in NIEP
 STDPATH = '/'.join(path.abspath(__file__).split('/')[:-1]) + '/'
-
-
-def check_output_text(cmd):
-    data = check_output(cmd)
-    if isinstance(data, bytes):
-        return data.decode("utf-8", "ignore")
-    return data
 
 #VM: class for generic VMs management.
 #Assumptions:
@@ -51,6 +37,8 @@ class VM:
         self.VM_JSON = ''
         self.VIRT_VM = None
         self.RUNTIME = DEFAULT_LIBVIRT_RUNTIME
+        self.IMAGE_STORE = VMImageStore(STDPATH)
+        self.NETWORK = DEFAULT_VM_NETWORK_RUNTIME
 
         if interfaces != None:
             self.outInterfaces(configurationPath, alias, interfaces)
@@ -193,24 +181,9 @@ class VM:
             else:
                 iface['LINK_MAC'] = self.__randomizeMAC()
 
-        existingImages = glob(STDPATH + 'IMAGES/*')
-        for images in existingImages:
-            if images.split("/")[-1] == self.ID:
-                self.VM_EXIST = True
-                break
-
-        upVMs = check_output_text(['virsh', 'list']).split('\n')
-        for index in range(2, len(upVMs)-2):
-            if [VM for VM in upVMs[index].replace(' ', ',').split(',') if VM != ''][1] == self.ID:
-                self.VM_UP = True
-                break
-
-        identicalVM = False
-        allVMs = check_output_text(['virsh', 'list', '--all']).split('\n')
-        for index in range(2, len(allVMs)-2):
-            if [VM for VM in allVMs[index].replace(' ', ',').split(',') if VM != ''][1] == self.ID:
-                identicalVM = True
-                break
+        self.VM_EXIST = self.IMAGE_STORE.instance_exists(self.ID)
+        self.VM_UP = self.RUNTIME.is_running(self.ID)
+        identicalVM = self.RUNTIME.exists(self.ID)
 
         if self.VM_EXIST:
             if self.VM_UP:
@@ -282,12 +255,11 @@ class VM:
         if self.VM_STATUS < 0:
             return
 
-        if not path.isfile(STDPATH + 'IMAGES/' + self.DISK + '.qcow2'):
+        if not self.IMAGE_STORE.base_disk_exists(self.DISK):
             return -1
 
         if not self.VM_EXIST:
-            call(['mkdir', STDPATH + 'IMAGES/' + self.ID], stdout=FNULL, stderr=STDOUT)
-            call(['cp', STDPATH + 'IMAGES/' + self.DISK + '.qcow2', STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.qcow2'], stdout=FNULL, stderr=STDOUT)
+            self.IMAGE_STORE.create_instance(self.ID, self.DISK)
             self.VM_EXIST = True
             self.applyVM()
             return 0
@@ -348,7 +320,7 @@ class VM:
             return -1
 
         if self.VM_EXIST:
-            call(['rm', '-r', './IMAGES/' + self.ID], stdout=FNULL, stderr=STDOUT)
+            self.IMAGE_STORE.remove_instance(self.ID)
             self.VM_EXIST = False
             self.VM_STATUS = 0
             return 0
@@ -368,16 +340,16 @@ class VM:
             return -2
 
         if not self.VM_UP:
-            call(['cp', STDPATH + 'IMAGES/' + self.DISK + '.xml', STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.xml'], stdout=FNULL, stderr=STDOUT)
+            self.IMAGE_STORE.copy_template_xml(self.ID, self.DISK)
 
-            configurationXML = ElementTree.parse(STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.xml')
+            configurationXML = ElementTree.parse(self.IMAGE_STORE.instance_xml_path(self.ID, self.DISK))
             configurationXML.find('name').text = self.ID
             configurationXML.find('uuid').text = str(uuid4())
             configurationXML.find('memory').text = str(self.MEMORY * 1024)
             configurationXML.find('currentMemory').text = str(self.MEMORY * 1024)
             configurationXML.find('vcpu').text = str(self.VCPU)
             configurationXML.find('devices/interface/mac').attrib['address'] = self.MANAGEMENT_MAC
-            configurationXML.find('devices/disk/source').attrib['file'] = path.abspath(STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.qcow2')
+            configurationXML.find('devices/disk/source').attrib['file'] = path.abspath(self.IMAGE_STORE.instance_disk_path(self.ID, self.DISK))
 
             slotID = 0x0a
             for iface in self.INTERFACES:
@@ -397,7 +369,7 @@ class VM:
                 interfaceConfig.attrib['function'] = '0x0'
                 slotID += 1
 
-            configurationXML.write(STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.xml')
+            configurationXML.write(self.IMAGE_STORE.instance_xml_path(self.ID, self.DISK))
             return 0
         else:
             return -1
@@ -416,21 +388,8 @@ class VM:
             return -2
 
         if not self.VM_UP:
-            ifacesData = check_output_text(['brctl', 'show']).split('\n')
-            ifacesCreate = copy(self.INTERFACES)
-            for iface in self.INTERFACES:
-                for iface2 in ifacesData:
-                    if iface2.startswith(iface['ID']):
-                        ifacesCreate.remove(iface)
-
-            for iface in ifacesCreate:
-                call(['brctl', 'addbr', iface['ID']], stdout=FNULL, stderr=STDOUT)
-                call(['ifconfig', iface['ID'], "hw", "ether", iface['LINK_MAC']], stdout=FNULL, stderr=STDOUT)
-            for iface in self.INTERFACES:
-                call(['ifconfig', iface['ID'], 'up'], stdout=FNULL, stderr=STDOUT)
-
-            with open(STDPATH + 'IMAGES/' + self.ID + '/' + self.DISK + '.xml', 'r') as domainFile:
-                domainXML = domainFile.read()
+            self.NETWORK.prepare_interfaces(self.INTERFACES)
+            domainXML = self.IMAGE_STORE.read_domain_xml(self.ID, self.DISK)
             self.VIRT_VM = self.RUNTIME.define_and_create(self.ID, domainXML)
             self.VM_UP = True
             return 0
@@ -454,9 +413,7 @@ class VM:
             self.RUNTIME.undefine(self.VIRT_VM)
             self.VIRT_VM = None
             self.VM_UP = False
-            for iface in self.INTERFACES:
-                call(['ifconfig', iface['ID'], 'down'], stdout=FNULL, stderr=STDOUT)
-                call(['brctl', 'delbr', iface['ID']], stdout=FNULL, stderr=STDOUT)
+            self.NETWORK.release_interfaces(self.INTERFACES)
             return 0
         else:
             return -1
@@ -492,13 +449,9 @@ class VM:
             return
 
         if self.VM_UP:
-            for attempt in range(0,3):
-                arpData = check_output_text(['arp', '-n']).split('\n')
-                for index in range(1,len(arpData)-1):
-                    iface = [data for data in arpData[index].replace(' ', ',').split(',') if data != '']
-                    if iface[2] == self.MANAGEMENT_MAC:
-                        return iface[0]
-                sleep(2)
+            managementIp = self.NETWORK.management_ip(self.MANAGEMENT_MAC)
+            if managementIp is not None:
+                return managementIp
         else:
             return -1
 
@@ -517,7 +470,7 @@ class VM:
             managementIp = self.managementVM()
             if type(managementIp) != str:
                 return -2
-            call(['sshpass', '-p', str(passwd), 'ssh', '-o', 'StrictHostKeyChecking=no', str(user) + '@' + managementIp])
+            self.NETWORK.ssh(user, passwd, managementIp)
             return 0
         else:
             return -1

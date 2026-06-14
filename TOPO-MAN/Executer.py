@@ -1,12 +1,7 @@
 from Parser import *
 from Spec import MininetControllerSpec
-from subprocess import check_output
-from subprocess import call, Popen
-from subprocess import STDOUT
-from os import devnull, getenv
-from sys import executable
-from time import sleep
-from signal import signal, SIGINT, SIG_IGN
+from InfrastructureRuntime import DEFAULT_INFRASTRUCTURE_RUNTIME
+from os import getenv
 from mininet.net import Mininet
 from mininet.node import Host
 from mininet.node import Switch
@@ -14,20 +9,6 @@ from mininet.node import OVSSwitch
 from mininet.node import Controller, RemoteController
 from mininet.link import Link, Intf
 from mininet.clean import Cleanup
-
-#FNULL: redirects the system call normal output
-FNULL = open(devnull, 'w')
-
-#pre_exec: ignores a CTRL+C command in a subprocess
-def pre_exec():
-    signal(SIGINT, SIG_IGN)
-
-
-def check_output_text(cmd):
-    data = check_output(cmd)
-    if isinstance(data, bytes):
-        return data.decode("utf-8", "ignore")
-    return data
 
 
 class Executer:
@@ -44,6 +25,7 @@ class Executer:
         self.STATUS = None
         self.SWITCH_CONTROLLER_ID = None
         self.LOCAL_POX_ENABLED = True
+        self.INFRASTRUCTURE = DEFAULT_INFRASTRUCTURE_RUNTIME
 
         if CONFIGURATION.STATUS == 0:
             self.CONFIGURATION = CONFIGURATION
@@ -54,14 +36,7 @@ class Executer:
 #------------------------------------------------------------------
 
     def interfacesMaping(self):
-        ifacesDictionary = {}
-
-        ifacesData = check_output_text(['brctl', 'show']).split('\n')
-        for iface in ifacesData[1:-1]:
-            iface = iface.split('\t')
-            ifacesDictionary[iface[0]] = iface[5]
-
-        return ifacesDictionary
+        return self.INFRASTRUCTURE.interfaces_mapping()
 
 #------------------------------------------------------------------
 
@@ -80,8 +55,7 @@ class Executer:
 
         if self.SWITCHES:
             if self.LOCAL_POX_ENABLED:
-                self.POX = Popen([executable, '/'.join(abspath(__file__).split('/')[:-2]) + '/OFCONTROLLERS/pox/pox.py', 'forwarding.l2_learning'], stdout=FNULL, stderr=STDOUT, preexec_fn=pre_exec)
-                sleep(3)
+                self.POX = self.INFRASTRUCTURE.start_local_pox()
                 UNICTRL = MininetControllerSpec('UNICTRL', '127.0.0.1', 6633)
                 UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
                 self.CONTROLLERS['UNICTRL'] = UNICTRL
@@ -292,27 +266,7 @@ class Executer:
 
     def topologyUp(self):
 
-        checked = False
-        ifacesData = check_output_text(['brctl', 'show']).split('\n')
-        for iface in ifacesData:
-            if iface.startswith('vbrNIEP'):
-                checked = True
-                break
-        if not checked:
-            call(['brctl', 'addbr', 'vbrNIEP'], stdout=FNULL, stderr=STDOUT)
-        else:
-            checked = False
-
-        netData = check_output_text(['virsh', 'net-list']).split('\n')
-        for net in netData:
-            netColumns = net.split()
-            if netColumns and netColumns[0] == 'vnNIEP':
-                checked = True
-                if len(netColumns) < 2 or netColumns[1] != 'active':
-                    call(['virsh', 'net-start', 'vnNIEP'], stdout=FNULL, stderr=STDOUT)
-                break
-        if not checked:
-            call(['virsh', 'net-create', '../CONFS/vnNIEP.xml'], stdout=FNULL, stderr=STDOUT)
+        self.INFRASTRUCTURE.prepare_topology_infrastructure()
 
         if self.CONFIGURATION.VMS:
             for VMINSTANCE in self.CONFIGURATION.VMS:
@@ -385,12 +339,8 @@ class Executer:
         for SWITCH in self.SWITCHES:
             self.SWITCHES[SWITCH].ELEM.stop()
 
-        if self.POX is not None:
-            self.POX.terminate()
-
-        call(['virsh', 'net-destroy', 'vnNIEP'], stdout=FNULL, stderr=STDOUT)
-        call(['ifconfig', 'vbrNIEP', 'down'], stdout=FNULL, stderr=STDOUT)
-        call(['brctl', 'delbr', 'vbrNIEP'], stdout=FNULL, stderr=STDOUT)
+        self.INFRASTRUCTURE.stop_process(self.POX)
+        self.INFRASTRUCTURE.cleanup_topology_infrastructure()
 
         for VMINSTANCE in self.CONFIGURATION.VMS:
             VMINSTANCE.downVM()
