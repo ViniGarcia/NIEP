@@ -1,7 +1,9 @@
 VAGRANT_PROVIDER ?= libvirt
 NIEP_DIR ?= /home/vagrant/NIEP
+NIEP_SOCKET ?= /tmp/niep.sock
+NIEPCTL_ARGS ?= status
 
-.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static vm-test-static vm-test-spec vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-all
+.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static test-command-dispatcher vm-test-static vm-test-command-dispatcher vm-test-spec vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-all
 
 vm-up:
 	vagrant up --provider=$(VAGRANT_PROVIDER)
@@ -23,6 +25,12 @@ vm-watch:
 
 vm-cli:
 	vagrant ssh -- -t "cd $(NIEP_DIR)/CLI && sudo python3 CLI.py"
+
+vm-daemon:
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tools/niepd.py --socket $(NIEP_SOCKET)"
+
+vm-ctl:
+	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/niepctl.py --socket $(NIEP_SOCKET) $(NIEPCTL_ARGS)"
 
 vm-clean:
 	vagrant ssh -- -t "sudo mn -c; sudo virsh net-destroy vnNIEP || true; sudo ip link set vbrNIEP down || true; sudo brctl delbr vbrNIEP || true"
@@ -51,8 +59,14 @@ lfs-pull:
 test-static:
 	python3 tools/check_static.py
 
+test-command-dispatcher:
+	python3 -m py_compile TOPO-MAN/Command.py TOPO-MAN/SocketServer.py tools/niepd.py tools/niepctl.py tools/check_command_dispatcher.py
+
 vm-test-static: vm-sync
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_static.py"
+
+vm-test-command-dispatcher: vm-sync
+	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_command_dispatcher.py"
 
 vm-test-spec: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_specs.py"
