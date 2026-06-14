@@ -3,7 +3,7 @@ NIEP_DIR ?= /home/vagrant/NIEP
 NIEP_SOCKET ?= /tmp/niep.sock
 NIEPCTL_ARGS ?= status
 
-.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static test-command-dispatcher vm-test-static vm-test-command-dispatcher vm-test-spec vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-all
+.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static test-command-dispatcher vm-test-static vm-test-command-dispatcher vm-test-spec vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
 
 vm-up:
 	vagrant up --provider=$(VAGRANT_PROVIDER)
@@ -60,7 +60,7 @@ test-static:
 	python3 tools/check_static.py
 
 test-command-dispatcher:
-	python3 -m py_compile TOPO-MAN/Command.py TOPO-MAN/SocketServer.py tools/niepd.py tools/niepctl.py tools/check_command_dispatcher.py
+	python3 -m py_compile TOPO-MAN/Command.py TOPO-MAN/SocketServer.py tools/niepd.py tools/niepctl.py tools/check_command_dispatcher.py tools/smoke/run_socket_smoke.py
 
 vm-test-static: vm-sync
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_static.py"
@@ -80,5 +80,9 @@ vm-smoke-vm: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
 vm-smoke-click: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py click"
 
+vm-smoke-socket: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tools/smoke/run_socket_smoke.py"
+
 vm-smoke-all: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py all"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tools/smoke/run_socket_smoke.py"

@@ -58,6 +58,15 @@ sudo python3 CLI.py
 
 See the sequential tutorial in [`tutorial/README.md`](tutorial/README.md).
 
+NIEP can also be operated non-interactively through a local Unix socket:
+
+```bash
+make vm-daemon
+make vm-ctl NIEPCTL_ARGS="--json status"
+```
+
+See [`tutorial/06-service-api.md`](tutorial/06-service-api.md) for the service workflow.
+
 ### How was it created?
 
 The original NIEP platform was developed for Python 2.7. This branch ports the core emulator to Python 3 and uses the applications below:

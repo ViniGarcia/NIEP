@@ -39,6 +39,8 @@ class CommandDispatcher:
             return self.vnf_command(args)
         if command == 'sfc':
             return self.sfc_command(args)
+        if command == 'mininet':
+            return self.mininet_command(args)
 
         return ServiceResult(
             ok=False,
@@ -101,6 +103,27 @@ class CommandDispatcher:
         if args[0] == 'down':
             return self._expect_args(args, 2, lambda: self.sfc.down(args[1]))
         return self._unknown_subcommand('SFC')
+
+    def mininet_command(self, args):
+        if not self.topology.is_up():
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.TOPOLOGY_NOT_UP,
+                message="TOPOLOGY IS NOT UP",
+            )
+        if not args:
+            return self._invalid_args("MININET COMMAND EXPECTED")
+        if args[0] == 'pingall':
+            return self._expect_args(args, 1, self.mininet_pingall)
+        return self._unknown_subcommand('MININET')
+
+    def mininet_pingall(self):
+        dropped = self.topology.executor.NET.pingAll()
+        return ServiceResult(
+            ok=True,
+            code=ResultCode.MININET_RESULT,
+            data={'dropped': dropped},
+        )
 
     def _expect_args(self, args, amount, callback):
         if len(args) != amount:
