@@ -8,7 +8,7 @@ path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
 from VNF import VNF
 from SFC import SFC
 from VM import VM
-from Spec import ConnectionSpec, MininetControllerSpec, MininetHostSpec, MininetOVSSwitchSpec, MininetSwitchSpec, TopologySpec
+from Spec import ConnectionSpec, InterfaceSpec, MininetControllerSpec, MininetHostSpec, MininetOVSSwitchSpec, MininetSwitchSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # TO DO LIST
@@ -27,6 +27,9 @@ class PlatformParser:
         self.VMS = []
         self.VNFS = []
         self.SFCS = []
+        self.VM_SPECS = []
+        self.VNF_SPECS = []
+        self.SFC_SPECS = []
         self.MNHOSTS = []
         self.MNSWITCHES = []
         self.MNCONTROLLER = []
@@ -73,9 +76,9 @@ class PlatformParser:
                             if self.connectionsCheck() == 0:
                                 self.SPEC = TopologySpec(
                                     id=self.ID,
-                                    vms=self.VMS,
-                                    vnfs=self.VNFS,
-                                    sfcs=self.SFCS,
+                                    vms=self.VM_SPECS,
+                                    vnfs=self.VNF_SPECS,
+                                    sfcs=self.SFC_SPECS,
                                     mininet_hosts=self.MNHOSTS,
                                     mininet_switches=self.MNSWITCHES,
                                     mininet_controllers=self.MNCONTROLLER,
@@ -164,6 +167,7 @@ class PlatformParser:
                     self.STATUS = -3
                     return -3
                 self.VMS.append(instance)
+                self.VM_SPECS.append(VMSpec.from_vm(instance))
             else:
                 self.STATUS = -2
                 return -2
@@ -191,6 +195,7 @@ class PlatformParser:
                     self.STATUS = -3
                     return -3
                 self.VNFS.append(instance)
+                self.VNF_SPECS.append(VNFSpec.from_vnf(instance))
                 PATHINSTANCE[VNFPATH] = instance
             else:
                 self.STATUS = -2
@@ -205,6 +210,7 @@ class PlatformParser:
                     self.STATUS = -3
                     return -3
                 self.VNFS.append(instance)
+                self.VNF_SPECS.append(VNFSpec.from_vnf(instance))
                 PATHINSTANCE[VNFPATH] = instance
             else:
                 self.STATUS = -2
@@ -235,6 +241,7 @@ class PlatformParser:
                     self.STATUS = -5
                     return -5
                 self.SFCS.append(instance)
+                self.SFC_SPECS.append(SFCSpec.from_sfc(instance))
 
                 for VNFCONF in instance.SFC_VNFS_CONF:
                     if VNFCONF[0][0] not in SFCVNFS:                                                    #VNF REDEFINITION, FIRST ASSUMED
@@ -302,7 +309,8 @@ class PlatformParser:
                         self.STATUS = -7
                         return -7
 
-                    self.MNHOSTS.append(MininetHostSpec(HOST["ID"], HOST["INTERFACES"]))
+                    interfaces = [InterfaceSpec.from_dict(IFACE) for IFACE in HOST["INTERFACES"]]
+                    self.MNHOSTS.append(MininetHostSpec(HOST["ID"], interfaces))
             else:
                 self.STATUS = -7
                 return -7

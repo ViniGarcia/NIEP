@@ -32,6 +32,29 @@ class InterfaceSpec:
             data["ELEM"] = self.elem
         return data
 
+    def __contains__(self, key):
+        return key in self.to_dict()
+
+    def __getitem__(self, key):
+        return self.to_dict()[key]
+
+    def __setitem__(self, key, value):
+        if key == "ID":
+            self.id = value
+        elif key == "MAC":
+            self.mac = value
+        elif key == "IP":
+            self.ip = value
+        elif key == "LINK_MAC":
+            self.link_mac = value
+        elif key == "ELEM":
+            self.elem = value
+        else:
+            raise KeyError(key)
+
+    def get(self, key, default=None):
+        return self.to_dict().get(key, default)
+
 
 @dataclass
 class MininetHostSpec:
@@ -54,6 +77,67 @@ class MininetHostSpec:
     @ELEM.setter
     def ELEM(self, value):
         self.elem = value
+
+
+@dataclass
+class VMSpec:
+    id: str
+    path: str
+    memory: int
+    vcpu: int
+    disk: str
+    management_mac: str
+    interfaces: list = field(default_factory=list)
+
+    @classmethod
+    def from_vm(cls, vm):
+        return cls(
+            id=vm.ID,
+            path=vm.VM_JSON,
+            memory=vm.MEMORY,
+            vcpu=vm.VCPU,
+            disk=vm.DISK,
+            management_mac=vm.MANAGEMENT_MAC,
+            interfaces=[InterfaceSpec.from_dict(iface) for iface in vm.INTERFACES],
+        )
+
+
+@dataclass
+class VNFSpec:
+    id: str
+    path: str
+    vm_path: str
+    vm: VMSpec
+
+    @classmethod
+    def from_vnf(cls, vnf):
+        return cls(
+            id=vnf.ID,
+            path=vnf.VNF_JSON,
+            vm_path=vnf.VM.VM_JSON,
+            vm=VMSpec.from_vm(vnf.VM),
+        )
+
+
+@dataclass
+class SFCSpec:
+    id: str
+    path: str
+    vnfs: list = field(default_factory=list)
+    ip: dict = field(default_factory=dict)
+    ops: list = field(default_factory=list)
+    connections: list = field(default_factory=list)
+
+    @classmethod
+    def from_sfc(cls, sfc):
+        return cls(
+            id=sfc.ID,
+            path=sfc.SFC_JSON,
+            vnfs=sfc.VNFS,
+            ip=sfc.IP,
+            ops=sfc.OPS,
+            connections=sfc.CONNECTIONS,
+        )
 
 
 @dataclass
