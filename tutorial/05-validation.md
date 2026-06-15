@@ -14,15 +14,39 @@ make test-static
 
 The static check validates:
 
-- Python syntax for `CLI/`, `TOPO-MAN/`, and `VEM/`.
-- JSON syntax for tutorial examples and legacy examples.
+- Python syntax for `CLI/`, `TOPO-MAN/`, `VEM/`, and `tests/`.
+- JSON syntax for tutorial examples, test topologies, and legacy examples.
 - Markdown fence balance for the README and tutorial pages.
 - Presence of the maintained tutorial artifacts.
 
-## VM Checks
+## Integration Tests
 
-The smoke checks require the Vagrant VM because they use Mininet, libvirt, KVM,
-bridges, and sudo privileges.
+The integration tests require the Vagrant VM because they use Mininet, libvirt,
+KVM, bridges, and sudo privileges. They call the `CommandDispatcher` directly
+and assert structured `ServiceResult` values instead of parsing the interactive
+CLI prompt.
+
+Run all integration tests:
+
+```bash
+make vm-test-integration
+```
+
+Run one scenario:
+
+```bash
+make vm-test-integration INTEGRATION_ARGS=mininet-isolated
+make vm-test-integration INTEGRATION_ARGS=mininet-connected
+make vm-test-integration INTEGRATION_ARGS=vm-host-link
+make vm-test-integration INTEGRATION_ARGS=click-policy
+```
+
+The integration test plan is documented in [`../tests/PLAN.md`](../tests/PLAN.md).
+
+## Legacy CLI Smokes
+
+The smoke checks drive the interactive CLI non-interactively. They are kept as
+compatibility checks for the legacy user interface.
 
 Run all smoke checks:
 
@@ -36,6 +60,12 @@ Run one scenario:
 make vm-smoke-mininet
 make vm-smoke-vm
 make vm-smoke-click
+```
+
+Run the full validation suite:
+
+```bash
+make vm-test-all
 ```
 
 ## Expected Results

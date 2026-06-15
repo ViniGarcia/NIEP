@@ -1,0 +1,32 @@
+{
+  "ID": "TestMininetIsolatedHosts",
+  "VMS": [],
+  "VNFS": [],
+  "SFCS": [],
+  "MININET": {
+    "HOSTS": [
+      {
+        "ID": "h1",
+        "INTERFACES": [
+          {
+            "IP": "10.40.0.1/24",
+            "MAC": "02:00:00:00:40:01"
+          }
+        ]
+      },
+      {
+        "ID": "h2",
+        "INTERFACES": [
+          {
+            "IP": "10.40.0.2/24",
+            "MAC": "02:00:00:00:40:02"
+          }
+        ]
+      }
+    ],
+    "SWITCHES": [],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": []
+}

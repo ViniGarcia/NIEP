@@ -2,8 +2,9 @@ VAGRANT_PROVIDER ?= libvirt
 NIEP_DIR ?= /home/vagrant/NIEP
 NIEP_SOCKET ?= /tmp/niep.sock
 NIEPCTL_ARGS ?= status
+INTEGRATION_ARGS ?= all
 
-.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static test-command-dispatcher vm-test-static vm-test-command-dispatcher vm-test-spec vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
+.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static test-command-dispatcher vm-test-static vm-test-command-dispatcher vm-test-spec vm-test-integration vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
 
 vm-up:
 	vagrant up --provider=$(VAGRANT_PROVIDER)
@@ -60,7 +61,7 @@ test-static:
 	python3 tools/check_static.py
 
 test-command-dispatcher:
-	python3 -m py_compile TOPO-MAN/Command.py TOPO-MAN/SocketServer.py tools/niepd.py tools/niepctl.py tools/check_command_dispatcher.py tools/smoke/run_socket_smoke.py
+	python3 -m py_compile TOPO-MAN/Command.py TOPO-MAN/SocketServer.py tools/niepd.py tools/niepctl.py tools/check_command_dispatcher.py tools/smoke/run_socket_smoke.py tests/integration/run_topology_tests.py
 
 vm-test-static: vm-sync
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_static.py"
@@ -70,6 +71,11 @@ vm-test-command-dispatcher: vm-sync
 
 vm-test-spec: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_specs.py"
+
+vm-test-integration: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tests/integration/run_topology_tests.py $(INTEGRATION_ARGS)"
+
+vm-test-all: vm-test-static vm-test-command-dispatcher vm-test-spec vm-test-integration vm-smoke-all
 
 vm-smoke-mininet: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py mininet"

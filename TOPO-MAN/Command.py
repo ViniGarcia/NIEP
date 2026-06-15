@@ -115,6 +115,10 @@ class CommandDispatcher:
             return self._invalid_args("MININET COMMAND EXPECTED")
         if args[0] == 'pingall':
             return self._expect_args(args, 1, self.mininet_pingall)
+        if args[0] == 'cmd':
+            if len(args) < 3:
+                return self._invalid_args("MININET CMD EXPECTS NODE AND COMMAND")
+            return self.mininet_node_command(args[1], args[2:])
         return self._unknown_subcommand('MININET')
 
     def mininet_pingall(self):
@@ -123,6 +127,22 @@ class CommandDispatcher:
             ok=True,
             code=ResultCode.MININET_RESULT,
             data={'dropped': dropped},
+        )
+
+    def mininet_node_command(self, node_id, command):
+        try:
+            node = self.topology.executor.NET.get(node_id)
+        except KeyError:
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.NODE_NOT_FOUND,
+                message="NODE NOT FOUND",
+            )
+        output = node.cmd(' '.join(command))
+        return ServiceResult(
+            ok=True,
+            code=ResultCode.NODE_COMMAND,
+            data={'node': node_id, 'output': output},
         )
 
     def _expect_args(self, args, amount, callback):

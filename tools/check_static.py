@@ -20,10 +20,12 @@ PYTHON_PATHS = [
     ROOT / "CLI",
     ROOT / "TOPO-MAN",
     ROOT / "VEM",
+    ROOT / "tests",
 ]
 
 JSON_GLOBS = [
     "tutorial/examples/*.json",
+    "tests/topologies/*.json",
     "EXAMPLES/**/*.json",
     "CONFS/*.json",
 ]

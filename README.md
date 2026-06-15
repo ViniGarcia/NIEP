@@ -58,6 +58,18 @@ sudo python3 CLI.py
 
 See the sequential tutorial in [`tutorial/README.md`](tutorial/README.md).
 
+Run the static checks on the host:
+
+```bash
+make test-static
+```
+
+Run the structured integration tests inside the Vagrant VM:
+
+```bash
+make vm-test-integration
+```
+
 NIEP can also be operated non-interactively through a local Unix socket:
 
 ```bash

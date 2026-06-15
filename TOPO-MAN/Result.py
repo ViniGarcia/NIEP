@@ -17,6 +17,8 @@ class ResultCode(str, Enum):
     MANAGEMENT_ADDRESS = "management_address"
     MANAGEMENT_UNREACHABLE = "management_unreachable"
     MININET_RESULT = "mininet_result"
+    NODE_COMMAND = "node_command"
+    NODE_NOT_FOUND = "node_not_found"
     NO_TOPOLOGY = "no_topology"
     PARSER_ERROR = "parser_error"
     SFC_ALREADY_DOWN = "sfc_already_down"
