@@ -8,7 +8,8 @@ path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
 from VNF import VNF
 from SFC import SFC
 from VM import VM
-from Spec import ConnectionSpec, InterfaceSpec, MininetControllerSpec, MininetHostSpec, MininetOVSSwitchSpec, MininetSwitchSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec
+from Container import Container
+from Spec import ConnectionSpec, ContainerSpec, InterfaceSpec, MininetControllerSpec, MininetHostSpec, MininetOVSSwitchSpec, MininetSwitchSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # TO DO LIST
@@ -27,9 +28,11 @@ class PlatformParser:
         self.VMS = []
         self.VNFS = []
         self.SFCS = []
+        self.CONTAINERS = []
         self.VM_SPECS = []
         self.VNF_SPECS = []
         self.SFC_SPECS = []
+        self.CONTAINER_SPECS = []
         self.MNHOSTS = []
         self.MNSWITCHES = []
         self.MNCONTROLLER = []
@@ -57,6 +60,8 @@ class PlatformParser:
         if 'SFCS' not in self.JSON:
             self.STATUS = -1
             return
+        if 'CONTAINERS' not in self.JSON:
+            self.JSON['CONTAINERS'] = []
         if 'MININET' not in self.JSON:
             self.STATUS = -1
             return
@@ -69,23 +74,25 @@ class PlatformParser:
 
         if self.STATUS == None:
             if self.VMSCheck() == 0:
-                SFCVNFS = self.SFCCheck()
-                if isinstance(SFCVNFS, dict):
-                    if self.VNFSCheck(SFCVNFS) == 0:
-                        if self.mininetCheck() == 0:
-                            if self.connectionsCheck() == 0:
-                                self.SPEC = TopologySpec(
-                                    id=self.ID,
-                                    vms=self.VM_SPECS,
-                                    vnfs=self.VNF_SPECS,
-                                    sfcs=self.SFC_SPECS,
-                                    mininet_hosts=self.MNHOSTS,
-                                    mininet_switches=self.MNSWITCHES,
-                                    mininet_controllers=self.MNCONTROLLER,
-                                    mininet_ovs_switches=self.MNOVSES,
-                                    connections=self.CONNECTIONS,
-                                )
-                                self.STATUS = 0
+                if self.CONTAINERSCheck() == 0:
+                    SFCVNFS = self.SFCCheck()
+                    if isinstance(SFCVNFS, dict):
+                        if self.VNFSCheck(SFCVNFS) == 0:
+                            if self.mininetCheck() == 0:
+                                if self.connectionsCheck() == 0:
+                                    self.SPEC = TopologySpec(
+                                        id=self.ID,
+                                        vms=self.VM_SPECS,
+                                        vnfs=self.VNF_SPECS,
+                                        sfcs=self.SFC_SPECS,
+                                        containers=self.CONTAINER_SPECS,
+                                        mininet_hosts=self.MNHOSTS,
+                                        mininet_switches=self.MNSWITCHES,
+                                        mininet_controllers=self.MNCONTROLLER,
+                                        mininet_ovs_switches=self.MNOVSES,
+                                        connections=self.CONNECTIONS,
+                                    )
+                                    self.STATUS = 0
 
 #------------------------------------------------------------------
 
@@ -168,6 +175,24 @@ class PlatformParser:
                     return -3
                 self.VMS.append(instance)
                 self.VM_SPECS.append(VMSpec.from_vm(instance))
+            else:
+                self.STATUS = -2
+                return -2
+
+        return 0
+
+#------------------------------------------------------------------
+
+    def CONTAINERSCheck(self):
+
+        for CONTAINERPATH in self.JSON['CONTAINERS']:
+            if isinstance(CONTAINERPATH, str) and isfile(CONTAINERPATH):
+                instance = Container(CONTAINERPATH)
+                if instance.CONTAINER_STATUS < 0:
+                    self.STATUS = -3
+                    return -3
+                self.CONTAINERS.append(instance)
+                self.CONTAINER_SPECS.append(ContainerSpec.from_container(instance))
             else:
                 self.STATUS = -2
                 return -2
@@ -366,6 +391,8 @@ class PlatformParser:
     def connectionsCheck(self):
 
         VMSSUMMARY = {VMINSTANCE.ID:VMINSTANCE for VMINSTANCE in self.VMS}
+        for CONTAINERINSTANCE in self.CONTAINERS:
+            VMSSUMMARY[CONTAINERINSTANCE.ID] = CONTAINERINSTANCE
         HOSTSSUMMARY = {HOSTINSTANCE.ID:HOSTINSTANCE for HOSTINSTANCE in self.MNHOSTS}
         for VNFINSTANCE in self.VNFS:
             VMSSUMMARY[VNFINSTANCE.ID] = VNFINSTANCE.VM

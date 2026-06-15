@@ -37,6 +37,6 @@ Activate it with:
   source .venv/bin/activate
 
 Notes:
-  - System dependencies (mininet/libvirt/qemu/bridge-utils) must be installed via apt.
+  - System dependencies (mininet/libvirt/qemu/docker/bridge-utils) must be installed via apt.
   - libvirt Python bindings are typically installed via distro packages, not pip.
 EOF

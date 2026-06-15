@@ -38,14 +38,15 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   python3 python3-venv python3-pip python3-libvirt \
   qemu-kvm qemu-utils libvirt-daemon-system libvirt-clients virt-manager \
-  bridge-utils net-tools iproute2 sshpass git curl \
+  bridge-utils net-tools iproute2 sshpass git curl docker.io \
   mininet
 
-echo "[2/5] Enabling libvirt daemon..."
+echo "[2/5] Enabling libvirt and Docker daemons..."
 systemctl enable --now libvirtd || true
+systemctl enable --now docker || true
 
 echo "[3/5] Granting VM user access to virtualization groups..."
-usermod -aG libvirt,kvm "${TARGET_USER}" || true
+usermod -aG libvirt,kvm,docker "${TARGET_USER}" || true
 
 echo "[4/5] Bootstrapping Python 3 virtualenv in repo..."
 if [[ ! -d "${REPO_DIR}" ]]; then
@@ -64,7 +65,7 @@ cat <<EOF
 Provisioning complete.
 
 Important:
-  - Log out/in (or reboot) so ${TARGET_USER} gets libvirt/kvm group permissions.
+  - Log out/in (or reboot) so ${TARGET_USER} gets libvirt/kvm/docker group permissions.
   - Activate venv before running NIEP:
       source ${REPO_DIR}/.venv/bin/activate
   - If not using local POX during migration:

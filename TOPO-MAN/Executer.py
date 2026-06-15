@@ -20,6 +20,7 @@ class Executer:
         self.CONTROLLERS = {}
         self.VMS = {}
         self.VNFS = {}
+        self.CONTAINERS = {}
         self.POX = None
         self.NET = None
         self.STATUS = None
@@ -37,6 +38,16 @@ class Executer:
 
     def interfacesMaping(self):
         return self.INFRASTRUCTURE.interfaces_mapping()
+
+    def externalEndpoints(self):
+        endpoints = {}
+        for vm_id in self.VMS:
+            endpoints[vm_id] = self.VMS[vm_id]
+        for container_id in self.CONTAINERS:
+            endpoints[container_id] = self.CONTAINERS[container_id]
+        for vnf_id in self.VNFS:
+            endpoints[vnf_id] = self.VNFS[vnf_id].VM
+        return endpoints
 
 #------------------------------------------------------------------
 
@@ -75,6 +86,7 @@ class Executer:
             self.OVSSWITCHES[OVS.ID] = OVS
 
         ifacesData = self.interfacesMaping()
+        externalEndpoints = self.externalEndpoints()
         for LINK in self.CONFIGURATION.CONNECTIONS:
 
             if not "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
@@ -93,11 +105,8 @@ class Executer:
                 continue
 
             if "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
-                if LINK["IN/OUT"] in self.VNFS or LINK["IN/OUT"] in self.VMS:
-                    if LINK["IN/OUT"] in self.VNFS:
-                        EXTERNALLINKS = self.VNFS[LINK["IN/OUT"]].VM
-                    else:
-                        EXTERNALLINKS = self.VMS[LINK["IN/OUT"]]
+                if LINK["IN/OUT"] in externalEndpoints:
+                    EXTERNALLINKS = externalEndpoints[LINK["IN/OUT"]]
                     for iface in EXTERNALLINKS.INTERFACES:
                         if iface["MAC"] == LINK["IN/OUTIFACE"]:
                             if iface["ID"] in ifacesData:
@@ -133,11 +142,8 @@ class Executer:
                     continue
 
             if "OUT/INIFACE" in LINK and not "IN/OUTIFACE" in LINK:
-                if LINK["OUT/IN"] in self.VNFS or LINK["OUT/IN"] in self.VMS:
-                    if LINK["OUT/IN"] in self.VNFS:
-                        EXTERNALLINKS = self.VNFS[LINK["OUT/IN"]].VM
-                    else:
-                        EXTERNALLINKS = self.VMS[LINK["OUT/IN"]]
+                if LINK["OUT/IN"] in externalEndpoints:
+                    EXTERNALLINKS = externalEndpoints[LINK["OUT/IN"]]
                     for iface in EXTERNALLINKS.INTERFACES:
                         if iface["MAC"] == LINK["OUT/INIFACE"]:
                             if iface["ID"] in ifacesData:
@@ -196,10 +202,7 @@ class Executer:
 
                 if LINK["IN/OUT"] in self.HOSTS:
                     Element01 = self.HOSTS[LINK["IN/OUT"]]
-                    if LINK["OUT/IN"] in self.VNFS:
-                        EXTERNALLINKS = self.VNFS[LINK["OUT/IN"]].VM
-                    else:
-                        EXTERNALLINKS = self.VMS[LINK["OUT/IN"]]
+                    EXTERNALLINKS = externalEndpoints[LINK["OUT/IN"]]
                     for iface in EXTERNALLINKS.INTERFACES:
                         if iface["MAC"] == LINK["OUT/INIFACE"]:
                             if iface["ID"] in ifacesData:
@@ -218,10 +221,7 @@ class Executer:
 
                 if LINK["OUT/IN"] in self.HOSTS:
 
-                    if LINK["IN/OUT"] in self.VNFS:
-                        EXTERNALLINKS = self.VNFS[LINK["IN/OUT"]].VM
-                    else:
-                        EXTERNALLINKS = self.VMS[LINK["IN/OUT"]]
+                    EXTERNALLINKS = externalEndpoints[LINK["IN/OUT"]]
                     for iface in EXTERNALLINKS.INTERFACES:
                         if iface["MAC"] == LINK["IN/OUTIFACE"]:
                             if iface["ID"] in ifacesData:
@@ -300,6 +300,16 @@ class Executer:
                     return upStatus
                 self.VNFS[VNFINSTANCE.ID] = VNFINSTANCE
 
+        if self.CONFIGURATION.CONTAINERS:
+            for CONTAINERINSTANCE in self.CONFIGURATION.CONTAINERS:
+                upStatus = CONTAINERINSTANCE.upContainer()
+                if upStatus is None:
+                    upStatus = CONTAINERINSTANCE.CONTAINER_STATUS
+                if upStatus != 0:
+                    self.STATUS = upStatus
+                    return upStatus
+                self.CONTAINERS[CONTAINERINSTANCE.ID] = CONTAINERINSTANCE
+
         if self.CONFIGURATION.SFCS:
             for SFCINSTANCE in self.CONFIGURATION.SFCS:
                 SFCINSTANCE.SFC_UP = True
@@ -347,6 +357,9 @@ class Executer:
 
         for VNFINSTANCE in self.CONFIGURATION.VNFS:
             VNFINSTANCE.downVNF()
+
+        for CONTAINERINSTANCE in self.CONFIGURATION.CONTAINERS:
+            CONTAINERINSTANCE.downContainer()
 
         for SFCINSTANCE in self.CONFIGURATION.SFCS:
             SFCINSTANCE.SFC_UP = False

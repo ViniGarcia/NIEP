@@ -31,6 +31,13 @@ class InfrastructureRuntime:
             if len(iface) > 5:
                 ifacesDictionary[iface[0]] = iface[5]
 
+        linkData = check_output_text(['ip', '-o', 'link', 'show']).split('\n')
+        for link in linkData:
+            linkColumns = link.split(': ')
+            if len(linkColumns) >= 2:
+                linkName = linkColumns[1].split('@')[0]
+                ifacesDictionary.setdefault(linkName, linkName)
+
         return ifacesDictionary
 
     def bridge_exists(self, bridgeID):

@@ -103,6 +103,27 @@ class VMSpec:
 
 
 @dataclass
+class ContainerSpec:
+    id: str
+    path: str
+    image: str
+    command: object
+    privileged: bool = True
+    interfaces: list = field(default_factory=list)
+
+    @classmethod
+    def from_container(cls, container):
+        return cls(
+            id=container.ID,
+            path=container.CONTAINER_JSON,
+            image=container.IMAGE,
+            command=container.COMMAND,
+            privileged=container.PRIVILEGED,
+            interfaces=[InterfaceSpec.from_dict(iface) for iface in container.INTERFACES],
+        )
+
+
+@dataclass
 class VNFSpec:
     id: str
     path: str
@@ -252,6 +273,7 @@ class TopologySpec:
     vms: list = field(default_factory=list)
     vnfs: list = field(default_factory=list)
     sfcs: list = field(default_factory=list)
+    containers: list = field(default_factory=list)
     mininet_hosts: list = field(default_factory=list)
     mininet_switches: list = field(default_factory=list)
     mininet_controllers: list = field(default_factory=list)

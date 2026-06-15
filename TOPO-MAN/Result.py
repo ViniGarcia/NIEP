@@ -7,6 +7,8 @@ class ResultCode(str, Enum):
     ALREADY_EXECUTED = "already_executed"
     ARP_PROBLEMS = "arp_problems"
     COMMAND_ERROR = "command_error"
+    CONTAINER_EXEC = "container_exec"
+    CONTAINER_NOT_FOUND = "container_not_found"
     DEFINED = "defined"
     EXECUTER_ERROR = "executer_error"
     INVALID_COMMAND_ARGS = "invalid_command_args"

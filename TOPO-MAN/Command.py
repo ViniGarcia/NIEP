@@ -1,11 +1,12 @@
 from Result import ResultCode, ServiceResult
-from Service import TopologyService, VMService, VNFService, SFCService
+from Service import ContainerService, TopologyService, VMService, VNFService, SFCService
 
 
 class CommandDispatcher:
     def __init__(self, topology=None):
         self.topology = topology or TopologyService()
         self.vm = VMService(self.topology)
+        self.container = ContainerService(self.topology)
         self.vnf = VNFService(self.topology)
         self.sfc = SFCService(self.topology)
 
@@ -35,6 +36,8 @@ class CommandDispatcher:
             return self._expect_args(args, 0, self.status)
         if command == 'vm':
             return self.vm_command(args)
+        if command == 'container':
+            return self.container_command(args)
         if command == 'vnf':
             return self.vnf_command(args)
         if command == 'sfc':
@@ -53,6 +56,7 @@ class CommandDispatcher:
             'defined': self.topology.executor is not None,
             'up': self.topology.is_up(),
             'vms': self.topology.vm_ids(),
+            'containers': self.topology.container_ids(),
             'vnfs': self.topology.vnf_ids(),
             'sfcs': self.topology.sfc_ids(),
         }
@@ -68,6 +72,17 @@ class CommandDispatcher:
         if args[0] == 'ssh':
             return self._expect_args(args, 4, lambda: self.vm.ssh(args[1], args[2], args[3]))
         return self._unknown_subcommand('VM')
+
+    def container_command(self, args):
+        if not args:
+            return self._invalid_args("CONTAINER COMMAND EXPECTED")
+        if args[0] == 'list':
+            return self._expect_args(args, 1, lambda: ServiceResult(ok=True, code=ResultCode.DEFINED, data=self.topology.container_ids()))
+        if args[0] == 'exec':
+            if len(args) < 3:
+                return self._invalid_args("CONTAINER EXEC EXPECTS CONTAINER ID AND COMMAND")
+            return self.container.exec(args[1], ' '.join(args[2:]))
+        return self._unknown_subcommand('CONTAINER')
 
     def vnf_command(self, args):
         if not args:

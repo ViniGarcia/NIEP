@@ -131,6 +131,11 @@ class TopologyService:
             return []
         return list(self.executor.VMS.keys())
 
+    def container_ids(self):
+        if not self.is_up():
+            return []
+        return list(self.executor.CONTAINERS.keys())
+
     def vnf_ids(self):
         if not self.is_up():
             return []
@@ -145,6 +150,11 @@ class TopologyService:
         if not self.is_up():
             return None
         return self.executor.VMS.get(vm_id)
+
+    def get_container(self, container_id):
+        if not self.is_up():
+            return None
+        return self.executor.CONTAINERS.get(container_id)
 
     def get_vnf(self, vnf_id):
         if not self.is_up():
@@ -184,6 +194,23 @@ class VMService:
             return ServiceResult(ok=False, code=ResultCode.VM_NOT_FOUND, message="VM NOT FOUND")
         result = vm.sshVM(user, passwd)
         return ServiceResult(ok=(result == 0), code=ResultCode.VM_SSH, status=result)
+
+
+class ContainerService:
+    def __init__(self, topology):
+        self.topology = topology
+
+    def exec(self, container_id, command):
+        container = self.topology.get_container(container_id)
+        if container is None:
+            return ServiceResult(ok=False, code=ResultCode.CONTAINER_NOT_FOUND, message="CONTAINER NOT FOUND")
+        exit_code, output = container.execContainer(command)
+        return ServiceResult(
+            ok=(exit_code == 0),
+            code=ResultCode.CONTAINER_EXEC,
+            data={'exit_code': exit_code, 'output': output},
+            status=exit_code,
+        )
 
 
 class VNFService:
