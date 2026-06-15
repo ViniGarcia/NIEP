@@ -71,6 +71,14 @@ Mininet commands:
 
 ```text
 mininet pingall
+mininet cmd <node-id> <command...>
+```
+
+Container commands:
+
+```text
+container list
+container exec <container-id> <command...>
 ```
 
 VM commands:

@@ -178,7 +178,27 @@ def click_policy_vnf():
     run_topology("../tests/topologies/click-policy-vnf.json", body)
 
 
+def container_host_link():
+    def body(dispatcher):
+        container_list = dispatch(dispatcher, "container", ["list"], code="defined")
+        if container_list.data != ["test-alpine"]:
+            raise TestFailure(str(container_list.to_dict()))
+
+        container_ip = dispatch(dispatcher, "container", ["exec", "test-alpine", "ip", "-o", "addr", "show", "eth0"], code="container_exec")
+        assert_contains(container_ip.data["output"], "10.50.0.2/24")
+
+        if not mininet_probe(dispatcher, "h1", "ping -c1 -W2 10.50.0.2"):
+            raise TestFailure("h1 did not reach container interface")
+
+        container_ping = dispatch(dispatcher, "container", ["exec", "test-alpine", "ping", "-c1", "-W2", "10.50.0.1"], code="container_exec")
+        if container_ping.data["exit_code"] != 0:
+            raise TestFailure(str(container_ping.to_dict()))
+
+    run_topology("../tests/topologies/container-host-link.json", body)
+
+
 SCENARIOS = {
+    "container-host-link": Scenario("container-host-link", container_host_link),
     "mininet-isolated": Scenario("mininet-isolated", isolated_mininet_hosts),
     "mininet-connected": Scenario("mininet-connected", connected_mininet_hosts),
     "vm-host-link": Scenario("vm-host-link", vm_host_link),

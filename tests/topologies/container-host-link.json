@@ -1,0 +1,33 @@
+{
+  "ID": "TestContainerHostLink",
+  "VMS": [],
+  "VNFS": [],
+  "SFCS": [],
+  "CONTAINERS": [
+    "../tests/fixtures/alpine-container.json"
+  ],
+  "MININET": {
+    "HOSTS": [
+      {
+        "ID": "h1",
+        "INTERFACES": [
+          {
+            "IP": "10.50.0.1/24",
+            "MAC": "02:00:00:00:50:01"
+          }
+        ]
+      }
+    ],
+    "SWITCHES": [],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": [
+    {
+      "IN/OUT": "h1",
+      "IN/OUTIFACE": "02:00:00:00:50:01",
+      "OUT/IN": "test-alpine",
+      "OUT/INIFACE": "02:00:00:00:50:02"
+    }
+  ]
+}

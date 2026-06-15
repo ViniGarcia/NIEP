@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "TOPO-MAN"))
 
 from Parser import PlatformParser  # noqa: E402
-from Spec import ConnectionSpec, InterfaceSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec  # noqa: E402
+from Spec import ConnectionSpec, ContainerSpec, InterfaceSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec  # noqa: E402
 
 
 EXAMPLES = {
@@ -24,6 +24,7 @@ EXAMPLES = {
     "vm": "../tutorial/examples/vm-basic.json",
     "vm-host-link": "../tutorial/examples/vm-host-link.json",
     "click": "../tutorial/examples/click-forward-topology.json",
+    "container": "../tutorial/examples/container-host-link.json",
 }
 
 
@@ -60,6 +61,7 @@ def check_example(name: str, path: str) -> list[str]:
         )
 
     assert_true(all(isinstance(vm, VMSpec) for vm in spec.vms), f"{name}: non-spec VM found", errors)
+    assert_true(all(isinstance(container, ContainerSpec) for container in spec.containers), f"{name}: non-spec container found", errors)
     assert_true(all(isinstance(vnf, VNFSpec) for vnf in spec.vnfs), f"{name}: non-spec VNF found", errors)
     assert_true(all(isinstance(sfc, SFCSpec) for sfc in spec.sfcs), f"{name}: non-spec SFC found", errors)
     return errors

@@ -1,6 +1,6 @@
 # 00 - Setup and Workflow
 
-NIEP manages Mininet, Linux bridges, libvirt, KVM, and `virsh` directly. Run it inside a Linux VM prepared for that, or on a lab machine where you can use root privileges.
+NIEP manages Mininet, Linux bridges, libvirt, KVM, Docker, and `virsh` directly. Run it inside a Linux VM prepared for that, or on a lab machine where you can use root privileges.
 
 ## Vagrant VM
 
@@ -16,7 +16,9 @@ If preparing a machine manually, install at least:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y python3 python3-libvirt mininet qemu-kvm qemu-utils   libvirt-daemon-system libvirt-clients bridge-utils net-tools iproute2 sshpass
+sudo apt-get install -y python3 python3-libvirt mininet qemu-kvm qemu-utils \
+  libvirt-daemon-system libvirt-clients bridge-utils net-tools iproute2 \
+  sshpass docker.io
 ```
 
 Check that virtualization tools are available:
@@ -24,6 +26,7 @@ Check that virtualization tools are available:
 ```bash
 sudo virsh list --all
 sudo brctl show
+sudo docker ps
 ```
 
 ## Fast Vagrant Workflow

@@ -1,0 +1,33 @@
+{
+  "ID": "DocContainerHostLink",
+  "VMS": [],
+  "VNFS": [],
+  "SFCS": [],
+  "CONTAINERS": [
+    "../tutorial/examples/alpine-container.json"
+  ],
+  "MININET": {
+    "HOSTS": [
+      {
+        "ID": "h1",
+        "INTERFACES": [
+          {
+            "IP": "10.60.0.1/24",
+            "MAC": "02:00:00:00:60:01"
+          }
+        ]
+      }
+    ],
+    "SWITCHES": [],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": [
+    {
+      "IN/OUT": "h1",
+      "IN/OUTIFACE": "02:00:00:00:60:01",
+      "OUT/IN": "doc-alpine",
+      "OUT/INIFACE": "02:00:00:00:60:02"
+    }
+  ]
+}

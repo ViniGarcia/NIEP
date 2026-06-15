@@ -34,14 +34,14 @@ vm-ctl:
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/niepctl.py --socket $(NIEP_SOCKET) $(NIEPCTL_ARGS)"
 
 vm-clean:
-	vagrant ssh -- -t "sudo mn -c; sudo virsh net-destroy vnNIEP || true; sudo ip link set vbrNIEP down || true; sudo brctl delbr vbrNIEP || true"
+	vagrant ssh -- -t "sudo mn -c; sudo docker rm -f test-alpine doc-alpine || true; sudo virsh net-destroy vnNIEP || true; sudo ip link set vbrNIEP down || true; sudo brctl delbr vbrNIEP || true"
 
 
 vm-libvirt-perms:
 	vagrant ssh -- -t "sudo chmod o+x /home/vagrant $(NIEP_DIR) $(NIEP_DIR)/VEM; sudo chmod -R a+rX $(NIEP_DIR)/VEM/IMAGES"
 
 vm-reset-doc-vm:
-	vagrant ssh -- -t "sudo virsh destroy doc-tinycore || true; sudo virsh undefine doc-tinycore || true; sudo virsh destroy doc-tinycore-link || true; sudo virsh undefine doc-tinycore-link || true; sudo virsh destroy doc-click-forward || true; sudo virsh undefine doc-click-forward || true; sudo virsh destroy click-forward || true; sudo virsh undefine click-forward || true; sudo rm -rf $(NIEP_DIR)/VEM/IMAGES/doc-tinycore $(NIEP_DIR)/VEM/IMAGES/doc-tinycore-link $(NIEP_DIR)/VEM/IMAGES/doc-click-forward $(NIEP_DIR)/VEM/IMAGES/click-forward"
+	vagrant ssh -- -t "sudo docker rm -f test-alpine doc-alpine || true; sudo ip link del ct-alp0 || true; sudo ip link del ct-doc0 || true; sudo virsh destroy doc-tinycore || true; sudo virsh undefine doc-tinycore || true; sudo virsh destroy doc-tinycore-link || true; sudo virsh undefine doc-tinycore-link || true; sudo virsh destroy doc-click-forward || true; sudo virsh undefine doc-click-forward || true; sudo virsh destroy click-forward || true; sudo virsh undefine click-forward || true; sudo rm -rf $(NIEP_DIR)/VEM/IMAGES/doc-tinycore $(NIEP_DIR)/VEM/IMAGES/doc-tinycore-link $(NIEP_DIR)/VEM/IMAGES/doc-click-forward $(NIEP_DIR)/VEM/IMAGES/click-forward"
 
 
 vm-reset-tutorial-vm: vm-reset-doc-vm

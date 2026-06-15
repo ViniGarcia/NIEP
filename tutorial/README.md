@@ -18,6 +18,7 @@ sudo python3 CLI.py
 5. [Click-on-OSv VNF with forwarding policy](04-click-vnf-policy.md)
 6. [Validation checklist](05-validation.md)
 7. [NIEP service socket and niepctl](06-service-api.md)
-8. [Troubleshooting](99-troubleshooting.md)
+8. [Docker container runtime](07-container-runtime.md)
+9. [Troubleshooting](99-troubleshooting.md)
 
 The old `EXAMPLES/` directory is useful to understand the original project, but some examples may be stale or inconsistent. The examples in this tutorial are maintained independently under `tutorial/examples/`.

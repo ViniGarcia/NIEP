@@ -5,7 +5,7 @@ NIEP: NFV Infrastructure Emulation Platform
 
 ### What is NIEP?
 
-NIEP uses Mininet[1], libvirt/KVM, and Click-on-OSv[2] to deploy an emulated NFV infrastructure. It can instantiate single VNFs and larger SFCs connected to Mininet hosts and SDN switches. NIEP is useful for testing NFV topologies and collecting results in a controlled environment similar to a real deployment.<br/>
+NIEP uses Mininet[1], libvirt/KVM, Docker, and Click-on-OSv[2] to deploy an emulated NFV infrastructure. It can instantiate single VNFs, Docker containers, and larger SFCs connected to Mininet hosts and SDN switches. NIEP is useful for testing NFV topologies and collecting results in a controlled environment similar to a real deployment.<br/>
 
 The NIEP provides several elements to create your topology:
 
@@ -16,12 +16,14 @@ The NIEP provides several elements to create your topology:
 5. TinyCore 12 VMs - generic minimalist Linux distribution, accessible over SSH (username: tc / password: NIEPvm00).<br/>
 6. Click-on-OSv VNFs - platform to execute Click functions. It provides an EMS to control the VNF lifecycle.<br/>
 7. Click-on-OSv Links - created to connect Click-on-OSv elements with other Click-on-OSv elements and Click-on-OSv elements with Mininet elements.<br/>
+8. Docker Containers - lightweight compute endpoints attached to Mininet through veth interfaces.<br/>
 
 NIEP topologies are created using a simple JSON model. The maintained runnable examples are in the `tutorial/examples/` directory. There are three components to describe:
 
 1. VNFs - describe Click-on-OSv VM ID and requirements such as memory, CPU, management interface, and data interfaces. This description can be used by both SFC and topology components.<br/>
 2. SFCs - describe the relationship between VNFs to compose a service with an incoming point (IP), outgoing points (OPs), and VNF connections. In this case, all predefined VNF interfaces are ignored except the management interface.<br/>
-3. Topologies - describe Mininet elements and their relationship with VNFs and SFCs.<br/>
+3. Containers - describe Docker image, command, privileges, and data interfaces.<br/>
+4. Topologies - describe Mininet elements and their relationship with VMs, containers, VNFs and SFCs.<br/>
 
 ### Quick Start
 
@@ -101,8 +103,11 @@ The original NIEP platform was developed for Python 2.7. This branch ports the c
 3.3 Virt Manager - Optional - (apt-get install virt-manager)<br/>
 4. Mininet<br/>
 4.1 Mininet (apt-get install mininet)<br/>
-5. OpenFlow controller<br/>
-5.1 POX, vendored in OFCONTROLLERS/pox and compatible with Python 3 in this branch<br/>
+5. Containers<br/>
+5.1 Docker Engine (apt-get install docker.io)<br/>
+5.2 Docker SDK for Python (installed from INSTALLATION/requirements-py3-min.txt)<br/>
+6. OpenFlow controller<br/>
+6.1 POX, vendored in OFCONTROLLERS/pox and compatible with Python 3 in this branch<br/>
 
 ### Next Steps
 

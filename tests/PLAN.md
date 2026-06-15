@@ -51,6 +51,13 @@ The integration suite validates NIEP through the service layer instead of the le
      - `h2` reaches `h3`.
      - `h1` cannot reach `h3`.
 
+5. Docker container connected to a Mininet host
+   - Load `tests/topologies/container-host-link.json`.
+   - Start an Alpine container through the Docker SDK.
+   - Attach a veth interface to the container network namespace.
+   - Verify `h1` reaches the container.
+   - Verify the container reaches `h1` through `container exec`.
+
 ## Running
 
 From the host:
