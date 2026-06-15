@@ -1,0 +1,4 @@
+{
+  "ID": "click-forward",
+  "VM": "../tests/fixtures/click-forward-vm.json"
+}

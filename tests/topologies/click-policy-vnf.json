@@ -1,0 +1,67 @@
+{
+  "ID": "TestClickPolicy",
+  "VMS": [],
+  "VNFS": [
+    "../tests/fixtures/click-forward-vnf.json"
+  ],
+  "SFCS": [],
+  "MININET": {
+    "HOSTS": [
+      {
+        "ID": "h1",
+        "INTERFACES": [
+          {
+            "IP": "10.30.0.1/24",
+            "MAC": "02:00:00:00:30:11"
+          }
+        ]
+      },
+      {
+        "ID": "h2",
+        "INTERFACES": [
+          {
+            "IP": "10.30.0.2/24",
+            "MAC": "02:00:00:00:30:12"
+          }
+        ]
+      },
+      {
+        "ID": "h3",
+        "INTERFACES": [
+          {
+            "IP": "10.30.0.3/24",
+            "MAC": "02:00:00:00:30:13"
+          }
+        ]
+      }
+    ],
+    "SWITCHES": [
+      "s1"
+    ],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": [
+    {
+      "IN/OUT": "h1",
+      "IN/OUTIFACE": "02:00:00:00:30:11",
+      "OUT/IN": "click-forward",
+      "OUT/INIFACE": "52:54:02:00:30:01"
+    },
+    {
+      "IN/OUT": "click-forward",
+      "IN/OUTIFACE": "52:54:02:00:30:02",
+      "OUT/IN": "s1"
+    },
+    {
+      "IN/OUT": "h2",
+      "IN/OUTIFACE": "02:00:00:00:30:12",
+      "OUT/IN": "s1"
+    },
+    {
+      "IN/OUT": "h3",
+      "IN/OUTIFACE": "02:00:00:00:30:13",
+      "OUT/IN": "s1"
+    }
+  ]
+}

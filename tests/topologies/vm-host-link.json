@@ -1,0 +1,32 @@
+{
+  "ID": "TestVMHostLink",
+  "VMS": [
+    "../tests/fixtures/tinycore-vm-data.json"
+  ],
+  "VNFS": [],
+  "SFCS": [],
+  "MININET": {
+    "HOSTS": [
+      {
+        "ID": "h1",
+        "INTERFACES": [
+          {
+            "IP": "10.20.0.1/24",
+            "MAC": "02:00:00:00:10:11"
+          }
+        ]
+      }
+    ],
+    "SWITCHES": [],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": [
+    {
+      "IN/OUT": "h1",
+      "IN/OUTIFACE": "02:00:00:00:10:11",
+      "OUT/IN": "doc-tinycore-link",
+      "OUT/INIFACE": "52:54:02:00:10:01"
+    }
+  ]
+}

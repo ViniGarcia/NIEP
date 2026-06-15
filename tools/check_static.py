@@ -26,6 +26,7 @@ PYTHON_PATHS = [
 JSON_GLOBS = [
     "tutorial/examples/*.json",
     "tests/topologies/*.json",
+    "tests/fixtures/*.json",
     "EXAMPLES/**/*.json",
     "CONFS/*.json",
 ]

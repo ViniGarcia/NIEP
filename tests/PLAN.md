@@ -19,6 +19,8 @@ The integration suite validates NIEP through the service layer instead of the le
    - Assert structured `ServiceResult` values.
    - Run Mininet node commands through `mininet cmd`.
    - Avoid parsing CLI prompts or banners.
+   - Use self-contained topology fixtures from `tests/topologies/` and
+     `tests/fixtures/`, not tutorial examples.
 
 4. Legacy compatibility smokes
    - Keep the old CLI smoke runner to ensure the interactive CLI remains usable.
@@ -31,19 +33,19 @@ The integration suite validates NIEP through the service layer instead of the le
    - Verify host-to-host communication fails.
 
 2. Connected Mininet hosts
-   - Load `tutorial/examples/mininet-ping.json`.
+   - Load `tests/topologies/mininet-connected-hosts.json`.
    - Verify `mininet pingall` has 0% packet loss.
    - Verify direct host command connectivity from `h1` to `h2`.
 
 3. TinyCore VM connected to a Mininet host
-   - Load `tutorial/examples/vm-host-link.json`.
+   - Load `tests/topologies/vm-host-link.json`.
    - Retrieve the VM management address through the service.
    - Configure the VM data interface over SSH.
    - Verify the Mininet host reaches the VM data interface.
 
 4. Click-on-OSv policy VNF
-   - Load `tutorial/examples/click-forward-topology.json`.
-   - Upload and start `policy-forward.click`.
+   - Load `tests/topologies/click-policy-vnf.json`.
+   - Upload and start `tests/fixtures/click/policy-forward.click`.
    - Verify the policy behavior:
      - `h1` reaches `h2`.
      - `h2` reaches `h3`.

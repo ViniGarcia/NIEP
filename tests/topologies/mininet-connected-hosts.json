@@ -1,0 +1,45 @@
+{
+  "ID": "TestMininetConnectedHosts",
+  "VMS": [],
+  "VNFS": [],
+  "SFCS": [],
+  "MININET": {
+    "HOSTS": [
+      {
+        "ID": "h1",
+        "INTERFACES": [
+          {
+            "IP": "10.10.0.1/24",
+            "MAC": "02:00:00:00:00:01"
+          }
+        ]
+      },
+      {
+        "ID": "h2",
+        "INTERFACES": [
+          {
+            "IP": "10.10.0.2/24",
+            "MAC": "02:00:00:00:00:02"
+          }
+        ]
+      }
+    ],
+    "SWITCHES": [
+      "s1"
+    ],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": [
+    {
+      "IN/OUT": "h1",
+      "IN/OUTIFACE": "02:00:00:00:00:01",
+      "OUT/IN": "s1"
+    },
+    {
+      "IN/OUT": "s1",
+      "OUT/IN": "h2",
+      "OUT/INIFACE": "02:00:00:00:00:02"
+    }
+  ]
+}

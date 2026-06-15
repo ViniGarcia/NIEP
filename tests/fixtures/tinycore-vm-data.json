@@ -1,0 +1,14 @@
+{
+  "ID": "doc-tinycore-link",
+  "MEMORY": 300,
+  "VCPU": 1,
+  "DISK": "tinycore12",
+  "MANAGEMENT_MAC": "52:54:02:00:10:00",
+  "INTERFACES": [
+    {
+      "ID": "br-doc0",
+      "MAC": "52:54:02:00:10:01",
+      "LINK_MAC": "02:00:00:00:10:fe"
+    }
+  ]
+}

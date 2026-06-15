@@ -126,7 +126,7 @@ def connected_mininet_hosts():
         if not mininet_probe(dispatcher, "h1", "ping -c1 -W1 10.10.0.2"):
             raise TestFailure("h1 did not reach h2")
 
-    run_topology("../tutorial/examples/mininet-ping.json", body)
+    run_topology("../tests/topologies/mininet-connected-hosts.json", body)
 
 
 def vm_host_link():
@@ -146,7 +146,7 @@ def vm_host_link():
         if not mininet_probe(dispatcher, "h1", "ping -c1 -W2 10.20.0.2"):
             raise TestFailure("h1 did not reach VM data interface")
 
-    run_topology("../tutorial/examples/vm-host-link.json", body)
+    run_topology("../tests/topologies/vm-host-link.json", body)
 
 
 def click_policy_vnf():
@@ -158,7 +158,7 @@ def click_policy_vnf():
         dispatch(
             dispatcher,
             "vnf",
-            ["action", "click-forward", "POST_FUNCTION", "../tutorial/examples/click/policy-forward.click"],
+            ["action", "click-forward", "POST_FUNCTION", "../tests/fixtures/click/policy-forward.click"],
             code="vnf_action",
         )
         dispatch(dispatcher, "vnf", ["action", "click-forward", "POST_START"], code="vnf_action")
@@ -175,7 +175,7 @@ def click_policy_vnf():
         if not 33 <= pingall.data["dropped"] <= 34:
             raise TestFailure(str(pingall.to_dict()))
 
-    run_topology("../tutorial/examples/click-forward-topology.json", body)
+    run_topology("../tests/topologies/click-policy-vnf.json", body)
 
 
 SCENARIOS = {
