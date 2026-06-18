@@ -2,7 +2,7 @@
   "ID": "TestClickPolicy",
   "VMS": [],
   "VNFS": [
-    "../tests/fixtures/click-forward-vnf.json"
+    "../fixtures/click-forward-vnf.json"
   ],
   "SFCS": [],
   "MININET": {

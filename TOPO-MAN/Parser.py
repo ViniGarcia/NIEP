@@ -2,7 +2,7 @@ import re
 import json
 import random
 from sys import path
-from os.path import isfile, abspath
+from os.path import isabs, isfile, abspath, dirname, join, normpath
 
 path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
 from VNF import VNF
@@ -40,6 +40,7 @@ class PlatformParser:
         self.CONNECTIONS = []
         self.DETAIL = ""
         self.SPEC = None
+        self.BASE_DIR = dirname(abspath(jsonFilePath))
 
         if isfile(jsonFilePath):
             with open(jsonFilePath) as data:
@@ -163,11 +164,23 @@ class PlatformParser:
             return False
 
 #------------------------------------------------------------------
+
+    def resolvePath(self, filePath):
+        if not isinstance(filePath, str):
+            return filePath
+        if isfile(filePath):
+            return filePath
+        if isabs(filePath):
+            return filePath
+        return normpath(join(self.BASE_DIR, filePath))
+
+#------------------------------------------------------------------
 #TODO [VINICIUS - 30/08/21]: Add security tests to duplicate IDs (will raise a KVM error if an ID is duplicated)
 
     def VMSCheck(self):
 
         for VMPATH in self.JSON['VMS']:
+            VMPATH = self.resolvePath(VMPATH)
             if isinstance(VMPATH, str) and isfile(VMPATH):
                 instance = VM(VMPATH, None, None)
                 if instance.VM_STATUS < 0:
@@ -186,6 +199,7 @@ class PlatformParser:
     def CONTAINERSCheck(self):
 
         for CONTAINERPATH in self.JSON['CONTAINERS']:
+            CONTAINERPATH = self.resolvePath(CONTAINERPATH)
             if isinstance(CONTAINERPATH, str) and isfile(CONTAINERPATH):
                 instance = Container(CONTAINERPATH)
                 if instance.CONTAINER_STATUS < 0:
@@ -212,6 +226,7 @@ class PlatformParser:
 
         PATHINSTANCE = {}
         for VNFPATH in self.JSON['VNFS']:
+            VNFPATH = self.resolvePath(VNFPATH)
             if isinstance(VNFPATH, str) and isfile(VNFPATH):
                 instance = VNF(VNFPATH, None)
                 if instance.VNF_STATUS < 0:
@@ -225,8 +240,9 @@ class PlatformParser:
             else:
                 self.STATUS = -2
                 return -2
- 
+
         for VNFPATH in VERIFIEDSFCVNFS:
+            VNFPATH = self.resolvePath(VNFPATH)
             if isfile(VNFPATH):
                 instance = VNF(VNFPATH, VERIFIEDSFCVNFS[VNFPATH])
                 if instance.VNF_STATUS < 0:
@@ -257,6 +273,7 @@ class PlatformParser:
         SFCVNFS = {}
         SFCDIC = {}
         for SFCPATH in self.JSON['SFCS']:
+            SFCPATH = self.resolvePath(SFCPATH)
             if isinstance(SFCPATH, str) and isfile(SFCPATH):
                 instance = SFC(SFCPATH)
                 if instance.SFC_STATUS < 0:

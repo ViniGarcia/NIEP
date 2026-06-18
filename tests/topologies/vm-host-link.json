@@ -1,7 +1,7 @@
 {
   "ID": "TestVMHostLink",
   "VMS": [
-    "../tests/fixtures/tinycore-vm-data.json"
+    "../fixtures/tinycore-vm-data.json"
   ],
   "VNFS": [],
   "SFCS": [],

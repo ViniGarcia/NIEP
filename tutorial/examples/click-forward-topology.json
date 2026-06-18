@@ -2,7 +2,7 @@
   "ID": "DocClickForward",
   "VMS": [],
   "VNFS": [
-    "../tutorial/examples/click-forward-vnf.json"
+    "click-forward-vnf.json"
   ],
   "SFCS": [],
   "MININET": {

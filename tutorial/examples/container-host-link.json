@@ -4,7 +4,7 @@
   "VNFS": [],
   "SFCS": [],
   "CONTAINERS": [
-    "../tutorial/examples/alpine-container.json"
+    "alpine-container.json"
   ],
   "MININET": {
     "HOSTS": [

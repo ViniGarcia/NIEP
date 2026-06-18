@@ -38,10 +38,11 @@ class VNF:
         if 'ID' in parsedVNF:
             self.ID = parsedVNF['ID']
         if "VM" in parsedVNF:
+            vmPath = self.__resolvePath(parsedVNF["VM"])
             if interfaces != None:
-                self.VM = VM(parsedVNF["VM"], self.ID, interfaces)
+                self.VM = VM(vmPath, self.ID, interfaces)
             else:
-                self.VM = VM(parsedVNF["VM"], self.ID, None)
+                self.VM = VM(vmPath, self.ID, None)
 
         if self.VM is None or self.VM.__class__.__name__ != VM.__name__:
             self.VNF_STATUS = -2
@@ -50,6 +51,15 @@ class VNF:
         if self.VM.VM_STATUS < 0:
             self.VNF_STATUS = self.VM.VM_STATUS
             return
+
+    def __resolvePath(self, filePath):
+        if not isinstance(filePath, str):
+            return filePath
+        if path.isfile(filePath):
+            return filePath
+        if path.isabs(filePath):
+            return filePath
+        return path.normpath(path.join(path.dirname(path.abspath(self.VNF_JSON)), filePath))
 
 #scriptExecution: execute defined tasks in a json script file.
 #                 -1 = Script file does not exist

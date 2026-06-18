@@ -1,7 +1,7 @@
 {
   "ID": "DocVMHostLink",
   "VMS": [
-    "../tutorial/examples/tinycore-vm-data.json"
+    "tinycore-vm-data.json"
   ],
   "VNFS": [],
   "SFCS": [],

@@ -1,5 +1,5 @@
 from os import devnull
-from os.path import abspath
+from os.path import abspath, dirname, join
 from signal import signal, SIGINT, SIG_IGN
 from subprocess import call, check_output, Popen
 from subprocess import STDOUT
@@ -80,7 +80,8 @@ class InfrastructureRuntime:
 
     def prepare_topology_infrastructure(self):
         self.ensure_bridge('vbrNIEP')
-        self.ensure_virt_network('vnNIEP', '../CONFS/vnNIEP.xml')
+        configPath = join(dirname(abspath(__file__)), '..', 'CONFS', 'vnNIEP.xml')
+        self.ensure_virt_network('vnNIEP', configPath)
 
     def cleanup_topology_infrastructure(self):
         self.destroy_virt_network('vnNIEP')

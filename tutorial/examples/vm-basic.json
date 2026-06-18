@@ -1,7 +1,7 @@
 {
   "ID": "DocVMBasic",
   "VMS": [
-    "../tutorial/examples/tinycore-vm.json"
+    "tinycore-vm.json"
   ],
   "VNFS": [],
   "SFCS": [],
