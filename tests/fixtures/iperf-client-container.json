@@ -1,0 +1,16 @@
+{
+  "ID": "test-iperf-client",
+  "IMAGE": "niep/iperf3-test:local",
+  "COMMAND": [
+    "sleep",
+    "infinity"
+  ],
+  "PRIVILEGED": true,
+  "INTERFACES": [
+    {
+      "ID": "ct-tcli0",
+      "MAC": "02:00:00:00:80:01",
+      "IP": "10.80.0.1/24"
+    }
+  ]
+}

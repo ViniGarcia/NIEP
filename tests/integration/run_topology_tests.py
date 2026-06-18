@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -54,6 +55,29 @@ def mininet_cmd(dispatcher, node, command):
 def mininet_probe(dispatcher, node, command):
     output = mininet_cmd(dispatcher, node, command + " >/dev/null 2>&1 && echo OK || echo FAIL")
     return "OK" in output.split()
+
+
+def container_exec(dispatcher, container_id, command, code=0):
+    result = dispatch(dispatcher, "container", ["exec", container_id, command], code="container_exec")
+    if result.data["exit_code"] != code:
+        raise TestFailure(str(result.to_dict()))
+    return result.data["output"]
+
+
+def parse_receiver_bitrate(output):
+    matches = re.findall(r"([0-9.]+)\s+([KMG])bits/sec.*receiver", output)
+    if not matches:
+        raise TestFailure("could not parse receiver bitrate:\n" + output)
+    value, unit = matches[-1]
+    multiplier = {"K": 0.001, "M": 1.0, "G": 1000.0}[unit]
+    return float(value) * multiplier
+
+
+def parse_receiver_loss(output):
+    matches = re.findall(r"\(([0-9.]+)%\)\s+receiver", output)
+    if not matches:
+        raise TestFailure("could not parse receiver loss:\n" + output)
+    return float(matches[-1])
 
 
 def wait_for_vm_management(dispatcher, vm_id, attempts=12):
@@ -184,17 +208,52 @@ def container_host_link():
         if container_list.data != ["test-alpine"]:
             raise TestFailure(str(container_list.to_dict()))
 
-        container_ip = dispatch(dispatcher, "container", ["exec", "test-alpine", "ip", "-o", "addr", "show", "eth0"], code="container_exec")
-        assert_contains(container_ip.data["output"], "10.50.0.2/24")
+        container_ip = container_exec(dispatcher, "test-alpine", "ip -o addr show eth0")
+        assert_contains(container_ip, "10.50.0.2/24")
 
         if not mininet_probe(dispatcher, "h1", "ping -c1 -W2 10.50.0.2"):
             raise TestFailure("h1 did not reach container interface")
 
-        container_ping = dispatch(dispatcher, "container", ["exec", "test-alpine", "ping", "-c1", "-W2", "10.50.0.1"], code="container_exec")
-        if container_ping.data["exit_code"] != 0:
-            raise TestFailure(str(container_ping.to_dict()))
+        container_exec(dispatcher, "test-alpine", "ping -c1 -W2 10.50.0.1")
 
     run_topology("../tests/topologies/container-host-link.json", body)
+
+
+def iperf_click_shaper():
+    def body(dispatcher):
+        container_list = dispatch(dispatcher, "container", ["list"], code="defined")
+        if sorted(container_list.data) != ["test-iperf-client", "test-iperf-server"]:
+            raise TestFailure(str(container_list.to_dict()))
+
+        dispatch(
+            dispatcher,
+            "vnf",
+            ["action", "test-click-shaper", "POST_FUNCTION", "../tests/fixtures/click/udp-shaper.click"],
+            code="vnf_action",
+        )
+        dispatch(dispatcher, "vnf", ["action", "test-click-shaper", "POST_START"], code="vnf_action")
+        time.sleep(2)
+
+        client_ip = container_exec(dispatcher, "test-iperf-client", "ip -o addr show eth0")
+        server_ip = container_exec(dispatcher, "test-iperf-server", "ip -o addr show eth0")
+        assert_contains(client_ip, "10.80.0.1/24")
+        assert_contains(server_ip, "10.80.0.2/24")
+        container_exec(dispatcher, "test-iperf-client", "ping -c1 -W2 10.80.0.2")
+
+        tcp_output = container_exec(dispatcher, "test-iperf-client", "iperf3 -c 10.80.0.2 -t 3")
+        tcp_receiver = parse_receiver_bitrate(tcp_output)
+        if tcp_receiver < 100.0:
+            raise TestFailure("TCP receiver bitrate too low: " + str(tcp_receiver) + " Mbits/sec\n" + tcp_output)
+
+        udp_output = container_exec(dispatcher, "test-iperf-client", "iperf3 -u -b 20M -c 10.80.0.2 -t 5")
+        udp_receiver = parse_receiver_bitrate(udp_output)
+        udp_loss = parse_receiver_loss(udp_output)
+        if udp_receiver >= 10.0:
+            raise TestFailure("UDP receiver bitrate was not policed: " + str(udp_receiver) + " Mbits/sec\n" + udp_output)
+        if udp_loss < 30.0:
+            raise TestFailure("UDP loss too low for policer: " + str(udp_loss) + "%\n" + udp_output)
+
+    run_topology("../tests/topologies/iperf-click-shaper.json", body)
 
 
 SCENARIOS = {
@@ -205,17 +264,33 @@ SCENARIOS = {
     "click-policy": Scenario("click-policy", click_policy_vnf),
 }
 
+HEAVY_SCENARIOS = {
+    "iperf-click-shaper": Scenario("iperf-click-shaper", iperf_click_shaper),
+}
+
 
 def main():
     os.chdir(CLI_DIR)
     parser = argparse.ArgumentParser(description="Run NIEP integration tests")
-    parser.add_argument("scenario", nargs="?", default="all", choices=sorted([*SCENARIOS.keys(), "all"]))
+    parser.add_argument("scenario", nargs="?", default="all", choices=sorted([*SCENARIOS.keys(), *HEAVY_SCENARIOS.keys(), "all", "heavy"]))
     args = parser.parse_args()
 
-    names = sorted(SCENARIOS) if args.scenario == "all" else [args.scenario]
+    if args.scenario == "all":
+        selected = SCENARIOS
+        names = sorted(selected)
+    elif args.scenario == "heavy":
+        selected = HEAVY_SCENARIOS
+        names = sorted(selected)
+    elif args.scenario in HEAVY_SCENARIOS:
+        selected = HEAVY_SCENARIOS
+        names = [args.scenario]
+    else:
+        selected = SCENARIOS
+        names = [args.scenario]
+
     failed = False
     for name in names:
-        scenario = SCENARIOS[name]
+        scenario = selected[name]
         print("[RUN ] " + scenario.name)
         try:
             scenario.run()

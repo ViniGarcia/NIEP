@@ -25,6 +25,12 @@ The integration suite validates NIEP through the service layer instead of the le
 4. Legacy compatibility smokes
    - Keep the old CLI smoke runner to ensure the interactive CLI remains usable.
 
+5. Heavy integration checks
+   - Exercise scenarios with additional runtime dependencies or traffic
+     measurements.
+   - Keep them behind explicit targets so the default integration suite remains
+     faster and less sensitive to throughput variance.
+
 ## Current Integration Scenarios
 
 1. Isolated Mininet hosts
@@ -58,6 +64,17 @@ The integration suite validates NIEP through the service layer instead of the le
    - Verify `h1` reaches the container.
    - Verify the container reaches `h1` through `container exec`.
 
+## Heavy Integration Scenarios
+
+1. iperf3 containers through Click policing
+   - Build `niep/iperf3-test:local` from `tests/fixtures/containers/iperf3`.
+   - Load `tests/topologies/iperf-click-shaper.json`.
+   - Start a Click-on-OSv VNF with `tests/fixtures/click/udp-shaper.click`.
+   - Verify container addressing and basic reachability.
+   - Verify TCP traffic passes through the VNF.
+   - Verify UDP offered at 20 Mbit/s is policed by observing a lower receiver
+     bitrate and packet loss.
+
 ## Running
 
 From the host:
@@ -70,6 +87,12 @@ To run only one scenario:
 
 ```bash
 make vm-test-integration INTEGRATION_ARGS="mininet-connected"
+```
+
+To run the heavy iperf3 policing scenario:
+
+```bash
+make vm-test-iperf-shaper
 ```
 
 The full validation target is:

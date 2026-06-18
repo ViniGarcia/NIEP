@@ -1,0 +1,43 @@
+{
+  "ID": "TestIperfClickShaper",
+  "VMS": [],
+  "VNFS": [
+    "../fixtures/click-shaper-vnf.json"
+  ],
+  "SFCS": [],
+  "CONTAINERS": [
+    "../fixtures/iperf-client-container.json",
+    "../fixtures/iperf-server-container.json"
+  ],
+  "MININET": {
+    "HOSTS": [],
+    "SWITCHES": [
+      "s1",
+      "s2"
+    ],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": [
+    {
+      "IN/OUT": "test-iperf-client",
+      "IN/OUTIFACE": "02:00:00:00:80:01",
+      "OUT/IN": "s1"
+    },
+    {
+      "IN/OUT": "s1",
+      "OUT/IN": "test-click-shaper",
+      "OUT/INIFACE": "52:54:02:00:80:01"
+    },
+    {
+      "IN/OUT": "test-click-shaper",
+      "IN/OUTIFACE": "52:54:02:00:80:02",
+      "OUT/IN": "s2"
+    },
+    {
+      "IN/OUT": "s2",
+      "OUT/IN": "test-iperf-server",
+      "OUT/INIFACE": "02:00:00:00:80:02"
+    }
+  ]
+}

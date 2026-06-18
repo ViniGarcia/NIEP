@@ -1,0 +1,6 @@
+services:
+  iperf3:
+    image: niep/iperf3-test:local
+    build:
+      context: .
+      dockerfile: Dockerfile

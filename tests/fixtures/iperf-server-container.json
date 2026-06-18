@@ -1,0 +1,16 @@
+{
+  "ID": "test-iperf-server",
+  "IMAGE": "niep/iperf3-test:local",
+  "COMMAND": [
+    "iperf3",
+    "-s"
+  ],
+  "PRIVILEGED": true,
+  "INTERFACES": [
+    {
+      "ID": "ct-tsrv0",
+      "MAC": "02:00:00:00:80:02",
+      "IP": "10.80.0.2/24"
+    }
+  ]
+}
