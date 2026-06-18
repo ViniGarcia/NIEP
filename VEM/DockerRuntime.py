@@ -32,11 +32,12 @@ class DockerRuntime:
         except NotFound:
             return False
 
-    def create(self, container_id, image, command, privileged=True):
+    def create(self, container_id, image, command, privileged=True, entrypoint=None):
         self.ensure_image(image)
         return self.get_client().containers.create(
             image=image,
             command=command,
+            entrypoint=entrypoint,
             detach=True,
             name=container_id,
             hostname=container_id,

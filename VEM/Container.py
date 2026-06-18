@@ -11,6 +11,7 @@ class Container:
         self.ID = ''
         self.IMAGE = ''
         self.COMMAND = ['sleep', 'infinity']
+        self.ENTRYPOINT = None
         self.PRIVILEGED = True
         self.INTERFACES = []
         self.CONTAINER_STATUS = 0
@@ -54,6 +55,8 @@ class Container:
             self.IMAGE = parsedContainer['IMAGE']
         if 'COMMAND' in parsedContainer:
             self.COMMAND = parsedContainer['COMMAND']
+        if 'ENTRYPOINT' in parsedContainer:
+            self.ENTRYPOINT = parsedContainer['ENTRYPOINT']
         if 'PRIVILEGED' in parsedContainer:
             self.PRIVILEGED = parsedContainer['PRIVILEGED']
         if 'INTERFACES' in parsedContainer:
@@ -72,6 +75,9 @@ class Container:
             self.CONTAINER_STATUS = -3
             return -3
         if not isinstance(self.COMMAND, (str, list)):
+            self.CONTAINER_STATUS = -4
+            return -4
+        if self.ENTRYPOINT is not None and not isinstance(self.ENTRYPOINT, (str, list)):
             self.CONTAINER_STATUS = -4
             return -4
         if not isinstance(self.PRIVILEGED, bool):
@@ -95,7 +101,7 @@ class Container:
         if self.CONTAINER_STATUS < 0:
             return
         self.RUNTIME.remove(self.ID)
-        self.CONTAINER = self.RUNTIME.create(self.ID, self.IMAGE, self.COMMAND, self.PRIVILEGED)
+        self.CONTAINER = self.RUNTIME.create(self.ID, self.IMAGE, self.COMMAND, self.PRIVILEGED, self.ENTRYPOINT)
         return 0
 
     def upContainer(self):

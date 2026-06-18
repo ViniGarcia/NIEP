@@ -108,6 +108,7 @@ class ContainerSpec:
     path: str
     image: str
     command: object
+    entrypoint: object = None
     privileged: bool = True
     interfaces: list = field(default_factory=list)
 
@@ -118,6 +119,7 @@ class ContainerSpec:
             path=container.CONTAINER_JSON,
             image=container.IMAGE,
             command=container.COMMAND,
+            entrypoint=container.ENTRYPOINT,
             privileged=container.PRIVILEGED,
             interfaces=[InterfaceSpec.from_dict(iface) for iface in container.INTERFACES],
         )
