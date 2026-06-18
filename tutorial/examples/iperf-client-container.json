@@ -1,0 +1,16 @@
+{
+  "ID": "doc-iperf-client",
+  "IMAGE": "niep/iperf3:local",
+  "COMMAND": [
+    "sleep",
+    "infinity"
+  ],
+  "PRIVILEGED": true,
+  "INTERFACES": [
+    {
+      "ID": "ct-icli0",
+      "MAC": "02:00:00:00:70:01",
+      "IP": "10.70.0.1/24"
+    }
+  ]
+}

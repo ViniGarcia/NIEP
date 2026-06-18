@@ -1,0 +1,43 @@
+{
+  "ID": "DocContainerIperfClickShaper",
+  "VMS": [],
+  "VNFS": [
+    "click-shaper-vnf.json"
+  ],
+  "SFCS": [],
+  "CONTAINERS": [
+    "iperf-client-container.json",
+    "iperf-server-container.json"
+  ],
+  "MININET": {
+    "HOSTS": [],
+    "SWITCHES": [
+      "s1",
+      "s2"
+    ],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": [
+    {
+      "IN/OUT": "doc-iperf-client",
+      "IN/OUTIFACE": "02:00:00:00:70:01",
+      "OUT/IN": "s1"
+    },
+    {
+      "IN/OUT": "s1",
+      "OUT/IN": "click-shaper",
+      "OUT/INIFACE": "52:54:02:00:70:01"
+    },
+    {
+      "IN/OUT": "click-shaper",
+      "IN/OUTIFACE": "52:54:02:00:70:02",
+      "OUT/IN": "s2"
+    },
+    {
+      "IN/OUT": "s2",
+      "OUT/IN": "doc-iperf-server",
+      "OUT/INIFACE": "02:00:00:00:70:02"
+    }
+  ]
+}

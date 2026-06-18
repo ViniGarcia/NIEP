@@ -4,7 +4,7 @@ NIEP_SOCKET ?= /tmp/niep.sock
 NIEPCTL_ARGS ?= status
 INTEGRATION_ARGS ?= all
 
-.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static test-command-dispatcher vm-test-static vm-test-command-dispatcher vm-test-spec vm-test-integration vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
+.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-build-iperf3-image vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static test-command-dispatcher vm-test-static vm-test-command-dispatcher vm-test-spec vm-test-integration vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
 
 vm-up:
 	vagrant up --provider=$(VAGRANT_PROVIDER)
@@ -34,14 +34,17 @@ vm-ctl:
 	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/niepctl.py --socket $(NIEP_SOCKET) $(NIEPCTL_ARGS)"
 
 vm-clean:
-	vagrant ssh -- -t "sudo mn -c; sudo docker rm -f test-alpine doc-alpine || true; sudo virsh net-destroy vnNIEP || true; sudo ip link set vbrNIEP down || true; sudo brctl delbr vbrNIEP || true"
+	vagrant ssh -- -t "sudo mn -c; sudo docker rm -f test-alpine doc-alpine doc-iperf-client doc-iperf-server || true; sudo virsh net-destroy vnNIEP || true; sudo ip link set vbrNIEP down || true; sudo brctl delbr vbrNIEP || true"
+
+vm-build-iperf3-image: vm-sync
+	vagrant ssh -- -t "cd $(NIEP_DIR)/tutorial/examples/containers/iperf3 && sudo docker compose build"
 
 
 vm-libvirt-perms:
 	vagrant ssh -- -t "sudo chmod o+x /home/vagrant $(NIEP_DIR) $(NIEP_DIR)/VEM; sudo chmod -R a+rX $(NIEP_DIR)/VEM/IMAGES"
 
 vm-reset-doc-vm:
-	vagrant ssh -- -t "sudo docker rm -f test-alpine doc-alpine || true; sudo ip link del ct-alp0 || true; sudo ip link del ct-doc0 || true; sudo virsh destroy doc-tinycore || true; sudo virsh undefine doc-tinycore || true; sudo virsh destroy doc-tinycore-link || true; sudo virsh undefine doc-tinycore-link || true; sudo virsh destroy doc-click-forward || true; sudo virsh undefine doc-click-forward || true; sudo virsh destroy click-forward || true; sudo virsh undefine click-forward || true; sudo rm -rf $(NIEP_DIR)/VEM/IMAGES/doc-tinycore $(NIEP_DIR)/VEM/IMAGES/doc-tinycore-link $(NIEP_DIR)/VEM/IMAGES/doc-click-forward $(NIEP_DIR)/VEM/IMAGES/click-forward"
+	vagrant ssh -- -t "sudo docker rm -f test-alpine doc-alpine doc-iperf-client doc-iperf-server || true; sudo ip link del ct-alp0 || true; sudo ip link del ct-doc0 || true; sudo ip link del ct-icli0 || true; sudo ip link del ct-isrv0 || true; sudo virsh destroy doc-tinycore || true; sudo virsh undefine doc-tinycore || true; sudo virsh destroy doc-tinycore-link || true; sudo virsh undefine doc-tinycore-link || true; sudo virsh destroy doc-click-forward || true; sudo virsh undefine doc-click-forward || true; sudo virsh destroy doc-click-shaper || true; sudo virsh undefine doc-click-shaper || true; sudo virsh destroy click-forward || true; sudo virsh undefine click-forward || true; sudo virsh destroy click-shaper || true; sudo virsh undefine click-shaper || true; sudo rm -rf $(NIEP_DIR)/VEM/IMAGES/doc-tinycore $(NIEP_DIR)/VEM/IMAGES/doc-tinycore-link $(NIEP_DIR)/VEM/IMAGES/doc-click-forward $(NIEP_DIR)/VEM/IMAGES/doc-click-shaper $(NIEP_DIR)/VEM/IMAGES/click-forward $(NIEP_DIR)/VEM/IMAGES/click-shaper"
 
 
 vm-reset-tutorial-vm: vm-reset-doc-vm

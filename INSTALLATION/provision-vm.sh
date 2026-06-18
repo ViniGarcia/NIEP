@@ -38,7 +38,7 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   python3 python3-venv python3-pip python3-libvirt \
   qemu-kvm qemu-utils libvirt-daemon-system libvirt-clients virt-manager \
-  bridge-utils net-tools iproute2 sshpass git curl docker.io \
+  bridge-utils net-tools iproute2 sshpass git curl docker.io docker-compose-v2 \
   mininet
 
 echo "[2/5] Enabling libvirt and Docker daemons..."
