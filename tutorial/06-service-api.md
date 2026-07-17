@@ -14,7 +14,9 @@ From the host machine:
 make vm-daemon
 ```
 
-This starts the daemon inside the Vagrant VM as root, using `/tmp/niep.sock` by default.
+This starts the daemon inside the Vagrant VM as root, using `/run/niep.sock` by
+default. The socket is created with mode `0600` and then made group-accessible
+with its final mode `0660`; users outside its owner and group cannot access it.
 
 To use a different socket:
 
@@ -43,18 +45,18 @@ Inside the Vagrant VM, the equivalent commands are:
 
 ```bash
 cd /home/vagrant/NIEP
-sudo python3 tools/niepd.py --socket /tmp/niep.sock
+sudo python3 tools/niepd.py
 ```
 
 Then, in another VM shell:
 
 ```bash
 cd /home/vagrant/NIEP
-./tools/niepctl --socket /tmp/niep.sock --json status
-./tools/niepctl --socket /tmp/niep.sock --json define tutorial/examples/mininet-ping.json
-./tools/niepctl --socket /tmp/niep.sock --json topoup
-./tools/niepctl --socket /tmp/niep.sock --json mininet pingall
-./tools/niepctl --socket /tmp/niep.sock --json topodown
+sudo ./tools/niepctl --json status
+sudo ./tools/niepctl --json define tutorial/examples/mininet-ping.json
+sudo ./tools/niepctl --json topoup
+sudo ./tools/niepctl --json mininet pingall
+sudo ./tools/niepctl --json topodown
 ```
 
 ## Shell Completion
@@ -133,7 +135,7 @@ vm ssh <vm-id> <user> <password>
 captured output:
 
 ```bash
-niepctl --socket /tmp/niep.sock \
+niepctl \
   container exec doc-alpine ip -o addr show eth0
 ```
 
@@ -141,14 +143,14 @@ niepctl --socket /tmp/niep.sock \
 stream. It defaults to `/bin/sh`:
 
 ```bash
-niepctl --socket /tmp/niep.sock \
+niepctl \
   container shell doc-alpine
 ```
 
 An explicit shell or interactive program can also be selected:
 
 ```bash
-niepctl --socket /tmp/niep.sock \
+niepctl \
   container shell doc-alpine /bin/sh
 ```
 

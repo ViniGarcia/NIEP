@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "VEM"))
 from TerminalSession import bridge_terminal
 
 
-DEFAULT_SOCKET = "/tmp/niep.sock"
+DEFAULT_SOCKET = "/run/niep.sock"
 
 app = typer.Typer(
     name="niepctl",

@@ -7,7 +7,7 @@ from TerminalSession import bridge_sockets
 
 
 class NIEPSocketServer:
-    def __init__(self, socket_path='/tmp/niep.sock', dispatcher=None):
+    def __init__(self, socket_path='/run/niep.sock', dispatcher=None):
         self.socket_path = socket_path
         self.dispatcher = dispatcher or CommandDispatcher()
         self.socket = None
@@ -33,8 +33,12 @@ class NIEPSocketServer:
         if os.path.exists(self.socket_path):
             os.unlink(self.socket_path)
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.socket.bind(self.socket_path)
-        os.chmod(self.socket_path, 0o666)
+        previous_umask = os.umask(0o177)
+        try:
+            self.socket.bind(self.socket_path)
+        finally:
+            os.umask(previous_umask)
+        os.chmod(self.socket_path, 0o660)
         self.socket.listen(5)
 
     def _handle_connection(self, connection):

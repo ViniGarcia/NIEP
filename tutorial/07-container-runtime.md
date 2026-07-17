@@ -111,17 +111,17 @@ shell normally to return to `container(doc-alpine)>`.
 With the daemon and `niepctl`, use:
 
 ```bash
-niepctl --socket /tmp/niep.sock \
+niepctl \
   container exec doc-alpine ip -o addr show eth0
 
-niepctl --socket /tmp/niep.sock \
+niepctl \
   container shell doc-alpine
 ```
 
 The shell command can be overridden, for example:
 
 ```bash
-niepctl --socket /tmp/niep.sock \
+niepctl \
   container shell doc-alpine /bin/bash
 ```
 

@@ -13,7 +13,7 @@ from SocketServer import NIEPSocketServer
 
 def main():
     parser = argparse.ArgumentParser(description='Run the NIEP local command daemon.')
-    parser.add_argument('--socket', default='/tmp/niep.sock', help='Unix socket path')
+    parser.add_argument('--socket', default='/run/niep.sock', help='Unix socket path')
     args = parser.parse_args()
 
     server = NIEPSocketServer(args.socket)

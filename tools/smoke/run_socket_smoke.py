@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import json
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -19,7 +20,7 @@ import pexpect
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOCKET_PATH = "/tmp/niep-smoke.sock"
+SOCKET_PATH = "/run/niep.sock"
 
 sys.path.insert(0, str(ROOT / "tools"))
 from niepctl import receive_line, send_request
@@ -148,7 +149,7 @@ def main():
         os.unlink(SOCKET_PATH)
 
     daemon = subprocess.Popen(
-        [sys.executable, str(ROOT / "tools" / "niepd.py"), "--socket", SOCKET_PATH],
+        [sys.executable, str(ROOT / "tools" / "niepd.py")],
         cwd=ROOT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
@@ -156,6 +157,11 @@ def main():
 
     try:
         wait_for_socket(SOCKET_PATH)
+        socket_mode = stat.S_IMODE(os.stat(SOCKET_PATH).st_mode)
+        if socket_mode != 0o660:
+            raise AssertionError(
+                "unexpected socket mode: " + oct(socket_mode) + " (expected 0o660)"
+            )
 
         response = send_request(SOCKET_PATH, "define", ["tutorial/examples/mininet-ping.json"])
         expect(response, True, "defined")
@@ -180,8 +186,6 @@ def main():
         client = subprocess.run(
             [
                 str(ROOT / "tools" / "niepctl"),
-                "--socket",
-                SOCKET_PATH,
                 "--json",
                 "status",
             ],
