@@ -36,7 +36,7 @@ fi
 echo "[1/5] Installing system dependencies..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  python3 python3-venv python3-pip python3-libvirt \
+  python3 python3-venv python3-pip python3-libvirt python3-pexpect \
   qemu-kvm qemu-utils libvirt-daemon-system libvirt-clients virt-manager \
   bridge-utils net-tools iproute2 sshpass git curl docker.io docker-compose-v2 \
   mininet
@@ -59,6 +59,9 @@ if [[ -x "${REPO_DIR}/INSTALLATION/setup-py3-dev.sh" ]]; then
 else
   su - "${TARGET_USER}" -c "cd '${REPO_DIR}' && chmod +x INSTALLATION/setup-py3-dev.sh && ./INSTALLATION/setup-py3-dev.sh"
 fi
+
+chmod +x "${REPO_DIR}/tools/niepctl"
+ln -sf "${REPO_DIR}/tools/niepctl" /usr/local/bin/niepctl
 
 echo "[5/5] Done."
 cat <<EOF

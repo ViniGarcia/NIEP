@@ -11,6 +11,11 @@ echo "[1/4] Checking python3..."
 command -v python3 >/dev/null
 python3 --version
 
+if [[ -x "$VENV_DIR/bin/python" ]] && ! "$VENV_DIR/bin/python" -c "import sys" >/dev/null 2>&1; then
+  echo "Removing incompatible virtual environment at $VENV_DIR..."
+  rm -rf "$VENV_DIR"
+fi
+
 echo "[2/4] Creating virtual environment at $VENV_DIR..."
 python3 -m venv "$VENV_DIR"
 

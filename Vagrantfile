@@ -3,7 +3,8 @@ Vagrant.configure("2") do |config|
   config.vm.hostname = "niep-py3"
 
   # Sync current repository into guest.
-  config.vm.synced_folder ".", "/home/vagrant/NIEP"
+  config.vm.synced_folder ".", "/home/vagrant/NIEP",
+    rsync__exclude: [".venv/"]
 
   config.vm.provider :libvirt do |libvirt|
     libvirt.cpus = 4

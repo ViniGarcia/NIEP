@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PYTHON="${REPO_DIR}/.venv/bin/python"
+
+if [[ ! -x "${PYTHON}" ]] || ! "${PYTHON}" -c "import typer" >/dev/null 2>&1; then
+  PYTHON=python3
+fi
+
+exec "${PYTHON}" "${SCRIPT_DIR}/niepctl.py" "$@"
