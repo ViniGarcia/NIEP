@@ -96,7 +96,7 @@ The original NIEP platform was developed for Python 2.7. This branch ports the c
 2. Python<br/>
 2.1 Python 3 (apt-get install python3 python3-venv python3-pip)<br/>
 2.2 Python libvirt bindings (apt-get install python3-libvirt)<br/>
-2.3 Requests, Flask, and psutil (installed from INSTALLATION/requirements-py3-min.txt)<br/>
+2.3 Requests, Flask, psutil, and Typer (installed from INSTALLATION/requirements-py3-min.txt)<br/>
 3. Hypervisor<br/>
 3.1 Qemu (apt-get install qemu-kvm qemu-system qemu-utils)<br/>
 3.2 Libvirt (apt-get install libvirt-daemon-system libvirt-clients)<br/>

@@ -13,8 +13,17 @@ The integration suite validates NIEP through the service layer instead of the le
    - Command validation.
    - Error codes for invalid commands.
    - Service-level responses without creating topology resources.
+   - Validate the Typer command hierarchy and command argument parsing.
 
-3. Topology integration checks
+3. Parser and runtime failure checks
+   - Validate field-level parser diagnostics.
+   - Validate malformed JSON line and column reporting.
+   - Validate Docker startup failure messages.
+   - Verify failed container startup rolls back containers, veth interfaces,
+     and global topology infrastructure.
+   - Validate stopped/missing container command errors.
+
+4. Topology integration checks
    - Execute topologies with `CommandDispatcher`.
    - Assert structured `ServiceResult` values.
    - Run Mininet node commands through `mininet cmd`.
@@ -22,10 +31,10 @@ The integration suite validates NIEP through the service layer instead of the le
    - Use self-contained topology fixtures from `tests/topologies/` and
      `tests/fixtures/`, not tutorial examples.
 
-4. Legacy compatibility smokes
+5. Legacy compatibility smokes
    - Keep the old CLI smoke runner to ensure the interactive CLI remains usable.
 
-5. Heavy integration checks
+6. Heavy integration checks
    - Exercise scenarios with additional runtime dependencies or traffic
      measurements.
    - Keep them behind explicit targets so the default integration suite remains
@@ -64,6 +73,26 @@ The integration suite validates NIEP through the service layer instead of the le
    - Verify `h1` reaches the container.
    - Verify the container reaches `h1` through `container exec`.
 
+6. Multi-interface Docker router
+   - Load `tests/topologies/container-router.json`.
+   - Start one Alpine container with two veth interfaces in different subnets.
+   - Apply `net.ipv4.ip_forward=1` through declarative container sysctls.
+   - Verify deterministic `eth0` and `eth1` addresses and MACs.
+   - Install routes on two Mininet hosts and verify bidirectional forwarding.
+   - Verify the container and both host-side veth interfaces are removed after
+     `topodown`.
+
+7. Container command access
+   - Validate non-interactive `container exec` through the service socket.
+   - Validate an interactive Docker exec stream through `container shell`.
+   - Verify shell output traverses the Unix socket before the session closes.
+
+8. niepctl completion and UX
+   - Validate the Typer command hierarchy and contextual help.
+   - Validate non-interactive output and container exit-code propagation.
+   - Simulate Bash completion against a running daemon.
+   - Verify active container and VM IDs are returned as completion candidates.
+
 ## Heavy Integration Scenarios
 
 1. iperf3 containers through Click policing
@@ -81,6 +110,12 @@ From the host:
 
 ```bash
 make vm-test-integration
+```
+
+To run parser and Docker failure checks:
+
+```bash
+make vm-test-errors
 ```
 
 To run only one scenario:

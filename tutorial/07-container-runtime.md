@@ -5,8 +5,9 @@ section. Containers are started with the Docker SDK for Python, using
 `network_mode=none`, and NIEP attaches explicit veth interfaces to the
 container network namespace.
 
-The first supported container workflow is intentionally small: one Mininet host
-connected directly to one Alpine container.
+The basic workflow connects one Mininet host directly to one Alpine container.
+NIEP also supports containers with multiple interfaces, including routed
+topologies.
 
 ## Topology Files
 
@@ -92,10 +93,107 @@ make vm-ctl NIEPCTL_ARGS="--json mininet cmd h1 ping -c1 -W2 10.60.0.2"
 make vm-ctl NIEPCTL_ARGS="--json topodown"
 ```
 
+## Access A Container
+
+The legacy interactive NIEP CLI provides a container context:
+
+```text
+niep> container list
+niep> container doc-alpine
+container(doc-alpine)> containerexec ip -o addr show eth0
+container(doc-alpine)> containershell
+```
+
+`containerexec` captures command output and returns to the NIEP prompt.
+`containershell` opens an interactive TTY using `/bin/sh` by default. Exit the
+shell normally to return to `container(doc-alpine)>`.
+
+With the daemon and `niepctl`, use:
+
+```bash
+niepctl --socket /tmp/niep.sock \
+  container exec doc-alpine ip -o addr show eth0
+
+niepctl --socket /tmp/niep.sock \
+  container shell doc-alpine
+```
+
+The shell command can be overridden, for example:
+
+```bash
+niepctl --socket /tmp/niep.sock \
+  container shell doc-alpine /bin/bash
+```
+
+## Multi-Interface Router
+
+The maintained router example is:
+
+```text
+h1 (10.61.0.2/24) -- eth0 container eth1 -- h2 (10.62.0.2/24)
+```
+
+Files:
+
+```text
+tutorial/examples/container-router.json
+tutorial/examples/alpine-router-container.json
+```
+
+Container interfaces are deterministic: the first `INTERFACES` entry becomes
+`eth0`, the second becomes `eth1`, and so on. `SYSCTLS` are passed to Docker at
+container creation time:
+
+```json
+{
+  "SYSCTLS": {
+    "net.ipv4.ip_forward": "1"
+  },
+  "INTERFACES": [
+    {
+      "ID": "ct-drtr0",
+      "MAC": "02:00:00:00:61:01",
+      "IP": "10.61.0.1/24"
+    },
+    {
+      "ID": "ct-drtr1",
+      "MAC": "02:00:00:00:62:01",
+      "IP": "10.62.0.1/24"
+    }
+  ]
+}
+```
+
+Start the topology:
+
+```text
+niep> define ../tutorial/examples/container-router.json
+niep> topoup
+niep> mininet
+```
+
+Inside Mininet, install routes through the container and test both directions:
+
+```text
+mininet> h1 ip route add 10.62.0.0/24 via 10.61.0.1
+mininet> h2 ip route add 10.61.0.0/24 via 10.62.0.1
+mininet> h1 ping -c2 10.62.0.2
+mininet> h2 ping -c2 10.61.0.2
+```
+
+Inspect the container from another VM shell:
+
+```bash
+sudo docker exec doc-alpine-router ip -o addr show eth0
+sudo docker exec doc-alpine-router ip -o addr show eth1
+sudo docker exec doc-alpine-router cat /proc/sys/net/ipv4/ip_forward
+```
+
 ## Current Limitations
 
 - Containers currently use Docker only.
-- Container networking is veth-based and tested for direct host-container links.
+- Container networking is veth-based and tested for direct links and routed
+  multi-interface containers.
 - Docker images may be pulled on first use, so the first run needs internet
   access from the Vagrant VM.
 - This is not a replacement for Click-on-OSv VNFs yet; it is the first compute

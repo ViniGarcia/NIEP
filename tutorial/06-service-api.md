@@ -1,6 +1,8 @@
 # NIEP Service Socket
 
-NIEP can also run as a local service. In this mode, a daemon keeps the topology state in memory and `niepctl.py` sends commands to it through a Unix socket.
+NIEP can also run as a local service. In this mode, a daemon keeps the topology
+state in memory and the Typer-based `niepctl` sends commands through a Unix
+socket.
 
 This is useful for scripts and automation because each command can be executed non-interactively.
 
@@ -32,7 +34,8 @@ make vm-ctl NIEPCTL_ARGS="--json mininet pingall"
 make vm-ctl NIEPCTL_ARGS="--json topodown"
 ```
 
-The daemon keeps the loaded topology between calls. For example, `define` and `topoup` can be sent by separate `niepctl.py` executions.
+The daemon keeps the loaded topology between calls. For example, `define` and
+`topoup` can be sent by separate `niepctl` executions.
 
 ## Direct VM Usage
 
@@ -47,11 +50,47 @@ Then, in another VM shell:
 
 ```bash
 cd /home/vagrant/NIEP
-python3 tools/niepctl.py --socket /tmp/niep.sock --json status
-python3 tools/niepctl.py --socket /tmp/niep.sock --json define tutorial/examples/mininet-ping.json
-python3 tools/niepctl.py --socket /tmp/niep.sock --json topoup
-python3 tools/niepctl.py --socket /tmp/niep.sock --json mininet pingall
-python3 tools/niepctl.py --socket /tmp/niep.sock --json topodown
+./tools/niepctl --socket /tmp/niep.sock --json status
+./tools/niepctl --socket /tmp/niep.sock --json define tutorial/examples/mininet-ping.json
+./tools/niepctl --socket /tmp/niep.sock --json topoup
+./tools/niepctl --socket /tmp/niep.sock --json mininet pingall
+./tools/niepctl --socket /tmp/niep.sock --json topodown
+```
+
+## Shell Completion
+
+The installer exposes `niepctl` in `/usr/local/bin`. Install completion for the
+current shell once:
+
+```bash
+niepctl --install-completion
+```
+
+Restart the shell afterwards. Typer completes command groups and options.
+While the daemon is running with an active topology, resource arguments are
+queried dynamically:
+
+```text
+niepctl container exec <TAB>     # active container IDs
+niepctl container shell <TAB>    # active container IDs
+niepctl vm management <TAB>      # active VM IDs
+niepctl vnf up <TAB>             # active VNF IDs
+niepctl sfc down <TAB>           # active SFC IDs
+```
+
+For a custom socket, export it so both commands and completion use the same
+daemon:
+
+```bash
+export NIEP_SOCKET=/tmp/niep-dev.sock
+```
+
+Every command has contextual help:
+
+```bash
+niepctl --help
+niepctl container --help
+niepctl container exec --help
 ```
 
 ## Available Commands
@@ -79,6 +118,7 @@ Container commands:
 ```text
 container list
 container exec <container-id> <command...>
+container shell <container-id> [shell-command...]
 ```
 
 VM commands:
@@ -88,6 +128,32 @@ vm list
 vm management <vm-id>
 vm ssh <vm-id> <user> <password>
 ```
+
+`container exec` is non-interactive and returns a structured exit code and
+captured output:
+
+```bash
+niepctl --socket /tmp/niep.sock \
+  container exec doc-alpine ip -o addr show eth0
+```
+
+`container shell` upgrades the Unix socket connection to a bidirectional TTY
+stream. It defaults to `/bin/sh`:
+
+```bash
+niepctl --socket /tmp/niep.sock \
+  container shell doc-alpine
+```
+
+An explicit shell or interactive program can also be selected:
+
+```bash
+niepctl --socket /tmp/niep.sock \
+  container shell doc-alpine /bin/sh
+```
+
+The daemon handles one socket client at a time, so an interactive shell keeps
+that daemon connection occupied until the shell exits.
 
 VNF commands:
 

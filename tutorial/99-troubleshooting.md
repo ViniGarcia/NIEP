@@ -86,6 +86,48 @@ PY
 
 Expected status is `0` for all files.
 
+## Topology Validation Errors
+
+Parser errors include the JSON field, offending value, and referenced file when
+available. For example:
+
+```text
+ERROR: Invalid Mininet host configuration provided (DEFINE / PARSER / -7)
+DETAIL: Invalid MAC address; field=MININET.HOSTS[0].INTERFACES[0].MAC; value='not-a-mac'
+```
+
+Invalid JSON syntax reports its location:
+
+```text
+DETAIL: Invalid JSON syntax at line 8, column 3: Expecting ',' delimiter
+```
+
+Container descriptors are also validated before startup. Errors identify fields
+such as `IMAGE`, `COMMAND`, `ENTRYPOINT`, `PRIVILEGED`, interface IDs, MAC
+addresses, and IP prefixes.
+
+## Docker Runtime Errors
+
+Container startup errors distinguish common causes:
+
+- Docker daemon unavailable or inaccessible;
+- image missing and pull failure;
+- invalid image reference;
+- container creation or name conflict;
+- container process exiting during startup;
+- veth or namespace configuration failure;
+- command execution in a stopped or missing container.
+
+When container startup fails, NIEP removes the partially created container and
+interfaces, then rolls back the topology infrastructure. The detailed cause is
+returned by both the interactive CLI and `niepctl --json`.
+
+Run the focused failure checks with:
+
+```bash
+make vm-test-errors
+```
+
 ## Useful NIEP CLI Commands
 
 ```text
