@@ -1,0 +1,48 @@
+{
+  "ID": "DocContainerRouter",
+  "VMS": [],
+  "VNFS": [],
+  "SFCS": [],
+  "CONTAINERS": [
+    "alpine-router-container.json"
+  ],
+  "MININET": {
+    "HOSTS": [
+      {
+        "ID": "h1",
+        "INTERFACES": [
+          {
+            "IP": "10.61.0.2/24",
+            "MAC": "02:00:00:00:61:02"
+          }
+        ]
+      },
+      {
+        "ID": "h2",
+        "INTERFACES": [
+          {
+            "IP": "10.62.0.2/24",
+            "MAC": "02:00:00:00:62:02"
+          }
+        ]
+      }
+    ],
+    "SWITCHES": [],
+    "CONTROLLERS": [],
+    "OVSWITCHES": []
+  },
+  "CONNECTIONS": [
+    {
+      "IN/OUT": "h1",
+      "IN/OUTIFACE": "02:00:00:00:61:02",
+      "OUT/IN": "doc-alpine-router",
+      "OUT/INIFACE": "02:00:00:00:61:01"
+    },
+    {
+      "IN/OUT": "doc-alpine-router",
+      "IN/OUTIFACE": "02:00:00:00:62:01",
+      "OUT/IN": "h2",
+      "OUT/INIFACE": "02:00:00:00:62:02"
+    }
+  ]
+}

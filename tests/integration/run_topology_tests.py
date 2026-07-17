@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -58,7 +59,7 @@ def mininet_probe(dispatcher, node, command):
 
 
 def container_exec(dispatcher, container_id, command, code=0):
-    result = dispatch(dispatcher, "container", ["exec", container_id, command], code="container_exec")
+    result = dispatch(dispatcher, "container", ["exec", container_id, *shlex.split(command)], code="container_exec")
     if result.data["exit_code"] != code:
         raise TestFailure(str(result.to_dict()))
     return result.data["output"]
@@ -89,7 +90,7 @@ def wait_for_vm_management(dispatcher, vm_id, attempts=12):
     raise TestFailure("VM management address not available: " + str(result.to_dict()))
 
 
-def ssh_vm(ip_address, command):
+def ssh_vm(ip_address, command, attempts=10):
     ssh_command = [
         "sshpass",
         "-p",
@@ -102,16 +103,25 @@ def ssh_vm(ip_address, command):
         "tc@" + ip_address,
         command,
     ]
-    completed = subprocess.run(
-        ssh_command,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=30,
-    )
-    if completed.returncode != 0:
+    for attempt in range(attempts):
+        completed = subprocess.run(
+            ssh_command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=30,
+        )
+        if completed.returncode == 0:
+            return completed.stdout
+        if attempt + 1 < attempts and (
+            "Connection refused" in completed.stdout
+            or "Connection timed out" in completed.stdout
+            or "No route to host" in completed.stdout
+        ):
+            time.sleep(2)
+            continue
         raise TestFailure(completed.stdout)
-    return completed.stdout
+    raise TestFailure("SSH did not become ready at " + ip_address)
 
 
 def run_topology(definition_path, body):
@@ -219,6 +229,56 @@ def container_host_link():
     run_topology("../tests/topologies/container-host-link.json", body)
 
 
+def container_router():
+    dispatcher = CommandDispatcher()
+    try:
+        dispatch(dispatcher, "define", ["../tests/topologies/container-router.json"], code="defined")
+        dispatch(dispatcher, "topoup", code="topology_up")
+
+        container_list = dispatch(dispatcher, "container", ["list"], code="defined")
+        if container_list.data != ["test-alpine-router"]:
+            raise TestFailure(str(container_list.to_dict()))
+
+        eth0 = container_exec(dispatcher, "test-alpine-router", "ip -o addr show eth0")
+        eth1 = container_exec(dispatcher, "test-alpine-router", "ip -o addr show eth1")
+        eth0_link = container_exec(dispatcher, "test-alpine-router", "ip -o link show eth0")
+        eth1_link = container_exec(dispatcher, "test-alpine-router", "ip -o link show eth1")
+        assert_contains(eth0, "10.100.0.1/24")
+        assert_contains(eth1, "10.101.0.1/24")
+        assert_contains(eth0_link.lower(), "02:00:00:01:00:01")
+        assert_contains(eth1_link.lower(), "02:00:00:01:01:01")
+
+        forwarding = container_exec(dispatcher, "test-alpine-router", "cat /proc/sys/net/ipv4/ip_forward")
+        if forwarding.strip() != "1":
+            raise TestFailure("IPv4 forwarding is disabled: " + repr(forwarding))
+
+        if not mininet_probe(dispatcher, "h1", "ping -c1 -W2 10.100.0.1"):
+            raise TestFailure("h1 did not reach router eth0")
+        if not mininet_probe(dispatcher, "h2", "ping -c1 -W2 10.101.0.1"):
+            raise TestFailure("h2 did not reach router eth1")
+
+        mininet_cmd(dispatcher, "h1", "ip route add 10.101.0.0/24 via 10.100.0.1")
+        mininet_cmd(dispatcher, "h2", "ip route add 10.100.0.0/24 via 10.101.0.1")
+
+        if not mininet_probe(dispatcher, "h1", "ping -c2 -W2 10.101.0.2"):
+            raise TestFailure("h1 did not reach h2 through the container router")
+        if not mininet_probe(dispatcher, "h2", "ping -c2 -W2 10.100.0.2"):
+            raise TestFailure("h2 did not reach h1 through the container router")
+    finally:
+        down = dispatcher.dispatch("topodown")
+        if not down.ok and down.code.value != "no_topology":
+            raise TestFailure("topology cleanup failed: " + str(down.to_dict()))
+
+    for command, resource in (
+        (["docker", "inspect", "test-alpine-router"], "container"),
+        (["ip", "link", "show", "ct-rtr0"], "ct-rtr0"),
+        (["ip", "link", "show", "ct-rtr1"], "ct-rtr1"),
+    ):
+        completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if completed.returncode == 0:
+            raise TestFailure(resource + " was left behind after topodown")
+
+
 def iperf_click_shaper():
     def body(dispatcher):
         container_list = dispatch(dispatcher, "container", ["list"], code="defined")
@@ -258,6 +318,7 @@ def iperf_click_shaper():
 
 SCENARIOS = {
     "container-host-link": Scenario("container-host-link", container_host_link),
+    "container-router": Scenario("container-router", container_router),
     "mininet-isolated": Scenario("mininet-isolated", isolated_mininet_hosts),
     "mininet-connected": Scenario("mininet-connected", connected_mininet_hosts),
     "vm-host-link": Scenario("vm-host-link", vm_host_link),

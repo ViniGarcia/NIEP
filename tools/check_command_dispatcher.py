@@ -23,6 +23,7 @@ def main():
     assert_result(dispatcher.dispatch('topoup'), False, 'no_topology')
     assert_result(dispatcher.dispatch('mininet', ['pingall']), False, 'topology_not_up')
     assert_result(dispatcher.dispatch('vm', ['list']), True, 'defined')
+    assert_result(dispatcher.dispatch('container', ['shell', 'missing']), False, 'invalid_command_args')
     assert_result(dispatcher.dispatch('vnf', ['management']), False, 'invalid_command_args')
     print('[ OK ] command dispatcher')
 

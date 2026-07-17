@@ -25,6 +25,7 @@ EXAMPLES = {
     "vm-host-link": "../tutorial/examples/vm-host-link.json",
     "click": "../tutorial/examples/click-forward-topology.json",
     "container": "../tutorial/examples/container-host-link.json",
+    "container-router": "../tutorial/examples/container-router.json",
 }
 
 
@@ -62,6 +63,8 @@ def check_example(name: str, path: str) -> list[str]:
 
     assert_true(all(isinstance(vm, VMSpec) for vm in spec.vms), f"{name}: non-spec VM found", errors)
     assert_true(all(isinstance(container, ContainerSpec) for container in spec.containers), f"{name}: non-spec container found", errors)
+    for container in spec.containers:
+        assert_true(isinstance(container.sysctls, dict), f"{name}: container {container.id} sysctls are not a dict", errors)
     assert_true(all(isinstance(vnf, VNFSpec) for vnf in spec.vnfs), f"{name}: non-spec VNF found", errors)
     assert_true(all(isinstance(sfc, SFCSpec) for sfc in spec.sfcs), f"{name}: non-spec SFC found", errors)
     return errors
