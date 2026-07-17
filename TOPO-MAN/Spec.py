@@ -110,6 +110,7 @@ class ContainerSpec:
     command: object
     entrypoint: object = None
     privileged: bool = True
+    sysctls: dict = field(default_factory=dict)
     interfaces: list = field(default_factory=list)
 
     @classmethod
@@ -121,6 +122,7 @@ class ContainerSpec:
             command=container.COMMAND,
             entrypoint=container.ENTRYPOINT,
             privileged=container.PRIVILEGED,
+            sysctls=container.SYSCTLS,
             interfaces=[InterfaceSpec.from_dict(iface) for iface in container.INTERFACES],
         )
 

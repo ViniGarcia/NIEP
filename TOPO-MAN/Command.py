@@ -81,7 +81,9 @@ class CommandDispatcher:
         if args[0] == 'exec':
             if len(args) < 3:
                 return self._invalid_args("CONTAINER EXEC EXPECTS CONTAINER ID AND COMMAND")
-            return self.container.exec(args[1], ' '.join(args[2:]))
+            return self.container.exec(args[1], args[2:])
+        if args[0] == 'shell':
+            return self._invalid_args("CONTAINER SHELL REQUIRES AN INTERACTIVE CLIENT")
         return self._unknown_subcommand('CONTAINER')
 
     def vnf_command(self, args):

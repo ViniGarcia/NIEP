@@ -6,10 +6,13 @@ from mininet.cli import CLI
 import cmd
 import readline
 import rlcompleter
+import shlex
 
 path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['TOPO-MAN']))
+path.insert(0, '/'.join(abspath(__file__).split('/')[:-2] + ['VEM']))
 from Result import ResultCode
-from Service import TopologyService, VMService, VNFService, SFCService
+from Service import ContainerService, TopologyService, VMService, VNFService, SFCService
+from TerminalSession import bridge_terminal
 
 def PATHCOMPLETER(line, text):
 
@@ -61,11 +64,13 @@ class NIEPCLI(cmd.Cmd):
         self.prompt = 'niep> '
         self.NIEPEXE = None
         self.VMEXEC = None
+        self.CONTAINEREXEC = None
         self.VNFEXEC = None
         self.SFCEXEC = None
         self.CLICOMP = None
         self.TOPOLOGY = TopologyService()
         self.VMSERVICE = VMService(self.TOPOLOGY)
+        self.CONTAINERSERVICE = ContainerService(self.TOPOLOGY)
         self.VNFSERVICE = VNFService(self.TOPOLOGY)
         self.SFCSERVICE = SFCService(self.TOPOLOGY)
 
@@ -76,6 +81,8 @@ class NIEPCLI(cmd.Cmd):
         message = result.cli_message(include_status=include_status)
         if message:
             print(message)
+        if result.detail and result.detail != message:
+            print("DETAIL: " + result.detail)
 
     def print_define_error(self, result):
         if result.code == ResultCode.PARSER_ERROR:
@@ -155,6 +162,9 @@ class NIEPCLI(cmd.Cmd):
             print('\tvm arg -> assumes a VM or list the defined ones')
             print('\t\t-> arg = list (list every defined VM ID)')
             print('\t\t-> arg = VM ID (assumes VM ID prompt)')
+            print('\tcontainer arg -> assumes a container or list the defined ones')
+            print('\t\t-> arg = list (list every defined container ID)')
+            print('\t\t-> arg = container ID (assumes container prompt)')
             print('\tvnf arg -> assumes a VNF or list the defined ones')
             print('\t\t-> arg = list (list every defined VNF ID)')
             print('\t\t-> arg = VNF ID (assumes VNF ID prompt)')
@@ -167,6 +177,9 @@ class NIEPCLI(cmd.Cmd):
             print('\tvmssh arg1 arg2-> try to establish a ssh connection with the VM')
             print('\t\t-> arg1 -> username')
             print('\t\t-> arg2 -> password\n')
+            print('-> CONTAINER PROMPT <-')
+            print('\tcontainerexec command -> execute a non-interactive command')
+            print('\tcontainershell [program] -> open an interactive shell (default: /bin/sh)\n')
             print('-> VNF PROMPT <-')
             print('\tvnfmanagement -> return the VNF management interface address')
             print('\tvnfup -> wake the VNF')
@@ -255,6 +268,7 @@ class NIEPCLI(cmd.Cmd):
             if not self.NIEPEXE == None:
                 self.TOPOLOGY.clean()
                 self.VMEXEC = None
+                self.CONTAINEREXEC = None
                 self.VNFEXEC = None
                 self.SFCEXEC = None
                 self.sync_executor()
@@ -273,6 +287,7 @@ class NIEPCLI(cmd.Cmd):
             if not self.NIEPEXE == None:
                 self.TOPOLOGY.destroy()
                 self.VMEXEC = None
+                self.CONTAINEREXEC = None
                 self.VNFEXEC = None
                 self.SFCEXEC = None
                 self.sync_executor()
@@ -336,6 +351,42 @@ class NIEPCLI(cmd.Cmd):
                 return [common_prefix]
 
         return []
+
+    def do_container(self, args):
+        if self.prompt != 'niep> ':
+            print('NIEP PROMPT COMMAND')
+            return
+        if self.NIEPEXE is None:
+            print('NO TOPOLOGY DEFINED')
+            return
+        if self.NIEPEXE.STATUS != 0:
+            print('TOPOLOGY IS NOT UP')
+            return
+
+        split_args = args.split()
+        if len(split_args) != 1:
+            print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
+            return
+        if args == 'list':
+            print('\n########### CONTAINERS LIST ###########')
+            for container_id in self.TOPOLOGY.container_ids():
+                print(container_id)
+            print('#######################################\n')
+            return
+        if args in self.TOPOLOGY.container_ids():
+            self.changecontext(self.prompt, "container")
+            self.CONTAINEREXEC = self.TOPOLOGY.get_container(args)
+            self.prompt = 'container(' + args + ')> '
+            return
+        print('CONTAINER ' + args + ' NOT FOUND')
+
+    def complete_container(self, text, line, begidx, endidx):
+        if self.NIEPEXE is None or self.NIEPEXE.STATUS != 0:
+            return []
+        args_list = ['list'] + self.TOPOLOGY.container_ids()
+        if not text:
+            return args_list
+        return [item for item in args_list if item.startswith(text)]
 
     def do_vnf(self, args):
         if self.prompt == 'niep> ':
@@ -496,6 +547,56 @@ class NIEPCLI(cmd.Cmd):
             self.VMSERVICE.ssh(self.VMEXEC.ID, splited_args[0], splited_args[1])
         else:
             print('VM PROMPT COMMAND')
+
+##################################################################################################################################
+
+##################################################################################################################################
+# CONTAINER INTERFACE
+
+    def do_containerexec(self, args):
+        if not self.prompt.startswith('container'):
+            print('CONTAINER PROMPT COMMAND')
+            return
+        if not args.strip():
+            print('WRONG ARGUMENTS AMOUNT - COMMAND EXPECTED')
+            return
+
+        try:
+            command = shlex.split(args)
+        except ValueError as exc:
+            print('INVALID COMMAND: ' + str(exc))
+            return
+        result = self.CONTAINERSERVICE.exec(self.CONTAINEREXEC.ID, command)
+        if result.data is not None:
+            output = result.data.get('output', '')
+            if output:
+                print(output, end='' if output.endswith('\n') else '\n')
+        if not result.ok:
+            self.print_result_error(result, include_status=True)
+
+    def do_containershell(self, args):
+        if not self.prompt.startswith('container'):
+            print('CONTAINER PROMPT COMMAND')
+            return
+        try:
+            command = shlex.split(args) if args.strip() else ['/bin/sh']
+        except ValueError as exc:
+            print('INVALID SHELL COMMAND: ' + str(exc))
+            return
+
+        result = self.CONTAINERSERVICE.open_shell(self.CONTAINEREXEC.ID, command)
+        if not result.ok:
+            self.print_result_error(result)
+            return
+        stream = result.data
+        try:
+            bridge_terminal(stream)
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
+        print()
 
 ##################################################################################################################################
 
@@ -702,6 +803,8 @@ class NIEPCLI(cmd.Cmd):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
             elif self.prompt.startswith("vm"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VMMEM")   
+            elif self.prompt.startswith("container"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/CONTAINERMEM")
             elif self.prompt.startswith("vnf"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
             elif self.prompt.startswith("sfc"):
@@ -716,6 +819,8 @@ class NIEPCLI(cmd.Cmd):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
             elif current.startswith("vm"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VMMEM")
+            elif current.startswith("container"):
+                readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/CONTAINERMEM")
             elif current.startswith("vnf"):
                 readline.write_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
             elif current.startswith("sfc"):
@@ -728,6 +833,8 @@ class NIEPCLI(cmd.Cmd):
                 readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/NIEPMEM")
             elif succeeding.startswith("vm"):
                 readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VMMEM")
+            elif succeeding.startswith("container"):
+                readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/CONTAINERMEM")
             elif succeeding.startswith("vnf"):
                 readline.read_history_file(abspath(__file__)[:abspath(__file__).rindex("/")] + "/CLIMEM/VNFMEM")
             elif succeeding.startswith("sfc"):

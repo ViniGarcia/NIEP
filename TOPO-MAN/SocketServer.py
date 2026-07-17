@@ -3,6 +3,7 @@ import os
 import socket
 
 from Command import CommandDispatcher
+from TerminalSession import bridge_sockets
 
 
 class NIEPSocketServer:
@@ -38,8 +39,35 @@ class NIEPSocketServer:
 
     def _handle_connection(self, connection):
         request = self._read_request(connection)
+        if self._is_interactive_shell(request):
+            self._handle_interactive_shell(connection, request)
+            return
         response = self.handle_request(request)
         connection.sendall((json.dumps(response) + '\n').encode('utf-8'))
+
+    def _is_interactive_shell(self, request):
+        args = request.get('args', [])
+        return request.get('command') == 'container' and len(args) >= 2 and args[0] == 'shell'
+
+    def _handle_interactive_shell(self, connection, request):
+        args = request.get('args', [])
+        container_id = args[1]
+        command = args[2:] or ['/bin/sh']
+        result = self.dispatcher.container.open_shell(container_id, command)
+        response = result.to_dict()
+        response.pop('data', None)
+        connection.sendall((json.dumps(response) + '\n').encode('utf-8'))
+        if not result.ok:
+            return
+
+        stream = result.data
+        try:
+            bridge_sockets(connection, stream)
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
 
     def _read_request(self, connection):
         chunks = []

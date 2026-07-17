@@ -8,6 +8,8 @@ class ResultCode(str, Enum):
     ARP_PROBLEMS = "arp_problems"
     COMMAND_ERROR = "command_error"
     CONTAINER_EXEC = "container_exec"
+    CONTAINER_SHELL = "container_shell"
+    CONTAINER_RUNTIME_ERROR = "container_runtime_error"
     CONTAINER_NOT_FOUND = "container_not_found"
     DEFINED = "defined"
     EXECUTER_ERROR = "executer_error"

@@ -4,11 +4,12 @@ from shutil import rmtree
 from Executer import Executer
 from Parser import PlatformParser
 from Result import ResultCode, ServiceResult
+from DockerRuntime import DockerRuntimeError
 
 
 PARSERERRORS = {-1: "Invalid definition file path or invalid key included",
                 -2: "Invalid data type included as a key value",
-                -3: "Invalid VNF/VM configuration provided",
+                -3: "Invalid VM, VNF, or container configuration provided",
                 -4: "Invalid SFC file path provided",
                 -5: "Invalid SFC configuration provided",
                 -6: "Invalid Mininet configuration provided",
@@ -19,7 +20,7 @@ PARSERERRORS = {-1: "Invalid definition file path or invalid key included",
                 -11: "Invalid connections configuration provided",
                 -12: "Invalid In/Out point configuration provided",
                 -13: "Invalid Out/In point configuration provided",
-                -14: "Inconsistent in In/Out and Out/In poits"}
+                -14: "Inconsistent In/Out and Out/In points"}
 
 EXECUTERERRORS = {-1: "Mininet network interfaces mapping failed",
                   -2: "Invalid definition of Mininet network interface",
@@ -32,15 +33,24 @@ class TopologyService:
         self.executor = None
 
     def define(self, definition_path):
-        parser = PlatformParser(definition_path)
+        try:
+            parser = PlatformParser(definition_path)
+        except Exception as exc:
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.PARSER_ERROR,
+                message="Unexpected error while reading topology definition",
+                detail=str(exc),
+            )
         if parser.STATUS != 0:
+            detail = getattr(parser, 'DETAIL', '')
             return ServiceResult(
                 ok=False,
                 code=ResultCode.PARSER_ERROR,
                 message=PARSERERRORS.get(parser.STATUS, "Parser error"),
                 data=parser,
                 status=parser.STATUS,
-                detail=getattr(parser, 'DETAIL', ''),
+                detail=detail,
             )
 
         executor = Executer(parser)
@@ -68,15 +78,33 @@ class TopologyService:
                 status=self.executor.STATUS,
             )
 
-        self.executor.topologyUp()
-        if self.executor.STATUS != 0:
-            status = self.executor.STATUS
+        try:
+            self.executor.topologyUp()
+        except Exception as exc:
+            detail = str(exc)
+            self.executor.rollbackFailedStart()
+            rollbackDetail = getattr(self.executor, 'DETAIL', '')
+            if rollbackDetail:
+                detail += " | " + rollbackDetail
             self.executor = None
             return ServiceResult(
                 ok=False,
                 code=ResultCode.TOPOLOGY_UP_FAILED,
-                message="PROBLEMS ON TOPOLOGY DEFINITION ON UP PROCESS - TOPOLOGY UNDEFINED",
+                message="Topology startup raised an unexpected error",
+                detail=detail,
+            )
+        if self.executor.STATUS != 0:
+            status = self.executor.STATUS
+            detail = getattr(self.executor, 'DETAIL', '')
+            self.executor.rollbackFailedStart()
+            detail = getattr(self.executor, 'DETAIL', '') or detail
+            self.executor = None
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.TOPOLOGY_UP_FAILED,
+                message=detail or "Topology startup failed and the topology was undefined",
                 status=status,
+                detail=detail,
             )
 
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_UP, data=self.executor)
@@ -88,12 +116,14 @@ class TopologyService:
         self.executor.topologyDown()
         if self.executor.STATUS is not None:
             status = self.executor.STATUS
+            detail = getattr(self.executor, 'DETAIL', '')
             self.executor = None
             return ServiceResult(
                 ok=False,
                 code=ResultCode.TOPOLOGY_DOWN_FAILED,
-                message="PROBLEMS ON TOPOLOGY DEFINITION ON DOWN PROCESS - TOPOLOGY UNDEFINED",
+                message="Topology cleanup failed and the topology was undefined",
                 status=status,
+                detail=detail,
             )
 
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_DOWN)
@@ -204,13 +234,37 @@ class ContainerService:
         container = self.topology.get_container(container_id)
         if container is None:
             return ServiceResult(ok=False, code=ResultCode.CONTAINER_NOT_FOUND, message="CONTAINER NOT FOUND")
-        exit_code, output = container.execContainer(command)
+        try:
+            exit_code, output = container.execContainer(command)
+        except DockerRuntimeError as exc:
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.CONTAINER_RUNTIME_ERROR,
+                message="Container command could not be executed",
+                detail=str(exc),
+            )
         return ServiceResult(
             ok=(exit_code == 0),
             code=ResultCode.CONTAINER_EXEC,
+            message="" if exit_code == 0 else "Container command exited with status " + str(exit_code),
             data={'exit_code': exit_code, 'output': output},
             status=exit_code,
         )
+
+    def open_shell(self, container_id, command):
+        container = self.topology.get_container(container_id)
+        if container is None:
+            return ServiceResult(ok=False, code=ResultCode.CONTAINER_NOT_FOUND, message="CONTAINER NOT FOUND")
+        try:
+            stream = container.openShell(command)
+        except DockerRuntimeError as exc:
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.CONTAINER_RUNTIME_ERROR,
+                message="Container shell could not be opened",
+                detail=str(exc),
+            )
+        return ServiceResult(ok=True, code=ResultCode.CONTAINER_SHELL, data=stream)
 
 
 class VNFService:

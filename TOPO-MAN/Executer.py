@@ -24,6 +24,7 @@ class Executer:
         self.POX = None
         self.NET = None
         self.STATUS = None
+        self.DETAIL = ""
         self.SWITCH_CONTROLLER_ID = None
         self.LOCAL_POX_ENABLED = True
         self.INFRASTRUCTURE = DEFAULT_INFRASTRUCTURE_RUNTIME
@@ -306,6 +307,12 @@ class Executer:
                 if upStatus is None:
                     upStatus = CONTAINERINSTANCE.CONTAINER_STATUS
                 if upStatus != 0:
+                    self.DETAIL = (
+                        "Container "
+                        + str(CONTAINERINSTANCE.ID)
+                        + " failed to start: "
+                        + str(getattr(CONTAINERINSTANCE, "DETAIL", "unknown container error"))
+                    )
                     self.STATUS = upStatus
                     return upStatus
                 self.CONTAINERS[CONTAINERINSTANCE.ID] = CONTAINERINSTANCE
@@ -340,6 +347,8 @@ class Executer:
         if self.STATUS != 0:
             return
 
+        cleanupErrors = []
+
         for OVS in self.OVSSWITCHES:
             self.OVSSWITCHES[OVS].ELEM.stop()
 
@@ -359,11 +368,72 @@ class Executer:
             VNFINSTANCE.downVNF()
 
         for CONTAINERINSTANCE in self.CONFIGURATION.CONTAINERS:
-            CONTAINERINSTANCE.downContainer()
+            downStatus = CONTAINERINSTANCE.downContainer()
+            if downStatus not in (0, None):
+                cleanupErrors.append(
+                    "Container "
+                    + str(CONTAINERINSTANCE.ID)
+                    + " cleanup failed: "
+                    + str(getattr(CONTAINERINSTANCE, "DETAIL", downStatus))
+                )
 
         for SFCINSTANCE in self.CONFIGURATION.SFCS:
             SFCINSTANCE.SFC_UP = False
 
+        if cleanupErrors:
+            self.STATUS = -10
+            self.DETAIL = " | ".join(cleanupErrors)
+            return -10
+
         self.STATUS = None
+        self.DETAIL = ""
+        return 0
+
+#------------------------------------------------------------------
+
+    def rollbackFailedStart(self):
+        cleanupErrors = []
+
+        if self.NET is not None:
+            try:
+                self.NET.stop()
+            except Exception as exc:
+                cleanupErrors.append("Mininet rollback failed: " + str(exc))
+
+        for container in list(self.CONTAINERS.values()):
+            try:
+                result = container.downContainer()
+                if result not in (0, None):
+                    cleanupErrors.append(
+                        "Container "
+                        + str(container.ID)
+                        + " rollback failed: "
+                        + str(getattr(container, "DETAIL", result))
+                    )
+            except Exception as exc:
+                cleanupErrors.append("Container " + str(container.ID) + " rollback failed: " + str(exc))
+
+        for vnf in list(self.VNFS.values()):
+            try:
+                vnf.downVNF()
+            except Exception as exc:
+                cleanupErrors.append("VNF " + str(vnf.ID) + " rollback failed: " + str(exc))
+
+        for vm in list(self.VMS.values()):
+            try:
+                vm.downVM()
+            except Exception as exc:
+                cleanupErrors.append("VM " + str(vm.ID) + " rollback failed: " + str(exc))
+
+        try:
+            self.INFRASTRUCTURE.stop_process(self.POX)
+            self.INFRASTRUCTURE.cleanup_topology_infrastructure()
+        except Exception as exc:
+            cleanupErrors.append("Infrastructure rollback failed: " + str(exc))
+
+        if cleanupErrors:
+            suffix = "Rollback warnings: " + " | ".join(cleanupErrors)
+            self.DETAIL = (self.DETAIL + " | " if self.DETAIL else "") + suffix
+        return cleanupErrors
 
 #------------------------------------------------------------------
