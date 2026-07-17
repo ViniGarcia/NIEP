@@ -16,7 +16,10 @@ make vm-daemon
 
 This starts the daemon inside the Vagrant VM as root, using `/run/niep.sock` by
 default. The socket is created with mode `0600` and then made group-accessible
-with its final mode `0660`; users outside its owner and group cannot access it.
+as `root:niep` with its final mode `0660`. The installer adds its target user to
+the `niep` group, so authorized users can run `niepctl` without `sudo`; users
+outside the group cannot access the socket. Log out and back in after
+installation before using this access for the first time.
 
 To use a different socket:
 
@@ -52,11 +55,11 @@ Then, in another VM shell:
 
 ```bash
 cd /home/vagrant/NIEP
-sudo ./tools/niepctl --json status
-sudo ./tools/niepctl --json define tutorial/examples/mininet-ping.json
-sudo ./tools/niepctl --json topoup
-sudo ./tools/niepctl --json mininet pingall
-sudo ./tools/niepctl --json topodown
+./tools/niepctl --json status
+./tools/niepctl --json define tutorial/examples/mininet-ping.json
+./tools/niepctl --json topoup
+./tools/niepctl --json mininet pingall
+./tools/niepctl --json topodown
 ```
 
 ## Shell Completion

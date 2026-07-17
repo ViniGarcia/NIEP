@@ -7,8 +7,9 @@ will create Mininet and libvirt resources.
 
 from __future__ import annotations
 
-import os
+import grp
 import json
+import os
 import socket
 import stat
 import subprocess
@@ -61,6 +62,26 @@ def run_shell_request(path, container_id, command):
         client.close()
 
 
+def expect_terminal(child, expected):
+    while True:
+        match = child.expect([expected, r"\x1b\[6n", pexpect.EOF])
+        if match == 0:
+            return
+        if match == 1:
+            child.send("\x1b[1;1R")
+            continue
+        raise AssertionError("container shell closed before expected output")
+
+
+def expect_terminal_exit(child):
+    while True:
+        match = child.expect([r"\x1b\[6n", pexpect.EOF])
+        if match == 0:
+            child.send("\x1b[1;1R")
+            continue
+        return
+
+
 def run_niepctl_shell(path):
     child = pexpect.spawn(
         str(ROOT / "tools" / "niepctl"),
@@ -76,10 +97,12 @@ def run_niepctl_shell(path):
         timeout=20,
     )
     try:
+        expect_terminal(child, r"(?:^|\r\n)[^\r\n]*[#$] ")
         child.sendline("echo NIEPCTL_SHELL_OK")
-        child.expect("NIEPCTL_SHELL_OK")
+        expect_terminal(child, r"(?:^|\r\n)NIEPCTL_SHELL_OK\r\n")
+        expect_terminal(child, r"(?:^|\r\n)[^\r\n]*[#$] ")
         child.sendline("exit")
-        child.expect(pexpect.EOF)
+        expect_terminal_exit(child)
     finally:
         if child.isalive():
             child.close(force=True)
@@ -161,6 +184,18 @@ def main():
         if socket_mode != 0o660:
             raise AssertionError(
                 "unexpected socket mode: " + oct(socket_mode) + " (expected 0o660)"
+            )
+        socket_stat = os.stat(SOCKET_PATH)
+        expected_group = grp.getgrnam("niep")
+        if socket_stat.st_uid != 0 or socket_stat.st_gid != expected_group.gr_gid:
+            raise AssertionError(
+                "unexpected socket owner: "
+                + str(socket_stat.st_uid)
+                + ":"
+                + str(socket_stat.st_gid)
+                + " (expected 0:"
+                + str(expected_group.gr_gid)
+                + ")"
             )
 
         response = send_request(SOCKET_PATH, "define", ["tutorial/examples/mininet-ping.json"])

@@ -45,8 +45,9 @@ echo "[2/5] Enabling libvirt and Docker daemons..."
 systemctl enable --now libvirtd || true
 systemctl enable --now docker || true
 
-echo "[3/5] Granting VM user access to virtualization groups..."
-usermod -aG libvirt,kvm,docker "${TARGET_USER}" || true
+echo "[3/5] Creating the NIEP access group and granting user access..."
+getent group niep >/dev/null || groupadd --system niep
+usermod -aG libvirt,kvm,docker,niep "${TARGET_USER}"
 
 echo "[4/5] Bootstrapping Python 3 virtualenv in repo..."
 if [[ ! -d "${REPO_DIR}" ]]; then
@@ -68,7 +69,7 @@ cat <<EOF
 Provisioning complete.
 
 Important:
-  - Log out/in (or reboot) so ${TARGET_USER} gets libvirt/kvm/docker group permissions.
+  - Log out/in (or reboot) so ${TARGET_USER} gets libvirt/kvm/docker/niep group permissions.
   - Activate venv before running NIEP:
       source ${REPO_DIR}/.venv/bin/activate
   - If not using local POX during migration:

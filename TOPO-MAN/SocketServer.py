@@ -1,9 +1,13 @@
+import grp
 import json
 import os
 import socket
 
 from Command import CommandDispatcher
 from TerminalSession import bridge_sockets
+
+
+SOCKET_GROUP = 'niep'
 
 
 class NIEPSocketServer:
@@ -38,6 +42,8 @@ class NIEPSocketServer:
             self.socket.bind(self.socket_path)
         finally:
             os.umask(previous_umask)
+        socket_group = grp.getgrnam(SOCKET_GROUP)
+        os.chown(self.socket_path, 0, socket_group.gr_gid)
         os.chmod(self.socket_path, 0o660)
         self.socket.listen(5)
 

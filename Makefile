@@ -31,7 +31,7 @@ vm-daemon:
 	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tools/niepd.py --socket $(NIEP_SOCKET)"
 
 vm-ctl:
-	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo ./tools/niepctl --socket $(NIEP_SOCKET) $(NIEPCTL_ARGS)"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && ./tools/niepctl --socket $(NIEP_SOCKET) $(NIEPCTL_ARGS)"
 
 vm-clean:
 	vagrant ssh -- -t "sudo mn -c; sudo docker rm -f test-alpine test-alpine-router doc-alpine doc-alpine-router doc-iperf-client doc-iperf-server test-iperf-client test-iperf-server || true; sudo virsh net-destroy vnNIEP || true; sudo ip link set vbrNIEP down || true; sudo brctl delbr vbrNIEP || true"
