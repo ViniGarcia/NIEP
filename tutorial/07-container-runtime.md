@@ -23,7 +23,7 @@ The container descriptor is:
 ```json
 {
   "ID": "doc-alpine",
-  "IMAGE": "alpine:3.20",
+  "IMAGE": "alpine:3.20@sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e",
   "COMMAND": ["sleep", "infinity"],
   "PRIVILEGED": true,
   "INTERFACES": [
@@ -50,7 +50,7 @@ Start NIEP:
 
 ```bash
 cd /home/vagrant/NIEP/CLI
-sudo python3 CLI.py
+sudo ../.venv/bin/python CLI.py
 ```
 
 Load and start the topology:

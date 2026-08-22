@@ -1,3 +1,42 @@
+[build-system]
+requires = ["setuptools==75.6.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "niep"
+version = "1.1.0"
+description = "NFV Infrastructure Emulation Platform"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = {file = "LICENSE"}
+authors = [{name = "NIEP Research Group"}]
+dependencies = [
+  "docker>=7.1,<8",
+  "flask>=2.3,<4",
+  "psutil>=5.9,<7",
+  "requests>=2.31,<3",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "setuptools>=68",
+  "pytest>=8,<9",
+  "pytest-cov>=5,<7",
+  "pytest-timeout>=2.3,<3",
+]
+integration = [
+  "pexpect>=4.9,<5",
+]
+
+[project.scripts]
+niepctl = "niep.interfaces.niepctl:main"
+niepd = "niep.interfaces.niepd:main"
+
+[tool.setuptools.packages.find]
+include = ["niep*"]
+exclude = ["niep.tests*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -14,7 +53,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["TOPO-MAN", "VEM", "CLI", "tools"]
+source = ["niep"]
 omit = [
   "OFCONTROLLERS/pox/*",
   "*/OFCONTROLLERS/pox/*",

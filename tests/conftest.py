@@ -5,14 +5,6 @@ from typing import Any
 
 import pytest
 
-try:
-    from tests.support import install_optional_dependency_stubs
-except ImportError:  # pragma: no cover - direct pytest invocation fallback
-    from support import install_optional_dependency_stubs
-
-
-install_optional_dependency_stubs()
-
 
 @dataclass
 class RecordedCommands:

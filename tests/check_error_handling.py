@@ -3,26 +3,16 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-from tests.support import install_optional_dependency_stubs
-
-install_optional_dependency_stubs()
-sys.path.insert(0, str(ROOT / "TOPO-MAN"))
-sys.path.insert(0, str(ROOT / "VEM"))
-
-from Container import Container  # noqa: E402
-from ContainerNetworkRuntime import ContainerNetworkError  # noqa: E402
-from Command import CommandDispatcher  # noqa: E402
-from DockerRuntime import DockerRuntime, DockerRuntimeError  # noqa: E402
-from Parser import PlatformParser  # noqa: E402
-from Service import ContainerService  # noqa: E402
+from niep.application.command import CommandDispatcher
+from niep.application.parser import PlatformParser
+from niep.application.service import ContainerService
+from niep.runtime.container import Container
+from niep.runtime.container_network import ContainerNetworkError
+from niep.runtime.docker import DockerRuntime, DockerRuntimeError
 
 
 def base_topology():
@@ -101,7 +91,7 @@ def check_parser_diagnostics(directory):
 
     invalid_container_ip = {
         "ID": "bad-container-ip",
-        "IMAGE": "alpine:3.20",
+        "IMAGE": "alpine:3.20@sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e",
         "INTERFACES": [
             {
                 "ID": "ct-badip0",
@@ -121,7 +111,7 @@ def check_parser_diagnostics(directory):
 
     invalid_sysctls = {
         "ID": "bad-container-sysctls",
-        "IMAGE": "alpine:3.20",
+        "IMAGE": "alpine:3.20@sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e",
         "SYSCTLS": ["net.ipv4.ip_forward=1"],
         "INTERFACES": [],
     }

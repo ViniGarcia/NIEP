@@ -55,8 +55,21 @@ Run NIEP from the `CLI/` directory:
 
 ```bash
 cd CLI
-sudo python3 CLI.py
+sudo ../.venv/bin/python CLI.py
 ```
+
+An editable source install discovers repository assets automatically. A wheel
+contains only the maintained Python package: VM images, `CONFS`, CLI history
+and the vendored POX tree remain deployment assets. When running a wheel beside
+a separately provisioned checkout, point the package at it explicitly:
+
+```bash
+export NIEP_ROOT=/path/to/NIEP
+niepctl --help
+```
+
+An invalid or incomplete `NIEP_ROOT` is reported as an asset error when the
+corresponding runtime capability is used.
 
 See the sequential tutorial in [`tutorial/README.md`](tutorial/README.md).
 

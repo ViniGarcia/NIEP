@@ -11,17 +11,6 @@ from __future__ import annotations
 
 import sys
 import types
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _add_legacy_paths() -> None:
-    for directory in (ROOT / "TOPO-MAN", ROOT / "VEM"):
-        value = str(directory)
-        if value not in sys.path:
-            sys.path.insert(0, value)
 
 
 def _install_docker_import_stub() -> None:
@@ -151,18 +140,12 @@ def _install_mininet_import_stub() -> None:
 
 
 def install_optional_dependency_stubs() -> None:
-    """Install import-only dependency shims and load the neutral parser once."""
+    """Install import-only dependency shims for host-only tests."""
 
-    _add_legacy_paths()
     _install_docker_import_stub()
     _install_libvirt_import_stub()
     _install_requests_import_stub()
     _install_mininet_import_stub()
-
-    # Loading this module here ensures legacy teardown checks cannot replace
-    # the real parser with their historical placeholder in this pytest process.
-    if "Parser" not in sys.modules:
-        __import__("Parser")
 
 
 install_optional_dependency_stubs()

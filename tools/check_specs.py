@@ -13,23 +13,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 
 def _parser_types():
-    """Load parser types only when a check is actually requested.
+    """Load parser types only when a check is actually requested."""
 
-    The parser still has legacy imports of optional runtimes.  Keeping this
-    behind the check function makes importing this validator side-effect free
-    and lets host-only pytest bootstrap the dependency shims first.
-    """
-
-    from tests.support import install_optional_dependency_stubs
-
-    install_optional_dependency_stubs()
-    from Parser import PlatformParser
-    from Spec import ConnectionSpec, ContainerSpec, InterfaceSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec
+    from niep.application.parser import PlatformParser
+    from niep.domain.spec import ConnectionSpec, ContainerSpec, InterfaceSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec
 
     return (
         PlatformParser,

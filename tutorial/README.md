@@ -6,7 +6,7 @@ Run NIEP from the `CLI/` directory. All example paths below assume the prompt is
 
 ```bash
 cd /home/vagrant/NIEP/CLI
-sudo python3 CLI.py
+sudo ../.venv/bin/python CLI.py
 ```
 
 ## Sequence

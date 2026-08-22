@@ -54,7 +54,7 @@ make vm-up             # start the VM
 make vm-ssh            # open a shell in the VM
 make vm-sync           # sync host -> VM once
 make vm-watch          # continuously sync host -> VM
-make vm-cli            # open sudo python3 CLI.py in the correct directory
+make vm-cli            # open the CLI with the project virtual environment
 make vm-clean          # clean Mininet/bridges/vnNIEP after failures
 make check-images      # verify qcow2 files are real images, not Git LFS pointers
 make lfs-pull          # download qcow2 files managed by Git LFS
@@ -69,7 +69,7 @@ Run the CLI from `CLI/`:
 
 ```bash
 cd /home/vagrant/NIEP/CLI
-sudo python3 CLI.py
+sudo ../.venv/bin/python CLI.py
 ```
 
 You should see:

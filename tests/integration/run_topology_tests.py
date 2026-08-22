@@ -6,7 +6,6 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,10 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI_DIR = ROOT / "CLI"
-sys.path.insert(0, str(ROOT / "TOPO-MAN"))
-sys.path.insert(0, str(ROOT / "VEM"))
 
-from Command import CommandDispatcher
+from niep.application.command import CommandDispatcher
 
 
 @dataclass(frozen=True)

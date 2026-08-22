@@ -1,0 +1,3 @@
+# Python-side integration helper.  libvirt, Docker, Mininet, Open vSwitch and
+# qemu are installed from Ubuntu packages by provision-vm.sh, not from pip.
+pexpect>=4.9,<5

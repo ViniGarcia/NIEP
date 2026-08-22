@@ -68,16 +68,14 @@ jq empty tutorial/examples/*.json
 Validate that NIEP can parse the tutorial topologies without starting them:
 
 ```bash
-cd /home/vagrant/NIEP/CLI
-python3 - <<'PY'
-import sys
-sys.path.insert(0, '../TOPO-MAN')
-from Parser import PlatformParser
+cd /home/vagrant/NIEP
+.venv/bin/python - <<'PY'
+from niep.application.parser import PlatformParser
 for definition in [
-    '../tutorial/examples/mininet-ping.json',
-    '../tutorial/examples/vm-basic.json',
-    '../tutorial/examples/vm-host-link.json',
-    '../tutorial/examples/click-forward-topology.json',
+    'tutorial/examples/mininet-ping.json',
+    'tutorial/examples/vm-basic.json',
+    'tutorial/examples/vm-host-link.json',
+    'tutorial/examples/click-forward-topology.json',
 ]:
     p = PlatformParser(definition)
     print(definition, p.STATUS, getattr(p, 'DETAIL', ''))

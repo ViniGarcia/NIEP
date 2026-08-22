@@ -48,7 +48,7 @@ Inside the Vagrant VM, the equivalent commands are:
 
 ```bash
 cd /home/vagrant/NIEP
-sudo python3 tools/niepd.py
+sudo .venv/bin/niepd
 ```
 
 Then, in another VM shell:

@@ -93,7 +93,7 @@ SCENARIOS = {
 
 def run_scenario(scenario: Scenario) -> tuple[int, str]:
     proc = subprocess.Popen(
-        ["sudo", "python3", "CLI.py"],
+        ["sudo", sys.executable, "CLI.py"],
         cwd=CLI_DIR,
         text=True,
         stdin=subprocess.PIPE,

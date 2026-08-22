@@ -17,9 +17,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 PYTHON_PATHS = [
+    ROOT / "niep",
     ROOT / "CLI",
     ROOT / "TOPO-MAN",
     ROOT / "VEM",
+    ROOT / "tools",
     ROOT / "tests",
 ]
 

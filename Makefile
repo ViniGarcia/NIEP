@@ -3,8 +3,12 @@ NIEP_DIR ?= /home/vagrant/NIEP
 NIEP_SOCKET ?= /run/niep.sock
 NIEPCTL_ARGS ?= status
 INTEGRATION_ARGS ?= all
+PYTHON ?= .venv/bin/python
+BOOTSTRAP_PYTHON ?= python3
+NIEP_PYTHON ?= $(NIEP_DIR)/.venv/bin/python
+NIEPCTL ?= $(NIEP_DIR)/.venv/bin/niepctl
 
-.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-build-iperf3-image vm-build-test-iperf3-image vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test test-unit test-contract test-static test-command-dispatcher test-errors vm-test-static vm-test-command-dispatcher vm-test-errors vm-test-spec vm-test-integration vm-test-iperf-shaper vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
+.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-build-iperf3-image vm-build-test-iperf3-image vm-build-local-images vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm environment doctor vm-doctor check-images check-local-images vm-check-images vm-check-local-images vm-preflight lfs-pull test test-unit test-contract test-static test-command-dispatcher test-errors vm-test-static vm-test-command-dispatcher vm-test-errors vm-test-spec vm-test-integration vm-test-iperf-shaper vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
 
 vm-up:
 	vagrant up --provider=$(VAGRANT_PROVIDER)
@@ -24,14 +28,23 @@ vm-sync:
 vm-watch:
 	vagrant rsync-auto
 
+environment:
+	./INSTALLATION/setup-py3-dev.sh
+
+doctor:
+	$(BOOTSTRAP_PYTHON) tools/niep_doctor.py --strict
+
+vm-doctor: vm-sync
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/niep_doctor.py --strict"
+
 vm-cli:
-	vagrant ssh -- -t "cd $(NIEP_DIR)/CLI && sudo python3 CLI.py"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) CLI/CLI.py"
 
 vm-daemon:
-	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tools/niepd.py --socket $(NIEP_SOCKET)"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) tools/niepd.py --socket $(NIEP_SOCKET)"
 
 vm-ctl:
-	vagrant ssh -- -t "cd $(NIEP_DIR) && ./tools/niepctl --socket $(NIEP_SOCKET) $(NIEPCTL_ARGS)"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEPCTL) --socket $(NIEP_SOCKET) $(NIEPCTL_ARGS)"
 
 vm-clean:
 	vagrant ssh -- -t "sudo mn -c; sudo docker rm -f test-alpine test-alpine-router doc-alpine doc-alpine-router doc-iperf-client doc-iperf-server test-iperf-client test-iperf-server || true; sudo virsh net-destroy vnNIEP || true; sudo ip link set vbrNIEP down || true; sudo brctl delbr vbrNIEP || true"
@@ -41,6 +54,9 @@ vm-build-iperf3-image: vm-sync
 
 vm-build-test-iperf3-image: vm-sync
 	vagrant ssh -- -t "cd $(NIEP_DIR)/tests/fixtures/containers/iperf3 && sudo docker compose build"
+
+vm-build-local-images: vm-build-iperf3-image vm-build-test-iperf3-image
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/niep_doctor.py --check-local-images"
 
 
 vm-libvirt-perms:
@@ -53,67 +69,76 @@ vm-reset-doc-vm:
 vm-reset-tutorial-vm: vm-reset-doc-vm
 
 check-images:
-	@if grep -q "git-lfs.github.com/spec" VEM/IMAGES/tinycore12.qcow2 VEM/IMAGES/click-on-osv.qcow2; then 		echo "ERROR: qcow2 image files are still Git LFS pointer files."; 		echo "Run: git lfs install && git lfs pull --include='VEM/IMAGES/*.qcow2'"; 		exit 1; 	fi
-	@file VEM/IMAGES/tinycore12.qcow2 VEM/IMAGES/click-on-osv.qcow2
+	$(BOOTSTRAP_PYTHON) tools/niep_doctor.py --check-images
 
-vm-check-images:
-	vagrant ssh -- -t "cd $(NIEP_DIR) && if grep -q 'git-lfs.github.com/spec' VEM/IMAGES/tinycore12.qcow2 VEM/IMAGES/click-on-osv.qcow2; then echo 'ERROR: qcow2 image files are still Git LFS pointer files.'; exit 1; fi; qemu-img info VEM/IMAGES/tinycore12.qcow2"
+check-local-images:
+	$(BOOTSTRAP_PYTHON) tools/niep_doctor.py --check-local-images
+
+vm-check-images: vm-sync
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/niep_doctor.py --check-images"
+
+vm-check-local-images: vm-sync
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/niep_doctor.py --check-local-images"
+
+vm-preflight: vm-doctor vm-check-images
 
 lfs-pull:
-	git lfs install
+	git lfs install --skip-repo
 	git lfs pull --include='VEM/IMAGES/*.qcow2'
 
 test-static:
-	python3 tools/check_static.py
+	$(PYTHON) tools/check_static.py
 
 test-command-dispatcher:
-	python3 -m pytest tests/test_command_dispatcher.py -m unit
+	$(PYTHON) -m pytest tests/test_command_dispatcher.py -m unit
 
 test-unit:
-	python3 -m pytest -m "unit and not privileged"
+	$(PYTHON) -m pytest -m "unit and not privileged"
 
 test-contract:
-	python3 -m pytest -m "contract and not privileged"
+	$(PYTHON) -m pytest -m "contract and not privileged"
 
 test: test-static
-	python3 -m pytest -m "not privileged" --cov --cov-report=term-missing --cov-report=xml
+	$(PYTHON) -m pytest -m "not privileged" --cov --cov-report=term-missing --cov-report=xml
 
 test-errors:
-	python3 tests/check_teardown.py
+	$(PYTHON) tests/check_teardown.py
 
 vm-test-static: vm-sync
-	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_static.py"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/check_static.py"
 
 vm-test-command-dispatcher: vm-sync
-	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_command_dispatcher.py"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/check_command_dispatcher.py"
 
 vm-test-errors: vm-sync
-	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tests/check_teardown.py && sudo python3 tests/check_error_handling.py"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tests/check_teardown.py && sudo $(NIEP_PYTHON) tests/check_error_handling.py"
 
-vm-test-spec: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
-	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/check_specs.py"
+vm-test-spec: vm-preflight vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/check_specs.py"
 
-vm-test-integration: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
-	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tests/integration/run_topology_tests.py $(INTEGRATION_ARGS)"
+vm-test-integration: vm-preflight vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) tests/integration/run_topology_tests.py $(INTEGRATION_ARGS)"
 
-vm-test-iperf-shaper: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
+vm-test-iperf-shaper: vm-preflight vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR)/tutorial/examples/containers/iperf3 && sudo docker compose build"
 	vagrant ssh -- -t "cd $(NIEP_DIR)/tests/fixtures/containers/iperf3 && sudo docker compose build"
-	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tests/integration/run_topology_tests.py iperf-click-shaper"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/niep_doctor.py --check-local-images"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) tests/integration/run_topology_tests.py iperf-click-shaper"
 
 vm-test-all: vm-test-static vm-test-command-dispatcher vm-test-errors vm-test-spec vm-test-integration vm-smoke-all
 
-vm-smoke-mininet: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
-	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py mininet"
+vm-smoke-mininet: vm-preflight vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/smoke/run_cli_smoke.py mininet"
 
-vm-smoke-vm: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
-	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py vm"
+vm-smoke-vm: vm-preflight vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/smoke/run_cli_smoke.py vm"
 
-vm-smoke-click: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
-	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py click"
+vm-smoke-click: vm-preflight vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/smoke/run_cli_smoke.py click"
 
-vm-smoke-socket: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
-	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tools/smoke/run_socket_smoke.py"
+vm-smoke-socket: vm-preflight vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) tools/smoke/run_socket_smoke.py"
 
-vm-smoke-all: vm-sync vm-reset-tutorial-vm vm-libvirt-perms
-	vagrant ssh -- -t "cd $(NIEP_DIR) && python3 tools/smoke/run_cli_smoke.py all"
-	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo python3 tools/smoke/run_socket_smoke.py"
+vm-smoke-all: vm-preflight vm-reset-tutorial-vm vm-libvirt-perms
+	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/smoke/run_cli_smoke.py all"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) tools/smoke/run_socket_smoke.py"

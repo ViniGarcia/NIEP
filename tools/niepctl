@@ -1,12 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "${SOURCE}" ]]; do
+  SOURCE_DIR="$(cd -P "$(dirname "${SOURCE}")" && pwd)"
+  TARGET="$(readlink "${SOURCE}")"
+  if [[ "${TARGET}" != /* ]]; then
+    SOURCE="${SOURCE_DIR}/${TARGET}"
+  else
+    SOURCE="${TARGET}"
+  fi
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${SOURCE}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PYTHON="${REPO_DIR}/.venv/bin/python"
 
-if [[ ! -x "${PYTHON}" ]] || ! "${PYTHON}" -c "import typer" >/dev/null 2>&1; then
+if [[ ! -x "${PYTHON}" ]] || ! "${PYTHON}" -c "import niep, typer" >/dev/null 2>&1; then
   PYTHON=python3
+fi
+
+# Keep the documented shim useful even on a minimal host where the optional
+# CLI dependency has not been installed yet.  Full command handling is still
+# delegated to the package as soon as Typer is available.
+if ! "${PYTHON}" -c "import niep, typer" >/dev/null 2>&1; then
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: niepctl [OPTIONS] COMMAND [ARGS]..."
+    echo "Control the local NIEP daemon."
+    echo "Install with: python3 -m pip install -e '${REPO_DIR}'"
+    exit 0
+  fi
+  echo "niepctl requires an installed NIEP package and its runtime dependencies." >&2
+  exit 1
 fi
 
 exec "${PYTHON}" "${SCRIPT_DIR}/niepctl.py" "$@"

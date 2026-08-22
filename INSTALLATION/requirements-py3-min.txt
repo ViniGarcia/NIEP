@@ -1,3 +1,5 @@
+# Runtime fallback declarations for the pre-packaging baseline.  The exact
+# versions used by setup are in ../constraints/py3-linux.txt.
 flask>=2.3,<4
 requests>=2.31,<3
 psutil>=5.9,<7

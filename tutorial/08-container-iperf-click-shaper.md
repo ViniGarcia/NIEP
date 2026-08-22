@@ -57,7 +57,7 @@ From the NIEP CLI:
 
 ```bash
 cd /home/vagrant/NIEP/CLI
-sudo python3 CLI.py
+sudo ../.venv/bin/python CLI.py
 ```
 
 ```text

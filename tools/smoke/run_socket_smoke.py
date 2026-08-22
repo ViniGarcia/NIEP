@@ -23,8 +23,7 @@ import pexpect
 ROOT = Path(__file__).resolve().parents[2]
 SOCKET_PATH = "/run/niep.sock"
 
-sys.path.insert(0, str(ROOT / "tools"))
-from niepctl import receive_line, send_request
+from niep.interfaces.niepctl import receive_line, send_request
 
 
 def expect(response, ok, code):

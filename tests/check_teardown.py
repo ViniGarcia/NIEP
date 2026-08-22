@@ -4,35 +4,9 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-from tests.support import install_optional_dependency_stubs
-
-install_optional_dependency_stubs()
-sys.path.insert(0, str(ROOT / "TOPO-MAN"))
-sys.path.insert(0, str(ROOT / "VEM"))
 
 
 def install_import_stubs():
-    if "Parser" not in sys.modules:
-        parser = types.ModuleType("Parser")
-        parser.PlatformParser = object
-        sys.modules["Parser"] = parser
-
-    if "DockerRuntime" not in sys.modules:
-        docker_runtime = types.ModuleType("DockerRuntime")
-
-        class DockerRuntimeError(RuntimeError):
-            pass
-
-        docker_runtime.DockerRuntimeError = DockerRuntimeError
-        docker_runtime.DEFAULT_DOCKER_RUNTIME = object()
-        sys.modules["DockerRuntime"] = docker_runtime
-
     try:
         mininet_available = importlib.util.find_spec("mininet") is not None
     except ValueError:
@@ -63,14 +37,14 @@ def install_import_stubs():
 
 install_import_stubs()
 
-from Executer import Executer  # noqa: E402
-from Container import Container  # noqa: E402
-from Command import CommandDispatcher  # noqa: E402
-from InfrastructureRuntime import InfrastructureRuntime  # noqa: E402
-from VM import VM  # noqa: E402
-from VNF import VNF  # noqa: E402
-import Service as service_module  # noqa: E402
-from Service import TopologyService  # noqa: E402
+from niep.application.command import CommandDispatcher  # noqa: E402
+from niep.application.executer import Executer  # noqa: E402
+from niep.application.service import TopologyService  # noqa: E402
+from niep.runtime.container import Container  # noqa: E402
+from niep.runtime.infrastructure import InfrastructureRuntime  # noqa: E402
+from niep.runtime.vm import VM  # noqa: E402
+from niep.runtime.vnf import VNF  # noqa: E402
+import niep.application.service as service_module  # noqa: E402
 
 
 STAGES = [
