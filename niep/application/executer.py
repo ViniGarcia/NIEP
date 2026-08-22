@@ -1,6 +1,7 @@
-from niep.domain.spec import MininetControllerSpec
 from niep.runtime.infrastructure import DEFAULT_INFRASTRUCTURE_RUNTIME
+from niep.runtime.errors import cleanup_failure_record
 from os import getenv
+from types import SimpleNamespace
 
 try:  # Mininet is installed by the integration image, not on host-only runs.
     from mininet.net import Mininet
@@ -23,7 +24,7 @@ except ImportError:  # pragma: no cover - import-only fallback
 
 
 class Executer:
-    def __init__(self, CONFIGURATION):
+    def __init__(self, CONFIGURATION, infrastructure=None, runtime_factory=None):
         self.CONFIGURATION = None
         self.HOSTS = {}
         self.SWITCHES = {}
@@ -42,7 +43,9 @@ class Executer:
         self._PERSISTENT_STATE_COMPLETED = set()
         self.SWITCH_CONTROLLER_ID = None
         self.LOCAL_POX_ENABLED = True
-        self.INFRASTRUCTURE = DEFAULT_INFRASTRUCTURE_RUNTIME
+        if infrastructure is None and runtime_factory is not None:
+            infrastructure = runtime_factory.infrastructure()
+        self.INFRASTRUCTURE = infrastructure if infrastructure is not None else DEFAULT_INFRASTRUCTURE_RUNTIME
 
         if CONFIGURATION.STATUS == 0:
             self.CONFIGURATION = CONFIGURATION
@@ -83,7 +86,13 @@ class Executer:
         if self.SWITCHES:
             if self.LOCAL_POX_ENABLED:
                 self.POX = self.INFRASTRUCTURE.start_local_pox()
-                UNICTRL = MininetControllerSpec('UNICTRL', '127.0.0.1', 6633)
+                # The parser/domain specs are frozen value objects.  The
+                # executor attaches the Mininet handle below, so the
+                # synthesized local controller must be runtime-owned and
+                # mutable just like factory-materialized controllers.
+                UNICTRL = SimpleNamespace(
+                    ID='UNICTRL', IP='127.0.0.1', PORT=6633, ELEM=None,
+                )
                 UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
                 self.CONTROLLERS['UNICTRL'] = UNICTRL
                 self.SWITCH_CONTROLLER_ID = 'UNICTRL'
@@ -339,7 +348,19 @@ class Executer:
 
         if self.CONFIGURATION.SFCS:
             for SFCINSTANCE in self.CONFIGURATION.SFCS:
-                SFCINSTANCE.SFC_UP = True
+                # SFCs are materialized and prepared by RuntimeFactory. Keep
+                # them down until the explicit SFC service command starts
+                # their concrete VNF instances; merely setting SFC_UP here
+                # made an empty SFC appear active and caused upSFC() == -2.
+                if getattr(SFCINSTANCE, "SFC_VNFS_CONF", None):
+                    continue
+                prepare = getattr(SFCINSTANCE, "prepareSFC", None)
+                if not callable(prepare):
+                    continue
+                prepare_status = prepare()
+                if prepare_status not in (None, 0):
+                    self.STATUS = prepare_status
+                    return prepare_status
 
         if self.mininetPrepare() != 0:
             return
@@ -517,7 +538,12 @@ class Executer:
             if nestedErrors:
                 cleanupErrors.extend(self._structuredCleanupErrors(nestedErrors))
             cleanupErrors.append(
-                self._cleanupError(resourceType, resourceID, operation, str(exc))
+                cleanup_failure_record(
+                    exc,
+                    resource_type=resourceType,
+                    resource_id=resourceID,
+                    operation=operation,
+                )
             )
             return
 
@@ -549,15 +575,14 @@ class Executer:
         if isinstance(errors, (dict, str, bytes)) or not hasattr(errors, "__iter__"):
             errors = [errors]
         for error in errors:
-            if isinstance(error, dict):
-                structured.append({
-                    "resource_type": str(error.get("resource_type", "unknown")),
-                    "resource_id": str(error.get("resource_id", "unknown")),
-                    "operation": str(error.get("operation", "cleanup")),
-                    "message": str(error.get("message", error)),
-                })
-            else:
-                structured.append(self._cleanupError("unknown", "unknown", "cleanup", error))
+            structured.append(
+                cleanup_failure_record(
+                    error,
+                    resource_type="unknown",
+                    resource_id="unknown",
+                    operation="cleanup",
+                )
+            )
         return structured
 
     def _cleanupError(self, resourceType, resourceID, operation, message):
@@ -566,6 +591,9 @@ class Executer:
             "resource_id": str(resourceID),
             "operation": str(operation),
             "message": str(message),
+            "cause": None,
+            "context": {},
+            "retryable": False,
         }
 
     def _cleanupDetail(self, cleanupErrors):

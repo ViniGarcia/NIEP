@@ -3,6 +3,7 @@ import json
 from niep.runtime.click_on_osv import ClickOnOSv
 from os import path
 
+from niep.runtime.errors import RuntimeFailure, cleanup_failure_record, safe_context
 from niep.runtime.vm import VM
 
 #VNFServer: class for VNFs management.
@@ -19,7 +20,7 @@ class VNF:
 
 # __init__: redirects to the correct function to initialize the class, for file interfaces use set 'interface'
 #          as None.
-    def __init__(self, configurationPath, interfaces):
+    def __init__(self, configurationPath, interfaces, runtime=None, image_store=None, network=None, runtime_factory=None):
         self.ID = ''
         self.VM = None
         self.VNF_OPERATOR = None
@@ -42,9 +43,9 @@ class VNF:
         if "VM" in parsedVNF:
             vmPath = self.__resolvePath(parsedVNF["VM"])
             if interfaces != None:
-                self.VM = VM(vmPath, self.ID, interfaces)
+                self.VM = VM(vmPath, self.ID, interfaces, runtime=runtime, image_store=image_store, network=network, runtime_factory=runtime_factory)
             else:
-                self.VM = VM(vmPath, self.ID, None)
+                self.VM = VM(vmPath, self.ID, None, runtime=runtime, image_store=image_store, network=network, runtime_factory=runtime_factory)
 
         if self.VM is None or self.VM.__class__.__name__ != VM.__name__:
             self.VNF_STATUS = -2
@@ -190,12 +191,12 @@ class VNF:
             self.CLEANUP_ERRORS = self._structuredCleanupErrors(
                 getattr(self.VM, "CLEANUP_ERRORS", [])
             )
-            self.CLEANUP_ERRORS.append({
-                "resource_type": "vnf",
-                "resource_id": str(self.ID),
-                "operation": "downVNF",
-                "message": str(exc),
-            })
+            self.CLEANUP_ERRORS.append(cleanup_failure_record(
+                exc,
+                resource_type="vnf",
+                resource_id=self.ID,
+                operation="downVNF",
+            ))
             self.DETAIL = str(exc)
             return -10
 
@@ -204,12 +205,17 @@ class VNF:
                 getattr(self.VM, "CLEANUP_ERRORS", [])
             )
             if not self.CLEANUP_ERRORS:
-                self.CLEANUP_ERRORS = [{
-                    "resource_type": "vnf",
-                    "resource_id": str(self.ID),
-                    "operation": "downVNF",
-                    "message": str(getattr(self.VM, "DETAIL", resultVm)),
-                }]
+                self.CLEANUP_ERRORS = [cleanup_failure_record(
+                    RuntimeFailure(
+                        "downVNF",
+                        "vnf",
+                        self.ID,
+                        message=str(getattr(self.VM, "DETAIL", resultVm)),
+                    ),
+                    resource_type="vnf",
+                    resource_id=self.ID,
+                    operation="downVNF",
+                )]
             self.DETAIL = " | ".join(error["message"] for error in self.CLEANUP_ERRORS)
             return resultVm
 
@@ -228,19 +234,32 @@ class VNF:
             errors = [errors]
         for error in errors:
             if isinstance(error, dict):
-                structured.append({
+                record = {
                     "resource_type": str(error.get("resource_type", "vnf")),
                     "resource_id": str(error.get("resource_id", self.ID)),
                     "operation": str(error.get("operation", "downVNF")),
                     "message": str(error.get("message", error)),
-                })
+                    "cause": error.get("cause"),
+                    "context": safe_context(error.get("context") if isinstance(error.get("context"), dict) else None),
+                    "retryable": bool(error.get("retryable", False)),
+                }
+                if not isinstance(record["cause"], (dict, type(None))):
+                    record["cause"] = {"type": type(record["cause"]).__name__, "message": str(record["cause"])[:2048]}
+                structured.append(record)
+            elif isinstance(error, RuntimeFailure):
+                structured.append(cleanup_failure_record(
+                    error,
+                    resource_type="vnf",
+                    resource_id=self.ID,
+                    operation="downVNF",
+                ))
             else:
-                structured.append({
-                    "resource_type": "vnf",
-                    "resource_id": str(self.ID),
-                    "operation": "downVNF",
-                    "message": str(error),
-                })
+                structured.append(cleanup_failure_record(
+                    error if isinstance(error, BaseException) else RuntimeError(str(error)),
+                    resource_type="vnf",
+                    resource_id=self.ID,
+                    operation="downVNF",
+                ))
         return structured
 
 #sleepVNF: down a started VNF but do not remove from hypervisor neither interfaces.

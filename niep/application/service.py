@@ -2,10 +2,11 @@ from os.path import exists, join
 from shutil import rmtree
 
 from niep.application.executer import Executer
+from niep.application.factory import RuntimeFactory
 from niep.application.parser import PlatformParser
 from niep.domain.result import ResultCode, ServiceResult
 from niep.paths import asset_directory
-from niep.runtime.docker import DockerRuntimeError
+from niep.runtime.errors import RuntimeFailure, cleanup_failure_record
 
 
 PARSERERRORS = {-1: "Invalid definition file path or invalid key included",
@@ -30,12 +31,20 @@ EXECUTERERRORS = {-1: "Mininet network interfaces mapping failed",
 
 
 class TopologyService:
-    def __init__(self):
+    def __init__(self, runtime_factory=None, executor_factory=None, parser_factory=None):
         self.executor = None
+        # Keep all materialization seams injectable for host-only tests and
+        # alternate runtime adapters.
+        self.runtime_factory = (runtime_factory if runtime_factory is not None
+                                else RuntimeFactory())
+        self.executor_factory = (executor_factory if executor_factory is not None
+                                  else Executer)
+        self.parser_factory = (parser_factory if parser_factory is not None
+                               else PlatformParser)
 
     def define(self, definition_path):
         try:
-            parser = PlatformParser(definition_path)
+            parser = self.parser_factory(definition_path)
         except Exception as exc:
             return ServiceResult(
                 ok=False,
@@ -54,7 +63,25 @@ class TopologyService:
                 detail=detail,
             )
 
-        executor = Executer(parser)
+        try:
+            materialize = getattr(self.runtime_factory, "materialize", None)
+            if materialize is None:
+                materialize = getattr(self.runtime_factory, "build", None)
+            if materialize is None:
+                raise TypeError("runtime factory does not provide materialize()")
+            configuration = materialize(parser.SPEC)
+            executor = self.executor_factory(configuration)
+        except Exception as exc:
+            detail = "Runtime materialization failed: " + str(exc)
+            parser.fail(-3, detail, file=getattr(parser, "SOURCE", definition_path))
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.PARSER_ERROR,
+                message=PARSERERRORS[-3],
+                data=parser,
+                status=-3,
+                detail=detail,
+            )
         if executor.STATUS is not None:
             return ServiceResult(
                 ok=False,
@@ -173,12 +200,12 @@ class TopologyService:
             self.executor.CLEANUP_ERRORS = errors
             return errors
         except Exception as exc:
-            error = {
-                "resource_type": "executor",
-                "resource_id": "topology",
-                "operation": "rollback",
-                "message": str(exc),
-            }
+            error = cleanup_failure_record(
+                exc,
+                resource_type="executor",
+                resource_id="topology",
+                operation="rollback",
+            )
             errors = self._structuredCleanupErrors(
                 getattr(self.executor, 'CLEANUP_ERRORS', [])
             )
@@ -198,16 +225,20 @@ class TopologyService:
         try:
             status = self.executor.topologyDown()
         except Exception as exc:
-            error = {
-                "resource_type": "executor",
-                "resource_id": "topology",
-                "operation": "topologyDown",
-                "message": str(exc),
-            }
-            self.executor.CLEANUP_ERRORS = [error]
+            error = cleanup_failure_record(
+                exc,
+                resource_type="executor",
+                resource_id="topology",
+                operation="topologyDown",
+            )
+            errors = self._structuredCleanupErrors(
+                getattr(self.executor, "CLEANUP_ERRORS", [])
+            )
+            errors.append(error)
+            self.executor.CLEANUP_ERRORS = errors
             self.executor.CLEANUP_REQUIRED = True
             self.executor.STATUS = -10
-            self.executor.DETAIL = self._cleanupDetail([error])
+            self.executor.DETAIL = self._cleanupDetail(errors)
             return self._cleanupFailure(failureMessage)
 
         if (
@@ -229,12 +260,12 @@ class TopologyService:
         )
         detail = getattr(self.executor, 'DETAIL', '')
         if not errors:
-            errors = [{
-                "resource_type": "executor",
-                "resource_id": "topology",
-                "operation": "topologyDown",
-                "message": detail or "cleanup returned a failure status",
-            }]
+            errors = [cleanup_failure_record(
+                RuntimeError(detail or "cleanup returned a failure status"),
+                resource_type="executor",
+                resource_id="topology",
+                operation="topologyDown",
+            )]
         return ServiceResult(
             ok=False,
             code=ResultCode.TOPOLOGY_DOWN_FAILED,
@@ -307,20 +338,14 @@ class TopologyService:
         if isinstance(errors, (dict, str, bytes)) or not hasattr(errors, "__iter__"):
             errors = [errors]
         for error in errors:
-            if isinstance(error, dict):
-                structured.append({
-                    "resource_type": str(error.get("resource_type", "unknown")),
-                    "resource_id": str(error.get("resource_id", "unknown")),
-                    "operation": str(error.get("operation", "cleanup")),
-                    "message": str(error.get("message", error)),
-                })
-            else:
-                structured.append({
-                    "resource_type": "unknown",
-                    "resource_id": "unknown",
-                    "operation": "cleanup",
-                    "message": str(error),
-                })
+            structured.append(
+                cleanup_failure_record(
+                    error,
+                    resource_type="unknown",
+                    resource_id="unknown",
+                    operation="cleanup",
+                )
+            )
         return structured
 
     def is_up(self):
@@ -392,7 +417,17 @@ class VMService:
         vm = self.topology.get_vm(vm_id)
         if vm is None:
             return ServiceResult(ok=False, code=ResultCode.VM_NOT_FOUND, message="VM NOT FOUND")
-        result = vm.sshVM(user, passwd)
+        try:
+            result = vm.sshVM(user, passwd)
+        except RuntimeFailure as exc:
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.VM_SSH,
+                message="VM SSH connection could not be opened",
+                data={"error": exc.to_dict()},
+                status=-10,
+                detail=str(exc),
+            )
         return ServiceResult(ok=(result == 0), code=ResultCode.VM_SSH, status=result)
 
 
@@ -406,11 +441,13 @@ class ContainerService:
             return ServiceResult(ok=False, code=ResultCode.CONTAINER_NOT_FOUND, message="CONTAINER NOT FOUND")
         try:
             exit_code, output = container.execContainer(command)
-        except DockerRuntimeError as exc:
+        except RuntimeFailure as exc:
             return ServiceResult(
                 ok=False,
                 code=ResultCode.CONTAINER_RUNTIME_ERROR,
                 message="Container command could not be executed",
+                data={"error": exc.to_dict()},
+                status=-10,
                 detail=str(exc),
             )
         return ServiceResult(
@@ -427,11 +464,13 @@ class ContainerService:
             return ServiceResult(ok=False, code=ResultCode.CONTAINER_NOT_FOUND, message="CONTAINER NOT FOUND")
         try:
             stream = container.openShell(command)
-        except DockerRuntimeError as exc:
+        except RuntimeFailure as exc:
             return ServiceResult(
                 ok=False,
                 code=ResultCode.CONTAINER_RUNTIME_ERROR,
                 message="Container shell could not be opened",
+                data={"error": exc.to_dict()},
+                status=-10,
                 detail=str(exc),
             )
         return ServiceResult(ok=True, code=ResultCode.CONTAINER_SHELL, data=stream)
@@ -541,22 +580,46 @@ class SFCService:
         sfc = self.topology.get_sfc(sfc_id)
         if sfc is None:
             return ServiceResult(ok=False, code=ResultCode.SFC_NOT_FOUND, message="SFC NOT FOUND")
-        sfc.checkStatusSFC()
-        result = sfc.wakeSFC()
+        start = getattr(sfc, "upSFC", None)
+        if callable(start):
+            result = start()
+        else:
+            sfc.checkStatusSFC()
+            result = sfc.wakeSFC()
         if result is None:
             return ServiceResult(ok=False, code=ResultCode.INVALID_SFC_STATUS, message="INVALID SFC STATUS")
         if result == -1:
             return ServiceResult(ok=False, code=ResultCode.SFC_ALREADY_UP, message="SFC ALREADY UP")
+        if isinstance(result, list):
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.INVALID_SFC_STATUS,
+                message="INVALID SFC STATUS",
+                data=result,
+                status=result[1] if len(result) > 1 and isinstance(result[1], int) else None,
+            )
         return ServiceResult(ok=True, code=ResultCode.SFC_UP, status=result)
 
     def down(self, sfc_id):
         sfc = self.topology.get_sfc(sfc_id)
         if sfc is None:
             return ServiceResult(ok=False, code=ResultCode.SFC_NOT_FOUND, message="SFC NOT FOUND")
-        sfc.checkStatusSFC()
-        result = sfc.sleepSFC()
+        stop = getattr(sfc, "downSFC", None)
+        if callable(stop):
+            result = stop()
+        else:
+            sfc.checkStatusSFC()
+            result = sfc.sleepSFC()
         if result is None:
             return ServiceResult(ok=False, code=ResultCode.INVALID_SFC_STATUS, message="INVALID SFC STATUS")
         if result == -1:
             return ServiceResult(ok=False, code=ResultCode.SFC_ALREADY_DOWN, message="SFC ALREADY DOWN")
+        if isinstance(result, list):
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.INVALID_SFC_STATUS,
+                message="INVALID SFC STATUS",
+                data=result,
+                status=result[1] if len(result) > 1 and isinstance(result[1], int) else None,
+            )
         return ServiceResult(ok=True, code=ResultCode.SFC_DOWN, status=result)

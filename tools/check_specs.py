@@ -8,6 +8,7 @@ imports runtime modules that depend on the NIEP environment.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from os import chdir
 from pathlib import Path
 
@@ -88,7 +89,7 @@ def check_example(name: str, path: str) -> list[str]:
     assert_true(all(isinstance(vm, VMSpec) for vm in spec.vms), f"{name}: non-spec VM found", errors)
     assert_true(all(isinstance(container, ContainerSpec) for container in spec.containers), f"{name}: non-spec container found", errors)
     for container in spec.containers:
-        assert_true(isinstance(container.sysctls, dict), f"{name}: container {container.id} sysctls are not a dict", errors)
+        assert_true(isinstance(container.sysctls, Mapping), f"{name}: container {container.id} sysctls are not a mapping", errors)
     assert_true(all(isinstance(vnf, VNFSpec) for vnf in spec.vnfs), f"{name}: non-spec VNF found", errors)
     assert_true(all(isinstance(sfc, SFCSpec) for sfc in spec.sfcs), f"{name}: non-spec SFC found", errors)
     return errors

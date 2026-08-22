@@ -5,9 +5,7 @@ from os import path
 
 class SFC:
 
-#__init__: charges the SFC data if JSON exists and call for validation
-#          -12 = JSON file not found
-    def __init__(self, configurationPath):
+    def _initialize(self):
         self.ID = ''
         self.VNFS = []
         self.IP = {}
@@ -20,6 +18,11 @@ class SFC:
         self.SFC_PARCIAL_UP = False
         self.SFC_STATUS = 0
         self.SFC_JSON = ''
+
+#__init__: charges the SFC data if JSON exists and call for validation
+#          -12 = JSON file not found
+    def __init__(self, configurationPath):
+        self._initialize()
 
         if path.isfile(configurationPath):
             self.SFC_JSON = configurationPath
@@ -42,6 +45,38 @@ class SFC:
 
         if self.structureValidation() == 0:
             self.graphValidation()
+
+    @classmethod
+    def from_spec(cls, spec, vnf_instances=()):
+        """Build an SFC from validated data without reading its JSON again."""
+
+        instance = cls.__new__(cls)
+        instance._initialize()
+        instance.configure(spec, vnf_instances)
+        return instance
+
+    def configure(self, spec, vnf_instances=()):
+        """Load validated spec data and bind concrete VNF runtime objects."""
+
+        data = spec.to_dict() if hasattr(spec, "to_dict") else dict(spec)
+        self.ID = getattr(spec, "id", data.get("ID", ""))
+        self.SFC_JSON = getattr(spec, "path", "")
+        self.VNFS = list(data.get("VNFS", []))
+        self.IP = dict(data.get("IP", {}))
+        self.OPS = list(data.get("OPS", []))
+        self.CONNECTIONS = list(data.get("CONNECTIONS", []))
+        self.SFC_VNFS_CONF = []
+        self.SFC_VNF_INSTANCES = list(vnf_instances)
+        self.SFC_LAST_INSTANCES = []
+        self.SFC_UP = False
+        self.SFC_PARCIAL_UP = False
+        self.SFC_STATUS = 0
+
+        if self.structureValidation() == 0:
+            self.graphValidation()
+        if self.SFC_STATUS == 0:
+            self.prepareSFC()
+        return self.SFC_STATUS
 
 #__checkMAC = verifies a given MAC address and return if it is valid or not.
 #              0 = valid MAC
@@ -353,16 +388,41 @@ class SFC:
         if self.SFC_VNFS_CONF == []:
             return -2
 
+        if not self.SFC_VNF_INSTANCES and self.SFC_LAST_INSTANCES:
+            self.SFC_VNF_INSTANCES = list(self.SFC_LAST_INSTANCES)
+            self.SFC_LAST_INSTANCES = []
+
+        if not self.SFC_VNF_INSTANCES:
+            for CONF in self.SFC_VNFS_CONF:
+                instance = VNF(CONF[0][1], CONF[1:])
+                if instance.VNF_STATUS < 0:
+                    return [CONF[0][0], instance.VNF_STATUS]
+                self.SFC_VNF_INSTANCES.append(instance)
+
+        # Factory-materialized SFCs already carry concrete instances in the
+        # validated descriptor order. Legacy callers may still provide none,
+        # in which case the block above retains the historical construction.
+        instances_by_id = {instance.ID: instance for instance in self.SFC_VNF_INSTANCES}
+        ordered_instances = []
         for CONF in self.SFC_VNFS_CONF:
-            instace = VNF(CONF[0][1], CONF[1:])
-            if instace.VNF_STATUS < 0:
-                return [CONF[0][0], instace.VNF_STATUS]
-            if instace.VNF_STATUS == 0:
-                instace.createVNF()
-            self.SFC_VNF_INSTANCES.append(instace)
+            instance = instances_by_id.get(CONF[0][0])
+            if instance is None:
+                return [CONF[0][0], -2]
+            ordered_instances.append(instance)
+        self.SFC_VNF_INSTANCES = ordered_instances
 
         for INSTANCE in self.SFC_VNF_INSTANCES:
+            if getattr(INSTANCE, "VNF_STATUS", 0) < 0:
+                return [INSTANCE.ID, INSTANCE.VNF_STATUS]
+            if getattr(INSTANCE, "VNF_UP", False):
+                continue
+            if getattr(INSTANCE, "VNF_STATUS", 0) == 0:
+                create_status = INSTANCE.createVNF()
+                if create_status not in (None, 0, -1):
+                    return [INSTANCE.ID, create_status]
             check = INSTANCE.upVNF()
+            if check is None:
+                check = getattr(INSTANCE, "VNF_STATUS", 0)
             if check != 0:
                 for DOWN in self.SFC_VNF_INSTANCES:
                     if DOWN.VNF_UP == True:

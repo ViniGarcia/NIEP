@@ -1,6 +1,7 @@
 """Topology data types and parsing contracts."""
 
 from .result import ResultCode, ServiceResult
+from .topology import DescriptorDocument, TopologyDocument, ValidationIssue, ValidationResult
 from .spec import (
     ConnectionSpec,
     ContainerSpec,
@@ -29,4 +30,8 @@ __all__ = [
     "TopologySpec",
     "VMSpec",
     "VNFSpec",
+    "DescriptorDocument",
+    "TopologyDocument",
+    "ValidationIssue",
+    "ValidationResult",
 ]

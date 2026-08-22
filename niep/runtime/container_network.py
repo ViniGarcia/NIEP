@@ -1,48 +1,92 @@
-from os import devnull
-from subprocess import call, check_output, run
-from subprocess import PIPE, STDOUT
+from subprocess import CalledProcessError, DEVNULL, PIPE, STDOUT
+
+from niep.runtime.errors import RuntimeFailure
+from niep.runtime.contracts import CommandRunner
+from niep.runtime.process import SubprocessRuntime
+
+FNULL = DEVNULL
 
 
-FNULL = open(devnull, 'w')
-
-
-class ContainerNetworkError(RuntimeError):
-    def __init__(self, operation, interface_id, command, output):
-        self.operation = operation
+class ContainerNetworkError(RuntimeFailure):
+    def __init__(self, operation, interface_id, command, output, *, cause=None, retryable=False):
         self.interface_id = interface_id
         self.command = command
         self.output = output
+        text = output.decode("utf-8", "replace") if isinstance(output, bytes) else str(output or "")
+        detail = "Container network operation failed: " + str(operation)
+        if text.strip():
+            detail += "; output=" + text.strip()
         super().__init__(
-            "Container network operation failed; operation="
-            + operation
-            + "; interface="
-            + str(interface_id)
-            + "; command="
-            + " ".join(command)
-            + (("; output=" + output.strip()) if output.strip() else "")
+            operation,
+            "interface",
+            interface_id,
+            cause=cause,
+            retryable=retryable,
+            context={"command": list(command), "output": text},
+            message=detail,
         )
 
 
-def check_output_text(cmd):
-    data = check_output(cmd)
+def check_output_text(cmd, runner=None):
+    data = (runner or SubprocessRuntime()).check_output(cmd)
     if isinstance(data, bytes):
         return data.decode("utf-8", "ignore")
     return data
 
 
 class ContainerNetworkRuntime:
+    def __init__(self, runner: CommandRunner | None = None, process_runtime: CommandRunner | None = None):
+        self._runner = runner or process_runtime or SubprocessRuntime()
+
+    def _command_failure(self, operation, interface_id, command, exc):
+        output = getattr(exc, "output", None) or str(exc)
+        return ContainerNetworkError(
+            operation,
+            interface_id,
+            command,
+            output,
+            cause=exc,
+            retryable=not isinstance(exc, CalledProcessError),
+        )
+
     def run_checked(self, operation, interface_id, command):
-        completed = run(command, stdout=PIPE, stderr=STDOUT, text=True)
+        try:
+            completed = self._runner.run(command, stdout=PIPE, stderr=STDOUT, text=True)
+        except RuntimeFailure:
+            raise
+        except (CalledProcessError, OSError) as exc:
+            raise self._command_failure(operation, interface_id, command, exc) from exc
         if completed.returncode != 0:
-            raise ContainerNetworkError(operation, interface_id, command, completed.stdout)
+            raise ContainerNetworkError(operation, interface_id, command, completed.stdout, retryable=False)
         return completed.stdout
 
     def interface_exists(self, interface_id):
-        return call(['ip', 'link', 'show', interface_id], stdout=FNULL, stderr=STDOUT) == 0
+        try:
+            return self._runner.call(['ip', 'link', 'show', interface_id], stdout=FNULL, stderr=STDOUT) == 0
+        except RuntimeFailure:
+            raise
+        except (CalledProcessError, OSError) as exc:
+            command = ['ip', 'link', 'show', interface_id]
+            raise self._command_failure("inspect", interface_id, command, exc) from exc
 
     def delete_interface(self, interface_id):
         if self.interface_exists(interface_id):
             self.run_checked("delete", interface_id, ['ip', 'link', 'del', interface_id])
+
+    def prepare(self, container, interfaces=None):
+        """Prepare and attach container interfaces (the canonical seam)."""
+
+        return self.setup_interfaces(container, interfaces or [])
+
+    def attach(self, container, interfaces=None):
+        return self.setup_interfaces(container, interfaces or [])
+
+    def detach(self, interfaces):
+        return self.release_interfaces(interfaces or [])
+
+    def cleanup(self, interfaces):
+        # Missing interfaces are successful cleanup by contract.
+        return self.release_interfaces(interfaces or [])
 
     def container_pid(self, container):
         container.reload()

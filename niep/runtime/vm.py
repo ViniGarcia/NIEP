@@ -7,6 +7,8 @@ from niep.paths import NIEPPathError, asset_directory
 from niep.runtime.libvirt import DEFAULT_LIBVIRT_RUNTIME
 from niep.runtime.vm_image_store import VMImageStore
 from niep.runtime.vm_network import DEFAULT_VM_NETWORK_RUNTIME
+from niep.runtime.errors import RuntimeFailure, cleanup_failure_record, raise_for_status
+from niep.runtime.contracts import ImageStore, VMComputeRuntime, VMNetworkRuntimeContract
 
 # STDPATH preserves the legacy checkout image store while this adapter lives
 # under the installable package.  A future release can make image storage an
@@ -32,7 +34,7 @@ class VM:
 
 # __init__: redirects to the correct function to initialize the class, for file interfaces use set 'interface'
 #          as none.
-    def __init__(self, configurationPath, alias, interfaces):
+    def __init__(self, configurationPath, alias, interfaces, runtime=None, image_store=None, network=None, runtime_factory=None):
         self.ID = ''
         self.MEMORY = 0
         self.VCPU = 0
@@ -45,10 +47,15 @@ class VM:
         self.CLEANUP_ERRORS = []
         self.VM_JSON = ''
         self.VIRT_VM = None
-        self.RUNTIME = DEFAULT_LIBVIRT_RUNTIME
+        if runtime_factory is not None:
+            runtime = runtime if runtime is not None else runtime_factory.libvirt()
+        self.RUNTIME: VMComputeRuntime = runtime if runtime is not None else DEFAULT_LIBVIRT_RUNTIME
         image_root = STDPATH or str(asset_directory('VEM')) + path.sep
-        self.IMAGE_STORE = VMImageStore(image_root)
-        self.NETWORK = DEFAULT_VM_NETWORK_RUNTIME
+        if runtime_factory is not None:
+            image_store = image_store if image_store is not None else runtime_factory.image_store(image_root)
+            network = network if network is not None else runtime_factory.vm_network()
+        self.IMAGE_STORE: ImageStore = image_store if image_store is not None else VMImageStore(image_root)
+        self.NETWORK: VMNetworkRuntimeContract = network if network is not None else DEFAULT_VM_NETWORK_RUNTIME
         self._CLEANUP_COMPLETED = set()
 
         if interfaces != None:
@@ -90,6 +97,34 @@ class VM:
             MACString = MACString + ":"
 
         return MACString
+
+    def _runtime_exists(self, resource_id):
+        exists = getattr(self.RUNTIME, 'exists', None)
+        if exists is not None:
+            return bool(exists(resource_id))
+        try:
+            self.RUNTIME.inspect(resource_id)
+            return True
+        except RuntimeFailure:
+            return False
+
+    def _runtime_running(self, resource_id):
+        running = getattr(self.RUNTIME, 'is_running', None)
+        if running is not None:
+            return bool(running(resource_id))
+        return False
+
+    def _runtime_lookup(self, resource_id):
+        lookup = getattr(self.RUNTIME, 'lookup', None)
+        return lookup(resource_id) if lookup is not None else self.RUNTIME.inspect(resource_id)
+
+    def _network_prepare(self, interfaces):
+        prepare = getattr(self.NETWORK, 'prepare_interfaces', None) or getattr(self.NETWORK, 'prepare')
+        return prepare(interfaces)
+
+    def _network_release(self, interfaces):
+        release = getattr(self.NETWORK, 'release_interfaces', None) or getattr(self.NETWORK, 'detach', None) or getattr(self.NETWORK, 'cleanup')
+        return release(interfaces)
 
 #inInterfaces: receives the JSON VM configuration, parses it, apply data in destiny attributes and
 #              validates the read data and check for VM existence.
@@ -193,8 +228,8 @@ class VM:
                 iface['LINK_MAC'] = self.__randomizeMAC()
 
         self.VM_EXIST = self.IMAGE_STORE.instance_exists(self.ID)
-        self.VM_UP = self.RUNTIME.is_running(self.ID)
-        identicalVM = self.RUNTIME.exists(self.ID)
+        self.VM_UP = self._runtime_running(self.ID)
+        identicalVM = self._runtime_exists(self.ID)
 
         if self.VM_EXIST:
             if self.VM_UP:
@@ -266,11 +301,26 @@ class VM:
         if self.VM_STATUS < 0:
             return
 
-        if not self.IMAGE_STORE.base_disk_exists(self.DISK):
+        try:
+            validate = getattr(self.IMAGE_STORE, 'validate', None)
+            if validate is not None:
+                validate(self.DISK)
+            elif not self.IMAGE_STORE.base_disk_exists(self.DISK):
+                return -1
+        except RuntimeFailure:
             return -1
 
         if not self.VM_EXIST:
-            self.IMAGE_STORE.create_instance(self.ID, self.DISK)
+            try:
+                instantiate = getattr(self.IMAGE_STORE, 'instantiate', None)
+                if instantiate is not None:
+                    instantiate(self.ID, self.DISK)
+                else:
+                    self.IMAGE_STORE.create_instance(self.ID, self.DISK)
+            except RuntimeFailure as exc:
+                self.DETAIL = str(exc)
+                self.VM_STATUS = -10
+                return -10
             self.VM_EXIST = True
             self.applyVM()
             return 0
@@ -331,7 +381,16 @@ class VM:
             return -1
 
         if self.VM_EXIST:
-            self.IMAGE_STORE.remove_instance(self.ID)
+            remove = getattr(self.IMAGE_STORE, 'remove', None)
+            try:
+                if remove is not None:
+                    remove(self.ID)
+                else:
+                    self.IMAGE_STORE.remove_instance(self.ID)
+            except RuntimeFailure as exc:
+                self.DETAIL = str(exc)
+                self.VM_STATUS = -10
+                return -10
             self.VM_EXIST = False
             self.VM_STATUS = 0
             return 0
@@ -401,9 +460,13 @@ class VM:
         if not self.VM_UP:
             # Starting a VM begins a fresh cleanup transaction.
             self._CLEANUP_COMPLETED = set()
-            self.NETWORK.prepare_interfaces(self.INTERFACES)
+            self._network_prepare(self.INTERFACES)
             domainXML = self.IMAGE_STORE.read_domain_xml(self.ID, self.DISK)
-            self.VIRT_VM = self.RUNTIME.define_and_create(self.ID, domainXML)
+            define_and_create = getattr(self.RUNTIME, 'define_and_create', None)
+            if define_and_create is not None:
+                self.VIRT_VM = define_and_create(self.ID, domainXML)
+            else:
+                self.VIRT_VM = self.RUNTIME.create(self.ID, domainXML)
             self.VM_UP = True
             return 0
         else:
@@ -422,8 +485,10 @@ class VM:
             return -2
 
         if self.VM_UP:
-            self.RUNTIME.destroy(self.VIRT_VM)
-            self.RUNTIME.undefine(self.VIRT_VM)
+            stop = getattr(self.RUNTIME, 'destroy', None) or getattr(self.RUNTIME, 'stop')
+            remove = getattr(self.RUNTIME, 'undefine', None) or getattr(self.RUNTIME, 'remove')
+            stop(self.VIRT_VM)
+            remove(self.VIRT_VM)
             self.VIRT_VM = None
             self.VM_UP = False
             self.NETWORK.release_interfaces(self.INTERFACES)
@@ -432,6 +497,11 @@ class VM:
             return -1
 
     def cleanupVM(self):
+        """Stop/remove the VM and bridges; absent resources are success.
+
+        A retry resumes at the first incomplete sub-operation, preserving
+        handles needed for a partial libvirt cleanup.
+        """
         errors = []
         cleanupErrors = []
         completed = getattr(self, '_CLEANUP_COMPLETED', None)
@@ -445,8 +515,8 @@ class VM:
 
         if domain is None and (destroyKey not in completed or undefineKey not in completed):
             try:
-                if self.RUNTIME.exists(self.ID):
-                    domain = self.RUNTIME.lookup(self.ID)
+                if self._runtime_exists(self.ID):
+                    domain = self._runtime_lookup(self.ID)
                     # Keep the handle when an operation below fails so a retry
                     # can continue at the pending operation.
                     self.VIRT_VM = domain
@@ -455,12 +525,12 @@ class VM:
                     completed.add(undefineKey)
             except Exception as exc:
                 errors.append(str(exc))
-                cleanupErrors.append({
-                    "resource_type": "vm",
-                    "resource_id": str(self.ID),
-                    "operation": "lookup",
-                    "message": str(exc),
-                })
+                cleanupErrors.append(cleanup_failure_record(
+                    exc,
+                    resource_type="vm",
+                    resource_id=self.ID,
+                    operation="lookup",
+                ))
 
         if domain is not None:
             if destroyKey not in completed:
@@ -472,14 +542,31 @@ class VM:
                 if isRunning is not None:
                     try:
                         running = bool(isRunning(self.ID))
-                    except Exception:
+                    except RuntimeFailure as exc:
+                        errors.append(str(exc))
+                        cleanupErrors.append(cleanup_failure_record(
+                            exc,
+                            resource_type="vm",
+                            resource_id=self.ID,
+                            operation="inspect",
+                        ))
+                        running = True
+                    except Exception as exc:
+                        errors.append(str(exc))
+                        cleanupErrors.append(cleanup_failure_record(
+                            exc,
+                            resource_type="vm",
+                            resource_id=self.ID,
+                            operation="inspect",
+                        ))
                         running = True
                 if not running:
                     self.VM_UP = False
                     completed.add(destroyKey)
                 else:
                     try:
-                        status = self.RUNTIME.destroy(domain)
+                        stop = getattr(self.RUNTIME, 'destroy', None) or getattr(self.RUNTIME, 'stop')
+                        status = stop(domain)
                         if status not in (0, None):
                             raise RuntimeError(
                                 "destroy returned status " + str(status)
@@ -487,18 +574,19 @@ class VM:
                         self.VM_UP = False
                     except Exception as exc:
                         errors.append(str(exc))
-                        cleanupErrors.append({
-                            "resource_type": "vm",
-                            "resource_id": str(self.ID),
-                            "operation": "destroy",
-                            "message": str(exc),
-                        })
+                        cleanupErrors.append(cleanup_failure_record(
+                            exc,
+                            resource_type="vm",
+                            resource_id=self.ID,
+                            operation="destroy",
+                        ))
                     else:
                         completed.add(destroyKey)
 
             if undefineKey not in completed:
                 try:
-                    status = self.RUNTIME.undefine(domain)
+                    remove = getattr(self.RUNTIME, 'undefine', None) or getattr(self.RUNTIME, 'remove')
+                    status = remove(domain)
                     if status not in (0, None):
                         raise RuntimeError(
                             "undefine returned status " + str(status)
@@ -506,12 +594,12 @@ class VM:
                     self.VIRT_VM = None
                 except Exception as exc:
                     errors.append(str(exc))
-                    cleanupErrors.append({
-                        "resource_type": "vm",
-                        "resource_id": str(self.ID),
-                        "operation": "undefine",
-                        "message": str(exc),
-                    })
+                    cleanupErrors.append(cleanup_failure_record(
+                        exc,
+                        resource_type="vm",
+                        resource_id=self.ID,
+                        operation="undefine",
+                    ))
                 else:
                     completed.add(undefineKey)
         else:
@@ -523,19 +611,19 @@ class VM:
             if cleanupKey in completed:
                 continue
             try:
-                status = self.NETWORK.release_interfaces([interface])
+                status = self._network_release([interface])
                 if status not in (0, None):
                     raise RuntimeError(
                         "release_interfaces returned status " + str(status)
                     )
             except Exception as exc:
                 errors.append(str(exc))
-                cleanupErrors.append({
-                    "resource_type": "vm_interface",
-                    "resource_id": str(interfaceID),
-                    "operation": "release_interfaces",
-                    "message": str(exc),
-                })
+                cleanupErrors.append(cleanup_failure_record(
+                    exc,
+                    resource_type="vm_interface",
+                    resource_id=interfaceID,
+                    operation="release_interfaces",
+                ))
             else:
                 completed.add(cleanupKey)
 
@@ -560,7 +648,8 @@ class VM:
             return -2
 
         if self.VM_UP:
-            self.RUNTIME.destroy(self.VIRT_VM)
+            stop = getattr(self.RUNTIME, 'destroy', None) or getattr(self.RUNTIME, 'stop')
+            stop(self.VIRT_VM)
             self.VIRT_VM = None
             self.VM_UP = False
             return 0
@@ -599,7 +688,13 @@ class VM:
             managementIp = self.managementVM()
             if type(managementIp) != str:
                 return -2
-            self.NETWORK.ssh(user, passwd, managementIp)
+            status = self.NETWORK.ssh(user, passwd, managementIp)
+            raise_for_status(
+                status,
+                operation="ssh",
+                resource_type="vm",
+                resource_id=self.ID,
+            )
             return 0
         else:
             return -1

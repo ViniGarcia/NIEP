@@ -5,6 +5,8 @@ import termios
 import tty
 from contextlib import contextmanager
 
+from niep.runtime.errors import RuntimeFailure
+
 
 def socket_object(stream):
     return getattr(stream, "_sock", stream)
@@ -25,6 +27,57 @@ def send(stream, data):
         stream.write(data)
         if hasattr(stream, "flush"):
             stream.flush()
+
+
+class SocketTerminalSession:
+    """Minimal injectable terminal stream lifecycle adapter.
+
+    The stream itself is supplied by a runtime (for example Docker exec).  No
+    socket is opened during construction or import.  Closing an already closed
+    or absent stream is a successful, idempotent cleanup.
+    """
+
+    def __init__(self, stream=None, opener=None):
+        self.stream = stream
+        self._opener = opener
+
+    def open_stream(self, *args, **kwargs):
+        if self.stream is None:
+            if self._opener is None:
+                raise RuntimeFailure("open", "terminal", None, message="terminal stream opener is not configured")
+            try:
+                self.stream = self._opener(*args, **kwargs)
+            except RuntimeFailure:
+                raise
+            except Exception as exc:
+                raise RuntimeFailure("open", "terminal", None, cause=exc, retryable=True) from exc
+        return self.stream
+
+    def close(self):
+        if self.stream is None:
+            return None
+        stream, self.stream = self.stream, None
+        try:
+            shutdown = getattr(stream, "shutdown", None)
+            if shutdown is not None:
+                try:
+                    shutdown(2)
+                except OSError:
+                    pass
+            close = getattr(stream, "close", None)
+            if close is not None:
+                return close()
+        except RuntimeFailure:
+            raise
+        except OSError as exc:
+            raise RuntimeFailure("close", "terminal", None, cause=exc, retryable=True) from exc
+        except Exception as exc:
+            raise RuntimeFailure("close", "terminal", None, cause=exc, retryable=True) from exc
+        return None
+
+
+TerminalSessionAdapter = SocketTerminalSession
+TerminalSessionRuntime = SocketTerminalSession
 
 
 @contextmanager

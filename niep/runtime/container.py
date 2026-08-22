@@ -6,10 +6,12 @@ from os import path
 
 from niep.runtime.container_network import ContainerNetworkError, DEFAULT_CONTAINER_NETWORK_RUNTIME
 from niep.runtime.docker import DEFAULT_DOCKER_RUNTIME, DockerRuntimeError
+from niep.runtime.errors import RuntimeFailure, cleanup_failure_record
+from niep.runtime.contracts import ContainerComputeRuntime, ContainerNetworkRuntimeContract
 
 
 class Container:
-    def __init__(self, configurationPath):
+    def __init__(self, configurationPath, runtime=None, network=None, runtime_factory=None):
         self.ID = ''
         self.IMAGE = ''
         self.COMMAND = ['sleep', 'infinity']
@@ -22,8 +24,11 @@ class Container:
         self.CLEANUP_ERRORS = []
         self.CONTAINER_JSON = ''
         self.CONTAINER = None
-        self.RUNTIME = DEFAULT_DOCKER_RUNTIME
-        self.NETWORK = DEFAULT_CONTAINER_NETWORK_RUNTIME
+        if runtime_factory is not None:
+            runtime = runtime if runtime is not None else runtime_factory.docker()
+            network = network if network is not None else runtime_factory.container_network()
+        self.RUNTIME: ContainerComputeRuntime = runtime if runtime is not None else DEFAULT_DOCKER_RUNTIME
+        self.NETWORK: ContainerNetworkRuntimeContract = network if network is not None else DEFAULT_CONTAINER_NETWORK_RUNTIME
         self._CLEANUP_COMPLETED = set()
 
         self.inInterfaces(configurationPath)
@@ -212,7 +217,7 @@ class Container:
                 self.ENTRYPOINT,
                 self.SYSCTLS,
             )
-        except DockerRuntimeError as exc:
+        except RuntimeFailure as exc:
             self.CONTAINER_STATUS = -10
             self.DETAIL = str(exc)
             return -10
@@ -226,14 +231,24 @@ class Container:
         self._CLEANUP_COMPLETED = set()
         try:
             if self.CONTAINER is None:
-                if not self.RUNTIME.exists(self.ID):
+                exists = getattr(self.RUNTIME, 'exists', None)
+                if exists is None:
+                    try:
+                        self.RUNTIME.inspect(self.ID)
+                        exists = lambda _resource_id: True
+                    except RuntimeFailure:
+                        exists = lambda _resource_id: False
+                if not exists(self.ID):
                     create_status = self.createContainer()
                     if create_status != 0:
                         return create_status
                 self.CONTAINER = self.RUNTIME.lookup(self.ID)
             self.RUNTIME.start(self.CONTAINER)
-            self.NETWORK.setup_interfaces(self.CONTAINER, self.INTERFACES)
-        except (DockerRuntimeError, ContainerNetworkError) as exc:
+            setup = getattr(self.NETWORK, 'setup_interfaces', None)
+            if setup is None:
+                setup = getattr(self.NETWORK, 'attach')
+            setup(self.CONTAINER, self.INTERFACES)
+        except RuntimeFailure as exc:
             self.CONTAINER_STATUS = -10
             self.DETAIL = str(exc)
             self._rollback()
@@ -246,6 +261,11 @@ class Container:
         return self.cleanupContainer()
 
     def cleanupContainer(self):
+        """Release interfaces/container; absent resources are success.
+
+        Completed cleanup operations are remembered so a retry is idempotent
+        and only repeats operations that previously failed.
+        """
         errors = []
         cleanupErrors = []
         completed = getattr(self, '_CLEANUP_COMPLETED', None)
@@ -259,19 +279,22 @@ class Container:
             if cleanupKey in completed:
                 continue
             try:
-                status = self.NETWORK.release_interfaces([interface])
+                release = getattr(self.NETWORK, 'release_interfaces', None)
+                if release is None:
+                    release = getattr(self.NETWORK, 'detach', None) or getattr(self.NETWORK, 'cleanup')
+                status = release([interface])
                 if status not in (0, None):
                     raise RuntimeError(
                         "release_interfaces returned status " + str(status)
                     )
             except Exception as exc:
                 errors.append(str(exc))
-                cleanupErrors.append({
-                    "resource_type": "veth_interface",
-                    "resource_id": str(interfaceID),
-                    "operation": "release_interfaces",
-                    "message": str(exc),
-                })
+                cleanupErrors.append(cleanup_failure_record(
+                    exc,
+                    resource_type="veth_interface",
+                    resource_id=interfaceID,
+                    operation="release_interfaces",
+                ))
             else:
                 completed.add(cleanupKey)
 
@@ -283,12 +306,12 @@ class Container:
                     raise RuntimeError("remove returned status " + str(status))
             except Exception as exc:
                 errors.append(str(exc))
-                cleanupErrors.append({
-                    "resource_type": "container",
-                    "resource_id": str(self.ID),
-                    "operation": "remove",
-                    "message": str(exc),
-                })
+                cleanupErrors.append(cleanup_failure_record(
+                    exc,
+                    resource_type="container",
+                    resource_id=self.ID,
+                    operation="remove",
+                ))
             else:
                 completed.add(removeKey)
         self.CONTAINER = None
