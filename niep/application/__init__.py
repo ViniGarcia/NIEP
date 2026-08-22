@@ -16,6 +16,10 @@ __all__ = [
     "RuntimeFactory",
     "TopologyLoader",
     "TopologyValidator",
+    "TopologyPlanner",
+    "TopologyPlanningError",
+    "PlanningError",
+    "MininetTopologyAdapter",
 ]
 
 
@@ -28,6 +32,14 @@ def __getattr__(name):
         from .validator import TopologyValidator
 
         return TopologyValidator
+    if name in {"TopologyPlanner", "TopologyPlanningError", "PlanningError"}:
+        from .planner import PlanningError, TopologyPlanner, TopologyPlanningError
+
+        return {"TopologyPlanner": TopologyPlanner, "TopologyPlanningError": TopologyPlanningError, "PlanningError": PlanningError}[name]
+    if name == "MininetTopologyAdapter":
+        from .mininet_adapter import MininetTopologyAdapter
+
+        return MininetTopologyAdapter
     if name == "RuntimeFactory":
         from .factory import RuntimeFactory
 

@@ -2,6 +2,8 @@ from niep.runtime.infrastructure import DEFAULT_INFRASTRUCTURE_RUNTIME
 from niep.runtime.errors import cleanup_failure_record
 from os import getenv
 from types import SimpleNamespace
+from niep.application.mininet_adapter import MininetTopologyAdapter
+from niep.application.planner import TopologyPlanner, TopologyPlanningError
 
 try:  # Mininet is installed by the integration image, not on host-only runs.
     from mininet.net import Mininet
@@ -71,221 +73,56 @@ class Executer:
 #------------------------------------------------------------------
 
     def mininetPrepare(self):
-
-        self.NET = Mininet(topo=None, build=False)
-        Cleanup().cleanup()
-
-        for HOST in self.CONFIGURATION.MNHOSTS:
-            HOST.ELEM = self.NET.addHost(HOST.ID)
-            self.HOSTS[HOST.ID] = HOST
-
-        for SWITCH in self.CONFIGURATION.MNSWITCHES:
-            SWITCH.ELEM = self.NET.addSwitch(SWITCH.ID)
-            self.SWITCHES[SWITCH.ID] = SWITCH
-
-        if self.SWITCHES:
-            if self.LOCAL_POX_ENABLED:
-                self.POX = self.INFRASTRUCTURE.start_local_pox()
-                # The parser/domain specs are frozen value objects.  The
-                # executor attaches the Mininet handle below, so the
-                # synthesized local controller must be runtime-owned and
-                # mutable just like factory-materialized controllers.
-                UNICTRL = SimpleNamespace(
-                    ID='UNICTRL', IP='127.0.0.1', PORT=6633, ELEM=None,
-                )
-                UNICTRL.ELEM = self.NET.addController('UNICTRL', controller=RemoteController, ip='127.0.0.1', port=6633)
-                self.CONTROLLERS['UNICTRL'] = UNICTRL
-                self.SWITCH_CONTROLLER_ID = 'UNICTRL'
-            elif self.CONFIGURATION.MNCONTROLLER:
-                self.SWITCH_CONTROLLER_ID = self.CONFIGURATION.MNCONTROLLER[0].ID
-            else:
-                self.STATUS = -4
-                return -4
-
-        for CONTROLLER in self.CONFIGURATION.MNCONTROLLER:
-            CONTROLLER.ELEM = self.NET.addController(CONTROLLER.ID, controller=RemoteController, ip=CONTROLLER.IP, port=CONTROLLER.PORT)
-            self.CONTROLLERS[CONTROLLER.ID] = CONTROLLER
-
-        for OVS in self.CONFIGURATION.MNOVSES:
-            OVS.ELEM = self.NET.addSwitch(OVS.ID)
-            self.OVSSWITCHES[OVS.ID] = OVS
-
-        ifacesData = self.interfacesMaping()
-        externalEndpoints = self.externalEndpoints()
-        for LINK in self.CONFIGURATION.CONNECTIONS:
-
-            if not "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
-
-                if LINK["IN/OUT"] in self.SWITCHES:
-                    Element01 = self.SWITCHES[LINK["IN/OUT"]]
-                else:
-                    Element01 = self.OVSSWITCHES[LINK["IN/OUT"]]
-
-                if LINK["OUT/IN"] in self.SWITCHES:
-                    Element02 = self.SWITCHES[LINK["OUT/IN"]]
-                else:
-                    Element02 = self.OVSSWITCHES[LINK["OUT/IN"]]
-
-                self.NET.addLink(Element01.ELEM, Element02.ELEM)
-                continue
-
-            if "IN/OUTIFACE" in LINK and not "OUT/INIFACE" in LINK:
-                if LINK["IN/OUT"] in externalEndpoints:
-                    EXTERNALLINKS = externalEndpoints[LINK["IN/OUT"]]
-                    for iface in EXTERNALLINKS.INTERFACES:
-                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
-                            if iface["ID"] in ifacesData:
-                                brName = iface["ID"]
-                                virtualIface = ifacesData[iface["ID"]]
-                                break
-                            else:
-                                self.STATUS = -1
-                                return -1
-                    if LINK["OUT/IN"] in self.SWITCHES:
-                        Intf(brName, node = self.SWITCHES[LINK["OUT/IN"]].ELEM)
-                    elif LINK["OUT/IN"] in self.OVSSWITCHES:
-                        Intf(brName, node = self.OVSSWITCHES[LINK["OUT/IN"]].ELEM)
-                    else:
-                        self.STATUS = -2
-                        return -2
-                    continue
-                else:
-                    Element01 = self.HOSTS[LINK["IN/OUT"]]
-
-                    if LINK["OUT/IN"] in self.SWITCHES:
-                        Element02 = self.SWITCHES[LINK["OUT/IN"]]
-                    else:
-                        Element02 = self.OVSSWITCHES[LINK["OUT/IN"]]
-
-                    NodesLink = self.NET.addLink(Element01.ELEM, Element02.ELEM)
-                    HostIface = Element01.ELEM.intf(NodesLink.intf1)
-                    HostIface.setMAC(LINK["IN/OUTIFACE"])
-                    for iface in Element01.INTERFACES:
-                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
-                            iface["ELEM"] = HostIface
-                            break
-                    continue
-
-            if "OUT/INIFACE" in LINK and not "IN/OUTIFACE" in LINK:
-                if LINK["OUT/IN"] in externalEndpoints:
-                    EXTERNALLINKS = externalEndpoints[LINK["OUT/IN"]]
-                    for iface in EXTERNALLINKS.INTERFACES:
-                        if iface["MAC"] == LINK["OUT/INIFACE"]:
-                            if iface["ID"] in ifacesData:
-                                brName = iface["ID"]
-                                virtualIface = ifacesData[iface["ID"]]
-                                break
-                            else:
-                                self.STATUS = -1
-                                return -1
-                    if LINK["IN/OUT"] in self.SWITCHES:
-                        Intf(brName, node = self.SWITCHES[LINK["IN/OUT"]].ELEM)
-                    elif LINK["IN/OUT"] in self.OVSSWITCHES:
-                        Intf(brName, node = self.OVSSWITCHES[LINK["IN/OUT"]].ELEM)
-                    else:
-                        self.STATUS = -2
-                        return -2
-                    continue
-                else:
-                    if LINK["IN/OUT"] in self.SWITCHES:
-                        Element01 = self.SWITCHES[LINK["IN/OUT"]]
-                    else:
-                        Element01 = self.OVSSWITCHES[LINK["IN/OUT"]]
-
-                    Element02 = self.HOSTS[LINK["OUT/IN"]]
-
-                    NodesLink = self.NET.addLink(Element01.ELEM, Element02.ELEM)
-                    HostIface = Element01.ELEM.intf(NodesLink.intf2)
-                    HostIface.setMAC(LINK["OUT/INIFACE"])
-                    for iface in Element02.INTERFACES:
-                        if iface["MAC"] == LINK["OUT/INIFACE"]:
-                            iface["ELEM"] = HostIface
-                            break
-                    continue
-
-            else:
-                if LINK["IN/OUT"] in self.HOSTS and LINK["OUT/IN"] in self.HOSTS:
-                    Element01 = self.HOSTS[LINK["IN/OUT"]]
-                    Element02 = self.HOSTS[LINK["OUT/IN"]]
-
-                    NodesLink = self.NET.addLink(Element01.ELEM, Element02.ELEM)
-                    HostIface01 = Element01.ELEM.intf(NodesLink.intf1)
-                    HostIface02 = Element01.ELEM.intf(NodesLink.intf2)
-
-                    HostIface01.setMAC(LINK["IN/OUTIFACE"])
-                    HostIface02.setMAC(LINK["OUT/INIFACE"])
-
-                    for iface in Element01.INTERFACES:
-                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
-                            iface["ELEM"] = HostIface01
-                            break
-                    for iface in Element02.INTERFACES:
-                        if iface["MAC"] == LINK["OUT/INIFACE"]:
-                            iface["ELEM"] = HostIface02
-                            break
-                    continue
-
-                if LINK["IN/OUT"] in self.HOSTS:
-                    Element01 = self.HOSTS[LINK["IN/OUT"]]
-                    EXTERNALLINKS = externalEndpoints[LINK["OUT/IN"]]
-                    for iface in EXTERNALLINKS.INTERFACES:
-                        if iface["MAC"] == LINK["OUT/INIFACE"]:
-                            if iface["ID"] in ifacesData:
-                                virtualIface = ifacesData[iface["ID"]]
-                                break
-                            else:
-                                self.STATUS = -1
-                                return -1
-
-                    HostIface = Intf(virtualIface, node = Element01.ELEM, mac = LINK["IN/OUTIFACE"])
-                    for iface in Element01.INTERFACES:
-                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
-                            iface["ELEM"] = HostIface
-                            break
-                    continue
-
-                if LINK["OUT/IN"] in self.HOSTS:
-
-                    EXTERNALLINKS = externalEndpoints[LINK["IN/OUT"]]
-                    for iface in EXTERNALLINKS.INTERFACES:
-                        if iface["MAC"] == LINK["IN/OUTIFACE"]:
-                            if iface["ID"] in ifacesData:
-                                virtualIface = ifacesData[iface["ID"]]
-                                break
-                            else:
-                                self.STATUS = -1
-                                return -1
-
-                    Element02 = self.HOSTS[LINK["OUT/IN"]]
-                    HostIface = Intf(virtualIface, node = Element02.ELEM, mac = LINK["OUT/INIFACE"])
-                    for iface in Element02.INTERFACES:
-                        if iface["MAC"] == LINK["OUT/INIFACE"]:
-                            iface["ELEM"] = HostIface
-                            break
-                    continue
-
-                else:
-                    self.STATUS = -3
-                    return -3
-
-        self.NET.build()
-        for HOST in self.HOSTS:
-            DummyIfaces = 0
-            for IFACE in self.HOSTS[HOST].INTERFACES:
-                if "ELEM" in IFACE:
-                    if IFACE["IP"] != None:
-                        IFACE["ELEM"].setIP(IFACE["IP"])
-                    else:
-                        if IFACE["ELEM"].IP() != None:
-                            self.HOSTS[HOST].ELEM.cmd("sudo ip addr flush " + str(IFACE["ELEM"].name))
-                else:
-                    self.HOSTS[HOST].ELEM.cmd("sudo ip link add mn-eth" + str(DummyIfaces) + " address " + IFACE["MAC"] + " type dummy")
-                    if IFACE["IP"] != None:
-                        self.HOSTS[HOST].ELEM.cmd("sudo ip addr add " + IFACE["IP"] + " dev " + "mn-eth" + str(DummyIfaces))
-                    self.HOSTS[HOST].ELEM.cmd("sudo ifconfig mn-eth" + str(DummyIfaces) + " up")
-                    DummyIfaces += 1
-
+        try:
+            plan = TopologyPlanner(
+                self.CONFIGURATION,
+                interface_mapping=self.interfacesMaping(),
+                external_endpoints=self.externalEndpoints(),
+                local_pox_enabled=self.LOCAL_POX_ENABLED,
+            ).plan()
+            adapter = MininetTopologyAdapter(
+                mininet_cls=Mininet,
+                cleanup_cls=Cleanup,
+                intf_cls=Intf,
+                remote_controller_cls=RemoteController,
+                local_pox=self.INFRASTRUCTURE.start_local_pox,
+            )
+            applied = adapter.apply(
+                plan,
+                runtime_configuration=self.CONFIGURATION,
+                runtime_nodes={
+                    "hosts": self._runtime_index(self.CONFIGURATION.MNHOSTS),
+                    "switches": self._runtime_index(self.CONFIGURATION.MNSWITCHES),
+                    "controllers": self._runtime_index(self.CONFIGURATION.MNCONTROLLER),
+                    "ovs_switches": self._runtime_index(self.CONFIGURATION.MNOVSES),
+                },
+            )
+        except TopologyPlanningError as exc:
+            self.STATUS = exc.status
+            self.DETAIL = exc.detail
+            return exc.status
+        self.NET = applied.net
+        self.POX = applied.pox
+        self.HOSTS = self._runtime_index(self.CONFIGURATION.MNHOSTS)
+        self.SWITCHES = self._runtime_index(self.CONFIGURATION.MNSWITCHES)
+        self.CONTROLLERS = self._runtime_index(self.CONFIGURATION.MNCONTROLLER)
+        self.OVSSWITCHES = self._runtime_index(self.CONFIGURATION.MNOVSES)
+        if "UNICTRL" in applied.controllers:
+            self.CONTROLLERS["UNICTRL"] = SimpleNamespace(
+                ID="UNICTRL", IP="127.0.0.1", PORT=6633,
+                ELEM=applied.controllers["UNICTRL"],
+            )
+        self.SWITCH_CONTROLLER_ID = plan.switch_controller_id
+        self.STATUS = 0
         return 0
+
+    @staticmethod
+    def _runtime_index(values):
+        return {
+            getattr(value, "ID", getattr(value, "id", None)): value
+            for value in (values or ())
+            if getattr(value, "ID", getattr(value, "id", None)) is not None
+        }
 
 #------------------------------------------------------------------
 
