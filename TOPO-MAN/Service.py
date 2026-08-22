@@ -1,4 +1,4 @@
-from os.path import abspath
+from os.path import abspath, dirname, exists, join
 from shutil import rmtree
 
 from Executer import Executer
@@ -82,27 +82,40 @@ class TopologyService:
             self.executor.topologyUp()
         except Exception as exc:
             detail = str(exc)
-            self.executor.rollbackFailedStart()
+            cleanupErrors = self._rollbackFailedStart(detail)
             rollbackDetail = getattr(self.executor, 'DETAIL', '')
-            if rollbackDetail:
+            if rollbackDetail and rollbackDetail not in detail:
                 detail += " | " + rollbackDetail
-            self.executor = None
+            if not cleanupErrors:
+                self.executor = None
             return ServiceResult(
                 ok=False,
                 code=ResultCode.TOPOLOGY_UP_FAILED,
-                message="Topology startup raised an unexpected error",
+                message=(
+                    "Topology startup raised an unexpected error; cleanup remains incomplete"
+                    if cleanupErrors
+                    else "Topology startup raised an unexpected error"
+                ),
+                data={"errors": cleanupErrors} if cleanupErrors else None,
+                status=getattr(self.executor, 'STATUS', None) if self.executor is not None else None,
                 detail=detail,
             )
         if self.executor.STATUS != 0:
             status = self.executor.STATUS
             detail = getattr(self.executor, 'DETAIL', '')
-            self.executor.rollbackFailedStart()
+            cleanupErrors = self._rollbackFailedStart(detail)
             detail = getattr(self.executor, 'DETAIL', '') or detail
-            self.executor = None
+            if not cleanupErrors:
+                self.executor = None
             return ServiceResult(
                 ok=False,
                 code=ResultCode.TOPOLOGY_UP_FAILED,
-                message=detail or "Topology startup failed and the topology was undefined",
+                message=(
+                    "Topology startup failed; cleanup remains incomplete"
+                    if cleanupErrors
+                    else (detail or "Topology startup failed and the topology was undefined")
+                ),
+                data={"errors": cleanupErrors} if cleanupErrors else None,
                 status=status,
                 detail=detail,
             )
@@ -113,18 +126,9 @@ class TopologyService:
         if self.executor is None:
             return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
-        self.executor.topologyDown()
-        if self.executor.STATUS is not None:
-            status = self.executor.STATUS
-            detail = getattr(self.executor, 'DETAIL', '')
-            self.executor = None
-            return ServiceResult(
-                ok=False,
-                code=ResultCode.TOPOLOGY_DOWN_FAILED,
-                message="Topology cleanup failed and the topology was undefined",
-                status=status,
-                detail=detail,
-            )
+        failure = self._teardown("Topology cleanup failed; the executor was preserved for retry")
+        if failure is not None:
+            return failure
 
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_DOWN)
 
@@ -132,8 +136,9 @@ class TopologyService:
         if self.executor is None:
             return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
-        if self.executor.STATUS == 0:
-            self.executor.topologyDown()
+        failure = self._teardown("Topology cleanup failed; the topology remains defined for retry")
+        if failure is not None:
+            return failure
         self.executor = None
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_CLEAN)
 
@@ -141,17 +146,131 @@ class TopologyService:
         if self.executor is None:
             return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
-        if self.executor.STATUS == 0:
-            self.executor.topologyDown()
+        failure = self._teardown(
+            "Topology cleanup failed; persistent images were not removed and the executor was preserved"
+        )
+        if failure is not None:
+            return failure
 
-        images_path = '/'.join(abspath(__file__).split('/')[:-2] + ['VEM', 'IMAGES'])
-        for vnf_id in self.executor.VNFS:
-            rmtree(images_path + '/' + self.executor.VNFS[vnf_id].ID, ignore_errors=True)
-        for vm_id in self.executor.VMS:
-            rmtree(images_path + '/' + self.executor.VMS[vm_id].ID, ignore_errors=True)
+        imageErrors = self._destroyImages()
+        if imageErrors:
+            self.executor.CLEANUP_ERRORS = imageErrors
+            self.executor.CLEANUP_REQUIRED = False
+            self.executor.STATUS = -10
+            self.executor.DETAIL = self._cleanupDetail(imageErrors)
+            return self._cleanupFailure(
+                "Persistent topology state could not be removed; the executor was preserved for retry"
+            )
 
         self.executor = None
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_DESTROYED)
+
+    def _rollbackFailedStart(self, startupDetail):
+        try:
+            return self.executor.rollbackFailedStart()
+        except Exception as exc:
+            error = {
+                "resource_type": "executor",
+                "resource_id": "topology",
+                "operation": "rollback",
+                "message": str(exc),
+            }
+            self.executor.CLEANUP_ERRORS = [error]
+            self.executor.CLEANUP_REQUIRED = True
+            self.executor.STATUS = -10
+            self.executor.DETAIL = (
+                (startupDetail + " | ") if startupDetail else ""
+            ) + "Rollback warnings: " + self._cleanupDetail([error])
+            return [error]
+
+    def _teardown(self, failureMessage):
+        if not self._cleanupRequired():
+            return None
+
+        try:
+            status = self.executor.topologyDown()
+        except Exception as exc:
+            error = {
+                "resource_type": "executor",
+                "resource_id": "topology",
+                "operation": "topologyDown",
+                "message": str(exc),
+            }
+            self.executor.CLEANUP_ERRORS = [error]
+            self.executor.CLEANUP_REQUIRED = True
+            self.executor.STATUS = -10
+            self.executor.DETAIL = self._cleanupDetail([error])
+            return self._cleanupFailure(failureMessage)
+
+        if (
+            status not in (0, None)
+            or bool(getattr(self.executor, 'CLEANUP_REQUIRED', False))
+            or self.executor.STATUS is not None
+        ):
+            return self._cleanupFailure(failureMessage)
+        return None
+
+    def _cleanupRequired(self):
+        if hasattr(self.executor, 'CLEANUP_REQUIRED'):
+            return bool(self.executor.CLEANUP_REQUIRED)
+        return self.executor.STATUS is not None
+
+    def _cleanupFailure(self, message):
+        errors = list(getattr(self.executor, 'CLEANUP_ERRORS', []))
+        detail = getattr(self.executor, 'DETAIL', '')
+        if not errors:
+            errors = [{
+                "resource_type": "executor",
+                "resource_id": "topology",
+                "operation": "topologyDown",
+                "message": detail or "cleanup returned a failure status",
+            }]
+        return ServiceResult(
+            ok=False,
+            code=ResultCode.TOPOLOGY_DOWN_FAILED,
+            message=message,
+            data={"errors": errors},
+            status=getattr(self.executor, 'STATUS', -10),
+            detail=detail or self._cleanupDetail(errors),
+        )
+
+    def _destroyImages(self):
+        imagesPath = join(dirname(abspath(__file__)), '..', 'VEM', 'IMAGES')
+        images = []
+        images.extend(("vnf_image", vnf.ID) for vnf in self.executor.VNFS.values())
+        images.extend(("vm_image", vm.ID) for vm in self.executor.VMS.values())
+
+        cleanupErrors = []
+        removed = set()
+        for resourceType, resourceID in images:
+            imagePath = join(imagesPath, resourceID)
+            if imagePath in removed or not exists(imagePath):
+                continue
+            try:
+                rmtree(imagePath)
+                removed.add(imagePath)
+            except FileNotFoundError:
+                removed.add(imagePath)
+            except Exception as exc:
+                cleanupErrors.append({
+                    "resource_type": resourceType,
+                    "resource_id": str(resourceID),
+                    "operation": "remove_persistent_state",
+                    "message": str(exc),
+                })
+        return cleanupErrors
+
+    def _cleanupDetail(self, errors):
+        return " | ".join(
+            error["resource_type"]
+            + " "
+            + error["resource_id"]
+            + " "
+            + error["operation"]
+            + " failed: "
+            + error["message"]
+            for error in errors
+        )
 
     def is_up(self):
         return self.executor is not None and self.executor.STATUS == 0

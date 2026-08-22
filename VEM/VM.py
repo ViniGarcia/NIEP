@@ -34,6 +34,7 @@ class VM:
         self.VM_EXIST = False
         self.VM_UP = False
         self.VM_STATUS = 0
+        self.CLEANUP_ERRORS = []
         self.VM_JSON = ''
         self.VIRT_VM = None
         self.RUNTIME = DEFAULT_LIBVIRT_RUNTIME
@@ -417,6 +418,71 @@ class VM:
             return 0
         else:
             return -1
+
+    def cleanupVM(self):
+        errors = []
+        cleanupErrors = []
+        domain = self.VIRT_VM
+
+        if domain is None:
+            try:
+                if self.RUNTIME.exists(self.ID):
+                    domain = self.RUNTIME.lookup(self.ID)
+            except Exception as exc:
+                errors.append(str(exc))
+                cleanupErrors.append({
+                    "resource_type": "vm",
+                    "resource_id": str(self.ID),
+                    "operation": "lookup",
+                    "message": str(exc),
+                })
+
+        if domain is not None:
+            try:
+                self.RUNTIME.destroy(domain)
+                self.VM_UP = False
+            except Exception as exc:
+                errors.append(str(exc))
+                cleanupErrors.append({
+                    "resource_type": "vm",
+                    "resource_id": str(self.ID),
+                    "operation": "destroy",
+                    "message": str(exc),
+                })
+            try:
+                self.RUNTIME.undefine(domain)
+                self.VIRT_VM = None
+            except Exception as exc:
+                errors.append(str(exc))
+                cleanupErrors.append({
+                    "resource_type": "vm",
+                    "resource_id": str(self.ID),
+                    "operation": "undefine",
+                    "message": str(exc),
+                })
+        else:
+            self.VM_UP = False
+
+        for interface in self.INTERFACES:
+            interfaceID = interface.get('ID', 'unknown')
+            try:
+                self.NETWORK.release_interfaces([interface])
+            except Exception as exc:
+                errors.append(str(exc))
+                cleanupErrors.append({
+                    "resource_type": "vm_interface",
+                    "resource_id": str(interfaceID),
+                    "operation": "release_interfaces",
+                    "message": str(exc),
+                })
+
+        self.CLEANUP_ERRORS = cleanupErrors
+        if errors:
+            self.DETAIL = " | ".join(errors)
+            return -10
+
+        self.DETAIL = ""
+        return 0
 
 #sleepVM: down a started VM but do not remove from hypervisor neither interfaces.
 #         -2 = VM does not exist

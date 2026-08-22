@@ -69,14 +69,32 @@ class InfrastructureRuntime:
 
     def stop_process(self, process):
         if process is not None:
+            if hasattr(process, 'poll') and process.poll() is not None:
+                return
             process.terminate()
 
     def destroy_virt_network(self, networkID):
-        call(['virsh', 'net-destroy', networkID], stdout=FNULL, stderr=STDOUT)
+        activeNetworks = check_output_text(['virsh', 'net-list', '--name']).splitlines()
+        if networkID not in activeNetworks:
+            return
+        status = call(['virsh', 'net-destroy', networkID], stdout=FNULL, stderr=STDOUT)
+        if status != 0:
+            raise RuntimeError(
+                "virsh net-destroy failed for " + str(networkID) + " with status " + str(status)
+            )
 
     def remove_bridge(self, bridgeID):
-        call(['ifconfig', bridgeID, 'down'], stdout=FNULL, stderr=STDOUT)
-        call(['brctl', 'delbr', bridgeID], stdout=FNULL, stderr=STDOUT)
+        if not self.bridge_exists(bridgeID):
+            return
+        errors = []
+        status = call(['ifconfig', bridgeID, 'down'], stdout=FNULL, stderr=STDOUT)
+        if status != 0:
+            errors.append("ifconfig down returned " + str(status))
+        status = call(['brctl', 'delbr', bridgeID], stdout=FNULL, stderr=STDOUT)
+        if status != 0:
+            errors.append("brctl delbr returned " + str(status))
+        if errors:
+            raise RuntimeError(" | ".join(errors))
 
     def prepare_topology_infrastructure(self):
         self.ensure_bridge('vbrNIEP')
@@ -84,8 +102,27 @@ class InfrastructureRuntime:
         self.ensure_virt_network('vnNIEP', configPath)
 
     def cleanup_topology_infrastructure(self):
-        self.destroy_virt_network('vnNIEP')
-        self.remove_bridge('vbrNIEP')
+        cleanupErrors = []
+        try:
+            self.destroy_virt_network('vnNIEP')
+        except Exception as exc:
+            cleanupErrors.append({
+                "resource_type": "libvirt_network",
+                "resource_id": "vnNIEP",
+                "operation": "destroy",
+                "message": str(exc),
+            })
+        try:
+            self.remove_bridge('vbrNIEP')
+        except Exception as exc:
+            cleanupErrors.append({
+                "resource_type": "bridge",
+                "resource_id": "vbrNIEP",
+                "operation": "remove",
+                "message": str(exc),
+            })
+        self.CLEANUP_ERRORS = cleanupErrors
+        return -10 if cleanupErrors else 0
 
 
 DEFAULT_INFRASTRUCTURE_RUNTIME = InfrastructureRuntime()

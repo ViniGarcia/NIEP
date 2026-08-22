@@ -33,10 +33,10 @@ class VMNetworkRuntime:
         call(['ifconfig', bridgeID, 'up'], stdout=FNULL, stderr=STDOUT)
 
     def disable_bridge(self, bridgeID):
-        call(['ifconfig', bridgeID, 'down'], stdout=FNULL, stderr=STDOUT)
+        return call(['ifconfig', bridgeID, 'down'], stdout=FNULL, stderr=STDOUT)
 
     def delete_bridge(self, bridgeID):
-        call(['brctl', 'delbr', bridgeID], stdout=FNULL, stderr=STDOUT)
+        return call(['brctl', 'delbr', bridgeID], stdout=FNULL, stderr=STDOUT)
 
     def prepare_interfaces(self, interfaces):
         for iface in interfaces:
@@ -46,9 +46,23 @@ class VMNetworkRuntime:
             self.enable_bridge(iface['ID'])
 
     def release_interfaces(self, interfaces):
+        errors = []
         for iface in interfaces:
-            self.disable_bridge(iface['ID'])
-            self.delete_bridge(iface['ID'])
+            interfaceID = iface['ID']
+            if not self.bridge_exists(interfaceID):
+                continue
+            downStatus = self.disable_bridge(interfaceID)
+            if downStatus != 0:
+                errors.append(
+                    "ifconfig down failed for " + str(interfaceID) + " with status " + str(downStatus)
+                )
+            deleteStatus = self.delete_bridge(interfaceID)
+            if deleteStatus != 0:
+                errors.append(
+                    "brctl delbr failed for " + str(interfaceID) + " with status " + str(deleteStatus)
+                )
+        if errors:
+            raise RuntimeError(" | ".join(errors))
 
     def management_ip(self, managementMac):
         for attempt in range(0, 3):

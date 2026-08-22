@@ -25,6 +25,9 @@ class Executer:
         self.NET = None
         self.STATUS = None
         self.DETAIL = ""
+        self.CLEANUP_ERRORS = []
+        self.CLEANUP_REQUIRED = False
+        self._CLEANUP_COMPLETED = set()
         self.SWITCH_CONTROLLER_ID = None
         self.LOCAL_POX_ENABLED = True
         self.INFRASTRUCTURE = DEFAULT_INFRASTRUCTURE_RUNTIME
@@ -267,10 +270,15 @@ class Executer:
 
     def topologyUp(self):
 
+        self.CLEANUP_ERRORS = []
+        self.CLEANUP_REQUIRED = True
+        self._CLEANUP_COMPLETED = set()
+        self.DETAIL = ""
         self.INFRASTRUCTURE.prepare_topology_infrastructure()
 
         if self.CONFIGURATION.VMS:
             for VMINSTANCE in self.CONFIGURATION.VMS:
+                self.VMS[VMINSTANCE.ID] = VMINSTANCE
                 createStatus = VMINSTANCE.createVM()
                 if createStatus == -1:
                     applyStatus = VMINSTANCE.applyVM()
@@ -283,10 +291,10 @@ class Executer:
                 if upStatus != 0:
                     self.STATUS = upStatus
                     return upStatus
-                self.VMS[VMINSTANCE.ID] = VMINSTANCE
 
         if self.CONFIGURATION.VNFS:
             for VNFINSTANCE in self.CONFIGURATION.VNFS:
+                self.VNFS[VNFINSTANCE.ID] = VNFINSTANCE
                 createStatus = VNFINSTANCE.createVNF()
                 if createStatus == -1:
                     applyStatus = VNFINSTANCE.applyVNF()
@@ -299,10 +307,10 @@ class Executer:
                 if upStatus != 0:
                     self.STATUS = upStatus
                     return upStatus
-                self.VNFS[VNFINSTANCE.ID] = VNFINSTANCE
 
         if self.CONFIGURATION.CONTAINERS:
             for CONTAINERINSTANCE in self.CONFIGURATION.CONTAINERS:
+                self.CONTAINERS[CONTAINERINSTANCE.ID] = CONTAINERINSTANCE
                 upStatus = CONTAINERINSTANCE.upContainer()
                 if upStatus is None:
                     upStatus = CONTAINERINSTANCE.CONTAINER_STATUS
@@ -315,7 +323,6 @@ class Executer:
                     )
                     self.STATUS = upStatus
                     return upStatus
-                self.CONTAINERS[CONTAINERINSTANCE.ID] = CONTAINERINSTANCE
 
         if self.CONFIGURATION.SFCS:
             for SFCINSTANCE in self.CONFIGURATION.SFCS:
@@ -343,46 +350,11 @@ class Executer:
 #------------------------------------------------------------------
 
     def topologyDown(self):
-
-        if self.STATUS != 0:
-            return
-
-        cleanupErrors = []
-
-        for OVS in self.OVSSWITCHES:
-            self.OVSSWITCHES[OVS].ELEM.stop()
-
-        for CONTROLLER in self.CONTROLLERS:
-            self.CONTROLLERS[CONTROLLER].ELEM.stop()
-
-        for SWITCH in self.SWITCHES:
-            self.SWITCHES[SWITCH].ELEM.stop()
-
-        self.INFRASTRUCTURE.stop_process(self.POX)
-        self.INFRASTRUCTURE.cleanup_topology_infrastructure()
-
-        for VMINSTANCE in self.CONFIGURATION.VMS:
-            VMINSTANCE.downVM()
-
-        for VNFINSTANCE in self.CONFIGURATION.VNFS:
-            VNFINSTANCE.downVNF()
-
-        for CONTAINERINSTANCE in self.CONFIGURATION.CONTAINERS:
-            downStatus = CONTAINERINSTANCE.downContainer()
-            if downStatus not in (0, None):
-                cleanupErrors.append(
-                    "Container "
-                    + str(CONTAINERINSTANCE.ID)
-                    + " cleanup failed: "
-                    + str(getattr(CONTAINERINSTANCE, "DETAIL", downStatus))
-                )
-
-        for SFCINSTANCE in self.CONFIGURATION.SFCS:
-            SFCINSTANCE.SFC_UP = False
+        cleanupErrors = self._cleanupResources()
 
         if cleanupErrors:
             self.STATUS = -10
-            self.DETAIL = " | ".join(cleanupErrors)
+            self.DETAIL = self._cleanupDetail(cleanupErrors)
             return -10
 
         self.STATUS = None
@@ -392,48 +364,175 @@ class Executer:
 #------------------------------------------------------------------
 
     def rollbackFailedStart(self):
+        startupDetail = self.DETAIL
+        cleanupErrors = self._cleanupResources()
+
+        if cleanupErrors:
+            self.STATUS = -10
+            suffix = "Rollback warnings: " + self._cleanupDetail(cleanupErrors)
+            self.DETAIL = (self.DETAIL + " | " if self.DETAIL else "") + suffix
+        else:
+            self.DETAIL = startupDetail
+        return cleanupErrors
+
+    def _cleanupResources(self):
+        if not self.CLEANUP_REQUIRED:
+            self.CLEANUP_ERRORS = []
+            return []
+
         cleanupErrors = []
 
         if self.NET is not None:
-            try:
-                self.NET.stop()
-            except Exception as exc:
-                cleanupErrors.append("Mininet rollback failed: " + str(exc))
+            self._attemptCleanup(
+                cleanupErrors,
+                ("mininet", "topology", "stop"),
+                "mininet",
+                getattr(self.CONFIGURATION, "ID", "topology"),
+                "stop",
+                self.NET.stop,
+            )
 
-        for container in list(self.CONTAINERS.values()):
-            try:
-                result = container.downContainer()
-                if result not in (0, None):
-                    cleanupErrors.append(
-                        "Container "
-                        + str(container.ID)
-                        + " rollback failed: "
-                        + str(getattr(container, "DETAIL", result))
-                    )
-            except Exception as exc:
-                cleanupErrors.append("Container " + str(container.ID) + " rollback failed: " + str(exc))
+        self._cleanupMininetElements(cleanupErrors, self.OVSSWITCHES, "ovs_switch")
+        self._cleanupMininetElements(cleanupErrors, self.CONTROLLERS, "controller")
+        self._cleanupMininetElements(cleanupErrors, self.SWITCHES, "switch")
 
-        for vnf in list(self.VNFS.values()):
-            try:
-                vnf.downVNF()
-            except Exception as exc:
-                cleanupErrors.append("VNF " + str(vnf.ID) + " rollback failed: " + str(exc))
+        if self.POX is not None:
+            self._attemptCleanup(
+                cleanupErrors,
+                ("process", "pox", "stop_process"),
+                "process",
+                "pox",
+                "stop_process",
+                lambda: self.INFRASTRUCTURE.stop_process(self.POX),
+            )
 
-        for vm in list(self.VMS.values()):
-            try:
-                vm.downVM()
-            except Exception as exc:
-                cleanupErrors.append("VM " + str(vm.ID) + " rollback failed: " + str(exc))
+        self._attemptCleanup(
+            cleanupErrors,
+            ("infrastructure", "global", "cleanup_topology_infrastructure"),
+            "infrastructure",
+            "global",
+            "cleanup_topology_infrastructure",
+            self.INFRASTRUCTURE.cleanup_topology_infrastructure,
+            self.INFRASTRUCTURE,
+        )
+
+        for containerID, container in list(self.CONTAINERS.items()):
+            cleanup = getattr(container, "cleanupContainer", None) or container.downContainer
+            self._attemptCleanup(
+                cleanupErrors,
+                ("container", containerID, "downContainer"),
+                "container",
+                containerID,
+                "downContainer",
+                cleanup,
+                container,
+            )
+
+        for vnfID, vnf in list(self.VNFS.items()):
+            cleanup = getattr(vnf, "cleanupVNF", None) or vnf.downVNF
+            self._attemptCleanup(
+                cleanupErrors,
+                ("vnf", vnfID, "downVNF"),
+                "vnf",
+                vnfID,
+                "downVNF",
+                cleanup,
+                vnf,
+            )
+
+        for vmID, vm in list(self.VMS.items()):
+            cleanup = getattr(vm, "cleanupVM", None) or vm.downVM
+            self._attemptCleanup(
+                cleanupErrors,
+                ("vm", vmID, "downVM"),
+                "vm",
+                vmID,
+                "downVM",
+                cleanup,
+                vm,
+            )
+
+        for sfc in list(getattr(self.CONFIGURATION, "SFCS", [])):
+            sfcID = getattr(sfc, "ID", "unknown")
+            self._attemptCleanup(
+                cleanupErrors,
+                ("sfc", sfcID, "mark_down"),
+                "sfc",
+                sfcID,
+                "mark_down",
+                lambda sfc=sfc: setattr(sfc, "SFC_UP", False),
+            )
+
+        self.CLEANUP_ERRORS = cleanupErrors
+        self.CLEANUP_REQUIRED = bool(cleanupErrors)
+        return cleanupErrors
+
+    def _cleanupMininetElements(self, cleanupErrors, elements, resourceType):
+        for elementID, element in list(elements.items()):
+            mininetElement = getattr(element, "ELEM", None)
+            if mininetElement is None:
+                continue
+            self._attemptCleanup(
+                cleanupErrors,
+                (resourceType, elementID, "stop"),
+                resourceType,
+                elementID,
+                "stop",
+                mininetElement.stop,
+            )
+
+    def _attemptCleanup(
+        self,
+        cleanupErrors,
+        cleanupKey,
+        resourceType,
+        resourceID,
+        operation,
+        cleanup,
+        resource=None,
+    ):
+        if cleanupKey in self._CLEANUP_COMPLETED:
+            return
 
         try:
-            self.INFRASTRUCTURE.stop_process(self.POX)
-            self.INFRASTRUCTURE.cleanup_topology_infrastructure()
+            status = cleanup()
         except Exception as exc:
-            cleanupErrors.append("Infrastructure rollback failed: " + str(exc))
+            cleanupErrors.append(
+                self._cleanupError(resourceType, resourceID, operation, str(exc))
+            )
+            return
 
-        if cleanupErrors:
-            suffix = "Rollback warnings: " + " | ".join(cleanupErrors)
-            self.DETAIL = (self.DETAIL + " | " if self.DETAIL else "") + suffix
-        return cleanupErrors
+        if status not in (0, None):
+            nestedErrors = getattr(resource, "CLEANUP_ERRORS", None)
+            if nestedErrors:
+                cleanupErrors.extend(nestedErrors)
+            else:
+                message = getattr(resource, "DETAIL", "") or str(status)
+                cleanupErrors.append(
+                    self._cleanupError(resourceType, resourceID, operation, message)
+                )
+            return
+
+        self._CLEANUP_COMPLETED.add(cleanupKey)
+
+    def _cleanupError(self, resourceType, resourceID, operation, message):
+        return {
+            "resource_type": str(resourceType),
+            "resource_id": str(resourceID),
+            "operation": str(operation),
+            "message": str(message),
+        }
+
+    def _cleanupDetail(self, cleanupErrors):
+        return " | ".join(
+            error["resource_type"]
+            + " "
+            + error["resource_id"]
+            + " "
+            + error["operation"]
+            + " failed: "
+            + error["message"]
+            for error in cleanupErrors
+        )
 
 #------------------------------------------------------------------

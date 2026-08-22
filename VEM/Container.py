@@ -19,6 +19,7 @@ class Container:
         self.INTERFACES = []
         self.CONTAINER_STATUS = 0
         self.DETAIL = ''
+        self.CLEANUP_ERRORS = []
         self.CONTAINER_JSON = ''
         self.CONTAINER = None
         self.RUNTIME = DEFAULT_DOCKER_RUNTIME
@@ -238,16 +239,35 @@ class Container:
         return 0
 
     def downContainer(self):
+        return self.cleanupContainer()
+
+    def cleanupContainer(self):
         errors = []
-        try:
-            self.NETWORK.release_interfaces(self.INTERFACES)
-        except ContainerNetworkError as exc:
-            errors.append(str(exc))
+        cleanupErrors = []
+        for interface in self.INTERFACES:
+            interfaceID = interface.get('ID', 'unknown')
+            try:
+                self.NETWORK.release_interfaces([interface])
+            except Exception as exc:
+                errors.append(str(exc))
+                cleanupErrors.append({
+                    "resource_type": "veth_interface",
+                    "resource_id": str(interfaceID),
+                    "operation": "release_interfaces",
+                    "message": str(exc),
+                })
         try:
             self.RUNTIME.remove(self.ID)
-        except DockerRuntimeError as exc:
+        except Exception as exc:
             errors.append(str(exc))
+            cleanupErrors.append({
+                "resource_type": "container",
+                "resource_id": str(self.ID),
+                "operation": "remove",
+                "message": str(exc),
+            })
         self.CONTAINER = None
+        self.CLEANUP_ERRORS = cleanupErrors
         if errors:
             self.CONTAINER_STATUS = -10
             self.DETAIL = " | ".join(errors)
@@ -263,12 +283,10 @@ class Container:
         return self.RUNTIME.open_interactive_exec(self.ID, command)
 
     def _rollback(self):
-        try:
-            self.NETWORK.release_interfaces(self.INTERFACES)
-        except ContainerNetworkError:
-            pass
-        try:
-            self.RUNTIME.remove(self.ID)
-        except DockerRuntimeError:
-            pass
-        self.CONTAINER = None
+        startupDetail = self.DETAIL
+        cleanupStatus = self.cleanupContainer()
+        cleanupDetail = self.DETAIL
+        self.CONTAINER_STATUS = -10
+        self.DETAIL = startupDetail
+        if cleanupStatus != 0 and cleanupDetail:
+            self.DETAIL += " | Rollback warnings: " + cleanupDetail
