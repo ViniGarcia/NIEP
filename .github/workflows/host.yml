@@ -1,0 +1,111 @@
+name: NIEP host checks
+
+on:
+  push:
+    branches: [main, master, container-runtime]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-test:
+    name: host tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    env:
+      PYTHON: python
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_INPUT: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      TEST_REPORT_DIR: build/test-results
+    steps:
+      - name: Checkout source (without LFS payloads)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/py3-linux.txt
+            requirements-dev.txt
+
+      - name: Install locked host dependencies
+        run: python -m pip install --constraint constraints/py3-linux.txt --editable '.[dev]'
+
+      - name: Run the single host test gate
+        run: |
+          mkdir -p build/ci
+          set -o pipefail
+          make test 2>&1 | tee build/ci/make-test.log
+
+      - name: Upload JUnit, coverage and test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-test-${{ matrix.python-version }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build/test-results/**
+            build/ci/make-test.log
+
+  quality:
+    name: lint, format and documentation links
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHON: python
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_INPUT: "1"
+    steps:
+      - name: Checkout source (without LFS payloads)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: false
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/py3-linux.txt
+            requirements-dev.txt
+
+      - name: Install locked host dependencies
+        run: python -m pip install --constraint constraints/py3-linux.txt --editable '.[dev]'
+
+      - name: Run local CI checks
+        run: |
+          mkdir -p build/ci
+          set -o pipefail
+          make ci-check 2>&1 | tee build/ci/quality.log
+
+      - name: Upload quality log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-quality
+          if-no-files-found: warn
+          retention-days: 14
+          path: build/ci/quality.log

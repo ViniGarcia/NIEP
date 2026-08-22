@@ -7,8 +7,11 @@ PYTHON ?= .venv/bin/python
 BOOTSTRAP_PYTHON ?= python3
 NIEP_PYTHON ?= $(NIEP_DIR)/.venv/bin/python
 NIEPCTL ?= $(NIEP_DIR)/.venv/bin/niepctl
+TEST_REPORT_DIR ?= build/test-results
+TEST_JUNIT_XML ?= $(TEST_REPORT_DIR)/junit.xml
+TEST_COVERAGE_XML ?= $(TEST_REPORT_DIR)/coverage.xml
 
-.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-build-iperf3-image vm-build-test-iperf3-image vm-build-local-images vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm environment doctor vm-doctor check-images check-local-images vm-check-images vm-check-local-images vm-preflight lfs-pull test test-unit test-contract test-static test-command-dispatcher test-errors vm-test-static vm-test-command-dispatcher vm-test-errors vm-test-spec vm-test-integration vm-test-iperf-shaper vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
+.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-build-iperf3-image vm-build-test-iperf3-image vm-build-local-images vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm environment doctor vm-doctor check-images check-local-images vm-check-images vm-check-local-images vm-preflight lfs-pull test test-unit test-contract test-static test-command-dispatcher test-errors ci-lint ci-docs ci-history ci-tool-tests ci-check vm-test-static vm-test-command-dispatcher vm-test-errors vm-test-spec vm-test-integration vm-test-iperf-shaper vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
 
 vm-up:
 	vagrant up --provider=$(VAGRANT_PROVIDER)
@@ -99,7 +102,22 @@ test-contract:
 	$(PYTHON) -m pytest -m "contract and not privileged"
 
 test: test-static
-	$(PYTHON) -m pytest -m "not privileged" --cov --cov-report=term-missing --cov-report=xml
+	mkdir -p "$(TEST_REPORT_DIR)"
+	$(PYTHON) -m pytest -m "not privileged" --cov --cov-report=term-missing --cov-report=xml:"$(TEST_COVERAGE_XML)" --junitxml="$(TEST_JUNIT_XML)"
+
+ci-lint:
+	$(PYTHON) tools/ci/check_style.py
+
+ci-docs:
+	$(PYTHON) tools/ci/check_docs.py
+
+ci-history:
+	$(PYTHON) tools/ci/check_privileged_history.py --history docs/ci/privileged-history.json
+
+ci-tool-tests:
+	$(PYTHON) -m pytest tests/test_ci_tools.py -m unit
+
+ci-check: ci-lint ci-docs ci-history ci-tool-tests
 
 test-errors:
 	$(PYTHON) tests/check_teardown.py

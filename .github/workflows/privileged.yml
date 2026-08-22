@@ -1,0 +1,156 @@
+name: NIEP privileged integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: Deterministic integration scenario (or all)
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - mininet-isolated
+          - mininet-connected
+          - vm-host-link
+          - click-policy
+          - container-host-link
+          - container-router
+      run_heavy:
+        description: Also run the throughput-sensitive iperf/Click job
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "17 3 * * 6"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: privileged-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  privileged-integration:
+    name: disposable VM integration
+    # This label is an operational contract: the runner must be dedicated to
+    # NIEP, have no persistent credentials, and be reimaged between runs.
+    runs-on: [self-hosted, linux, x64, niep-disposable]
+    timeout-minutes: 90
+    env:
+      PYTHON: python3
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_INPUT: "1"
+      INTEGRATION_ARGS: ${{ inputs.scenario || 'all' }}
+    steps:
+      - name: Checkout source and required LFS images
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: true
+          persist-credentials: false
+
+      - name: Discard resources from an interrupted run
+        run: |
+          set +e
+          vagrant destroy -f
+          exit 0
+
+      - name: Pull immutable inputs and create a fresh VM
+        run: |
+          mkdir -p build/ci
+          set -o pipefail
+          make lfs-pull 2>&1 | tee build/ci/lfs-pull.log
+          make check-images 2>&1 | tee build/ci/check-images.log
+          make vm-up 2>&1 | tee build/ci/vm-up.log
+
+      - name: Run deterministic integration scenarios
+        run: |
+          set -o pipefail
+          make vm-test-integration INTEGRATION_ARGS="$INTEGRATION_ARGS" 2>&1 | tee build/ci/integration.log
+
+      - name: Collect diagnostics (always)
+        if: always()
+        run: bash tools/ci/collect_diagnostics.sh build/ci-diagnostics
+
+      - name: Cleanup VM and host resources (always)
+        if: always()
+        run: |
+          set +e
+          make vm-clean
+          vagrant destroy -f
+          exit 0
+
+      - name: Upload integration logs and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: privileged-integration-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            build/ci/**
+            build/ci-diagnostics/**
+
+  heavy-throughput:
+    name: disposable VM iperf/Click (informational)
+    # Scheduled runs exercise this path; a maintainer can opt in from the
+    # manual workflow. It is never selected by pull_request events.
+    needs: privileged-integration
+    if: ${{ always() && (github.event_name == 'schedule' || inputs.run_heavy == true) }}
+    runs-on: [self-hosted, linux, x64, niep-disposable]
+    timeout-minutes: 120
+    env:
+      PYTHON: python3
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_INPUT: "1"
+    steps:
+      - name: Checkout source and required LFS images
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: true
+          persist-credentials: false
+
+      - name: Discard resources from an interrupted run
+        run: |
+          set +e
+          vagrant destroy -f
+          exit 0
+
+      - name: Pull immutable inputs and create a fresh VM
+        run: |
+          mkdir -p build/ci
+          set -o pipefail
+          make lfs-pull 2>&1 | tee build/ci/lfs-pull.log
+          make check-images 2>&1 | tee build/ci/check-images.log
+          make vm-up 2>&1 | tee build/ci/vm-up.log
+
+      - name: Run throughput-sensitive scenario
+        run: |
+          set -o pipefail
+          make vm-test-iperf-shaper 2>&1 | tee build/ci/iperf-click-shaper.log
+
+      - name: Collect diagnostics (always)
+        if: always()
+        run: bash tools/ci/collect_diagnostics.sh build/ci-diagnostics
+
+      - name: Cleanup VM and host resources (always)
+        if: always()
+        run: |
+          set +e
+          make vm-clean
+          vagrant destroy -f
+          exit 0
+
+      - name: Upload throughput logs and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: privileged-heavy-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            build/ci/**
+            build/ci-diagnostics/**

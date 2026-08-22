@@ -79,6 +79,10 @@ Run the static checks on the host:
 make test-static
 ```
 
+The pull-request gate runs `make test` across Python 3.10--3.12 and publishes
+JUnit, coverage and logs. CI policy, privileged-runner isolation and the
+promotion history are documented in [`docs/ci.md`](docs/ci.md).
+
 Run the structured integration tests inside the Vagrant VM:
 
 ```bash
