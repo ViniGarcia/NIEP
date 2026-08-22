@@ -13,10 +13,34 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "TOPO-MAN"))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from Parser import PlatformParser  # noqa: E402
-from Spec import ConnectionSpec, ContainerSpec, InterfaceSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec  # noqa: E402
+
+def _parser_types():
+    """Load parser types only when a check is actually requested.
+
+    The parser still has legacy imports of optional runtimes.  Keeping this
+    behind the check function makes importing this validator side-effect free
+    and lets host-only pytest bootstrap the dependency shims first.
+    """
+
+    from tests.support import install_optional_dependency_stubs
+
+    install_optional_dependency_stubs()
+    from Parser import PlatformParser
+    from Spec import ConnectionSpec, ContainerSpec, InterfaceSpec, SFCSpec, TopologySpec, VMSpec, VNFSpec
+
+    return (
+        PlatformParser,
+        ConnectionSpec,
+        ContainerSpec,
+        InterfaceSpec,
+        SFCSpec,
+        TopologySpec,
+        VMSpec,
+        VNFSpec,
+    )
 
 
 EXAMPLES = {
@@ -35,6 +59,16 @@ def assert_true(condition: bool, message: str, errors: list[str]) -> None:
 
 
 def check_example(name: str, path: str) -> list[str]:
+    (
+        PlatformParser,
+        ConnectionSpec,
+        ContainerSpec,
+        InterfaceSpec,
+        SFCSpec,
+        TopologySpec,
+        VMSpec,
+        VNFSpec,
+    ) = _parser_types()
     errors: list[str] = []
     parser = PlatformParser(str(path))
     assert_true(parser.STATUS == 0, f"{name}: parser status is {parser.STATUS}", errors)

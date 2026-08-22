@@ -4,7 +4,7 @@ NIEP_SOCKET ?= /run/niep.sock
 NIEPCTL_ARGS ?= status
 INTEGRATION_ARGS ?= all
 
-.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-build-iperf3-image vm-build-test-iperf3-image vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test-static test-command-dispatcher test-errors vm-test-static vm-test-command-dispatcher vm-test-errors vm-test-spec vm-test-integration vm-test-iperf-shaper vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
+.PHONY: vm-up vm-halt vm-reload vm-ssh vm-sync vm-watch vm-cli vm-daemon vm-ctl vm-clean vm-build-iperf3-image vm-build-test-iperf3-image vm-libvirt-perms vm-reset-doc-vm vm-reset-tutorial-vm check-images vm-check-images lfs-pull test test-unit test-contract test-static test-command-dispatcher test-errors vm-test-static vm-test-command-dispatcher vm-test-errors vm-test-spec vm-test-integration vm-test-iperf-shaper vm-test-all vm-smoke-mininet vm-smoke-vm vm-smoke-click vm-smoke-socket vm-smoke-all
 
 vm-up:
 	vagrant up --provider=$(VAGRANT_PROVIDER)
@@ -67,7 +67,16 @@ test-static:
 	python3 tools/check_static.py
 
 test-command-dispatcher:
-	python3 -m py_compile TOPO-MAN/Command.py TOPO-MAN/SocketServer.py VEM/TerminalSession.py tools/niepd.py tools/niepctl.py tools/check_command_dispatcher.py tools/smoke/run_socket_smoke.py tests/check_error_handling.py tests/check_teardown.py tests/integration/run_topology_tests.py
+	python3 -m pytest tests/test_command_dispatcher.py -m unit
+
+test-unit:
+	python3 -m pytest -m "unit and not privileged"
+
+test-contract:
+	python3 -m pytest -m "contract and not privileged"
+
+test: test-static
+	python3 -m pytest -m "not privileged" --cov --cov-report=term-missing --cov-report=xml
 
 test-errors:
 	python3 tests/check_teardown.py

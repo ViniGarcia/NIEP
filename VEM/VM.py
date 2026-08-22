@@ -40,6 +40,7 @@ class VM:
         self.RUNTIME = DEFAULT_LIBVIRT_RUNTIME
         self.IMAGE_STORE = VMImageStore(STDPATH)
         self.NETWORK = DEFAULT_VM_NETWORK_RUNTIME
+        self._CLEANUP_COMPLETED = set()
 
         if interfaces != None:
             self.outInterfaces(configurationPath, alias, interfaces)
@@ -389,6 +390,8 @@ class VM:
             return -2
 
         if not self.VM_UP:
+            # Starting a VM begins a fresh cleanup transaction.
+            self._CLEANUP_COMPLETED = set()
             self.NETWORK.prepare_interfaces(self.INTERFACES)
             domainXML = self.IMAGE_STORE.read_domain_xml(self.ID, self.DISK)
             self.VIRT_VM = self.RUNTIME.define_and_create(self.ID, domainXML)
@@ -422,12 +425,25 @@ class VM:
     def cleanupVM(self):
         errors = []
         cleanupErrors = []
+        completed = getattr(self, '_CLEANUP_COMPLETED', None)
+        if completed is None:
+            completed = set()
+            self._CLEANUP_COMPLETED = completed
+
+        destroyKey = ('vm', str(self.ID), 'destroy')
+        undefineKey = ('vm', str(self.ID), 'undefine')
         domain = self.VIRT_VM
 
-        if domain is None:
+        if domain is None and (destroyKey not in completed or undefineKey not in completed):
             try:
                 if self.RUNTIME.exists(self.ID):
                     domain = self.RUNTIME.lookup(self.ID)
+                    # Keep the handle when an operation below fails so a retry
+                    # can continue at the pending operation.
+                    self.VIRT_VM = domain
+                else:
+                    completed.add(destroyKey)
+                    completed.add(undefineKey)
             except Exception as exc:
                 errors.append(str(exc))
                 cleanupErrors.append({
@@ -438,35 +454,71 @@ class VM:
                 })
 
         if domain is not None:
-            try:
-                self.RUNTIME.destroy(domain)
-                self.VM_UP = False
-            except Exception as exc:
-                errors.append(str(exc))
-                cleanupErrors.append({
-                    "resource_type": "vm",
-                    "resource_id": str(self.ID),
-                    "operation": "destroy",
-                    "message": str(exc),
-                })
-            try:
-                self.RUNTIME.undefine(domain)
-                self.VIRT_VM = None
-            except Exception as exc:
-                errors.append(str(exc))
-                cleanupErrors.append({
-                    "resource_type": "vm",
-                    "resource_id": str(self.ID),
-                    "operation": "undefine",
-                    "message": str(exc),
-                })
+            if destroyKey not in completed:
+                # Libvirt rejects destroy() for an already stopped domain.
+                # Prefer the runtime's state query when available, while
+                # keeping compatibility with small legacy test/runtime fakes.
+                running = True
+                isRunning = getattr(self.RUNTIME, 'is_running', None)
+                if isRunning is not None:
+                    try:
+                        running = bool(isRunning(self.ID))
+                    except Exception:
+                        running = True
+                if not running:
+                    self.VM_UP = False
+                    completed.add(destroyKey)
+                else:
+                    try:
+                        status = self.RUNTIME.destroy(domain)
+                        if status not in (0, None):
+                            raise RuntimeError(
+                                "destroy returned status " + str(status)
+                            )
+                        self.VM_UP = False
+                    except Exception as exc:
+                        errors.append(str(exc))
+                        cleanupErrors.append({
+                            "resource_type": "vm",
+                            "resource_id": str(self.ID),
+                            "operation": "destroy",
+                            "message": str(exc),
+                        })
+                    else:
+                        completed.add(destroyKey)
+
+            if undefineKey not in completed:
+                try:
+                    status = self.RUNTIME.undefine(domain)
+                    if status not in (0, None):
+                        raise RuntimeError(
+                            "undefine returned status " + str(status)
+                        )
+                    self.VIRT_VM = None
+                except Exception as exc:
+                    errors.append(str(exc))
+                    cleanupErrors.append({
+                        "resource_type": "vm",
+                        "resource_id": str(self.ID),
+                        "operation": "undefine",
+                        "message": str(exc),
+                    })
+                else:
+                    completed.add(undefineKey)
         else:
             self.VM_UP = False
 
-        for interface in self.INTERFACES:
+        for interfaceIndex, interface in enumerate(self.INTERFACES):
             interfaceID = interface.get('ID', 'unknown')
+            cleanupKey = ('vm_interface', str(interfaceID), interfaceIndex, 'release_interfaces')
+            if cleanupKey in completed:
+                continue
             try:
-                self.NETWORK.release_interfaces([interface])
+                status = self.NETWORK.release_interfaces([interface])
+                if status not in (0, None):
+                    raise RuntimeError(
+                        "release_interfaces returned status " + str(status)
+                    )
             except Exception as exc:
                 errors.append(str(exc))
                 cleanupErrors.append({
@@ -475,6 +527,8 @@ class VM:
                     "operation": "release_interfaces",
                     "message": str(exc),
                 })
+            else:
+                completed.add(cleanupKey)
 
         self.CLEANUP_ERRORS = cleanupErrors
         if errors:

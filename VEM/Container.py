@@ -24,6 +24,7 @@ class Container:
         self.CONTAINER = None
         self.RUNTIME = DEFAULT_DOCKER_RUNTIME
         self.NETWORK = DEFAULT_CONTAINER_NETWORK_RUNTIME
+        self._CLEANUP_COMPLETED = set()
 
         self.inInterfaces(configurationPath)
 
@@ -220,6 +221,9 @@ class Container:
     def upContainer(self):
         if self.CONTAINER_STATUS < 0:
             return self.CONTAINER_STATUS
+        # A new start is a new cleanup transaction.  Do not carry successful
+        # operations from an earlier, fully or partially cleaned run into it.
+        self._CLEANUP_COMPLETED = set()
         try:
             if self.CONTAINER is None:
                 if not self.RUNTIME.exists(self.ID):
@@ -244,10 +248,22 @@ class Container:
     def cleanupContainer(self):
         errors = []
         cleanupErrors = []
-        for interface in self.INTERFACES:
+        completed = getattr(self, '_CLEANUP_COMPLETED', None)
+        if completed is None:
+            completed = set()
+            self._CLEANUP_COMPLETED = completed
+
+        for interfaceIndex, interface in enumerate(self.INTERFACES):
             interfaceID = interface.get('ID', 'unknown')
+            cleanupKey = ('veth_interface', str(interfaceID), interfaceIndex, 'release_interfaces')
+            if cleanupKey in completed:
+                continue
             try:
-                self.NETWORK.release_interfaces([interface])
+                status = self.NETWORK.release_interfaces([interface])
+                if status not in (0, None):
+                    raise RuntimeError(
+                        "release_interfaces returned status " + str(status)
+                    )
             except Exception as exc:
                 errors.append(str(exc))
                 cleanupErrors.append({
@@ -256,16 +272,25 @@ class Container:
                     "operation": "release_interfaces",
                     "message": str(exc),
                 })
-        try:
-            self.RUNTIME.remove(self.ID)
-        except Exception as exc:
-            errors.append(str(exc))
-            cleanupErrors.append({
-                "resource_type": "container",
-                "resource_id": str(self.ID),
-                "operation": "remove",
-                "message": str(exc),
-            })
+            else:
+                completed.add(cleanupKey)
+
+        removeKey = ('container', str(self.ID), 'remove')
+        if removeKey not in completed:
+            try:
+                status = self.RUNTIME.remove(self.ID)
+                if status not in (0, None):
+                    raise RuntimeError("remove returned status " + str(status))
+            except Exception as exc:
+                errors.append(str(exc))
+                cleanupErrors.append({
+                    "resource_type": "container",
+                    "resource_id": str(self.ID),
+                    "operation": "remove",
+                    "message": str(exc),
+                })
+            else:
+                completed.add(removeKey)
         self.CONTAINER = None
         self.CLEANUP_ERRORS = cleanupErrors
         if errors:

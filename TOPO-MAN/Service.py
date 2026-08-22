@@ -167,7 +167,10 @@ class TopologyService:
 
     def _rollbackFailedStart(self, startupDetail):
         try:
-            return self.executor.rollbackFailedStart()
+            errors = self.executor.rollbackFailedStart()
+            errors = self._structuredCleanupErrors(errors)
+            self.executor.CLEANUP_ERRORS = errors
+            return errors
         except Exception as exc:
             error = {
                 "resource_type": "executor",
@@ -175,13 +178,17 @@ class TopologyService:
                 "operation": "rollback",
                 "message": str(exc),
             }
-            self.executor.CLEANUP_ERRORS = [error]
+            errors = self._structuredCleanupErrors(
+                getattr(self.executor, 'CLEANUP_ERRORS', [])
+            )
+            errors.append(error)
+            self.executor.CLEANUP_ERRORS = errors
             self.executor.CLEANUP_REQUIRED = True
             self.executor.STATUS = -10
             self.executor.DETAIL = (
                 (startupDetail + " | ") if startupDetail else ""
-            ) + "Rollback warnings: " + self._cleanupDetail([error])
-            return [error]
+            ) + "Rollback warnings: " + self._cleanupDetail(errors)
+            return errors
 
     def _teardown(self, failureMessage):
         if not self._cleanupRequired():
@@ -216,7 +223,9 @@ class TopologyService:
         return self.executor.STATUS is not None
 
     def _cleanupFailure(self, message):
-        errors = list(getattr(self.executor, 'CLEANUP_ERRORS', []))
+        errors = self._structuredCleanupErrors(
+            getattr(self.executor, 'CLEANUP_ERRORS', [])
+        )
         detail = getattr(self.executor, 'DETAIL', '')
         if not errors:
             errors = [{
@@ -241,16 +250,33 @@ class TopologyService:
         images.extend(("vm_image", vm.ID) for vm in self.executor.VMS.values())
 
         cleanupErrors = []
-        removed = set()
+        completed = getattr(self.executor, '_PERSISTENT_STATE_COMPLETED', None)
+        if completed is None:
+            completed = set()
+            self.executor._PERSISTENT_STATE_COMPLETED = completed
         for resourceType, resourceID in images:
-            imagePath = join(imagesPath, resourceID)
-            if imagePath in removed or not exists(imagePath):
+            imagePath = join(imagesPath, str(resourceID))
+            cleanupKey = (resourceType, str(resourceID), "remove_persistent_state")
+            if cleanupKey in completed:
+                continue
+            try:
+                imageExists = exists(imagePath)
+            except Exception as exc:
+                cleanupErrors.append({
+                    "resource_type": resourceType,
+                    "resource_id": str(resourceID),
+                    "operation": "remove_persistent_state",
+                    "message": str(exc),
+                })
+                continue
+            if not imageExists:
+                completed.add(cleanupKey)
                 continue
             try:
                 rmtree(imagePath)
-                removed.add(imagePath)
+                completed.add(cleanupKey)
             except FileNotFoundError:
-                removed.add(imagePath)
+                completed.add(cleanupKey)
             except Exception as exc:
                 cleanupErrors.append({
                     "resource_type": resourceType,
@@ -262,15 +288,39 @@ class TopologyService:
 
     def _cleanupDetail(self, errors):
         return " | ".join(
-            error["resource_type"]
+            str(error["resource_type"])
             + " "
-            + error["resource_id"]
+            + str(error["resource_id"])
             + " "
-            + error["operation"]
+            + str(error["operation"])
             + " failed: "
-            + error["message"]
+            + str(error["message"])
             for error in errors
         )
+
+    def _structuredCleanupErrors(self, errors):
+        """Normalize legacy adapter errors before exposing them to callers."""
+        structured = []
+        if errors is None:
+            return structured
+        if isinstance(errors, (dict, str, bytes)) or not hasattr(errors, "__iter__"):
+            errors = [errors]
+        for error in errors:
+            if isinstance(error, dict):
+                structured.append({
+                    "resource_type": str(error.get("resource_type", "unknown")),
+                    "resource_id": str(error.get("resource_id", "unknown")),
+                    "operation": str(error.get("operation", "cleanup")),
+                    "message": str(error.get("message", error)),
+                })
+            else:
+                structured.append({
+                    "resource_type": "unknown",
+                    "resource_id": "unknown",
+                    "operation": "cleanup",
+                    "message": str(error),
+                })
+        return structured
 
     def is_up(self):
         return self.executor is not None and self.executor.STATUS == 0

@@ -28,6 +28,7 @@ class Executer:
         self.CLEANUP_ERRORS = []
         self.CLEANUP_REQUIRED = False
         self._CLEANUP_COMPLETED = set()
+        self._PERSISTENT_STATE_COMPLETED = set()
         self.SWITCH_CONTROLLER_ID = None
         self.LOCAL_POX_ENABLED = True
         self.INFRASTRUCTURE = DEFAULT_INFRASTRUCTURE_RUNTIME
@@ -273,6 +274,7 @@ class Executer:
         self.CLEANUP_ERRORS = []
         self.CLEANUP_REQUIRED = True
         self._CLEANUP_COMPLETED = set()
+        self._PERSISTENT_STATE_COMPLETED = set()
         self.DETAIL = ""
         self.INFRASTRUCTURE.prepare_topology_infrastructure()
 
@@ -452,11 +454,14 @@ class Executer:
                 vm,
             )
 
-        for sfc in list(getattr(self.CONFIGURATION, "SFCS", [])):
+        for sfcIndex, sfc in enumerate(list(getattr(self.CONFIGURATION, "SFCS", []))):
             sfcID = getattr(sfc, "ID", "unknown")
             self._attemptCleanup(
                 cleanupErrors,
-                ("sfc", sfcID, "mark_down"),
+                # SFC ids are not used as dictionary keys.  Include the
+                # position as a stable discriminator so two SFC objects with
+                # the same (legacy) id cannot make one another look cleaned.
+                ("sfc", sfcID, sfcIndex, "mark_down"),
                 "sfc",
                 sfcID,
                 "mark_down",
@@ -497,6 +502,9 @@ class Executer:
         try:
             status = cleanup()
         except Exception as exc:
+            nestedErrors = getattr(resource, "CLEANUP_ERRORS", None)
+            if nestedErrors:
+                cleanupErrors.extend(self._structuredCleanupErrors(nestedErrors))
             cleanupErrors.append(
                 self._cleanupError(resourceType, resourceID, operation, str(exc))
             )
@@ -505,7 +513,7 @@ class Executer:
         if status not in (0, None):
             nestedErrors = getattr(resource, "CLEANUP_ERRORS", None)
             if nestedErrors:
-                cleanupErrors.extend(nestedErrors)
+                cleanupErrors.extend(self._structuredCleanupErrors(nestedErrors))
             else:
                 message = getattr(resource, "DETAIL", "") or str(status)
                 cleanupErrors.append(
@@ -514,6 +522,32 @@ class Executer:
             return
 
         self._CLEANUP_COMPLETED.add(cleanupKey)
+
+    def _structuredCleanupErrors(self, errors):
+        """Return cleanup errors as serializable, structured records.
+
+        Runtime adapters written before the teardown contract sometimes expose
+        plain strings.  Keep their details while assigning the parent resource
+        context; modern adapters already return dictionaries and are copied
+        unchanged.  This also prevents a malformed adapter error from making
+        the whole teardown reporting path fail.
+        """
+        structured = []
+        if errors is None:
+            return structured
+        if isinstance(errors, (dict, str, bytes)) or not hasattr(errors, "__iter__"):
+            errors = [errors]
+        for error in errors:
+            if isinstance(error, dict):
+                structured.append({
+                    "resource_type": str(error.get("resource_type", "unknown")),
+                    "resource_id": str(error.get("resource_id", "unknown")),
+                    "operation": str(error.get("operation", "cleanup")),
+                    "message": str(error.get("message", error)),
+                })
+            else:
+                structured.append(self._cleanupError("unknown", "unknown", "cleanup", error))
+        return structured
 
     def _cleanupError(self, resourceType, resourceID, operation, message):
         return {

@@ -1,0 +1,6 @@
+# Host-only test tooling. Runtime requirements remain in
+# INSTALLATION/requirements-py3-min.txt and are not needed for unit/contract
+# checks.
+pytest>=8,<9
+pytest-cov>=5,<7
+pytest-timeout>=2.3,<3

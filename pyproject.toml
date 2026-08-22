@@ -1,0 +1,28 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-config --strict-markers -m 'not privileged'"
+timeout = 10
+
+markers = [
+  "unit: host-only tests of pure behavior and validation",
+  "contract: tests of stable service/parser/teardown contracts",
+  "integration: tests that require external runtimes or a provisioned host",
+  "smoke: end-to-end command or socket smoke checks",
+  "privileged: tests requiring root, Docker, libvirt, Mininet, or host networking",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["TOPO-MAN", "VEM", "CLI", "tools"]
+omit = [
+  "OFCONTROLLERS/pox/*",
+  "*/OFCONTROLLERS/pox/*",
+  "*/tests/*",
+  "*/tools/smoke/*",
+  "*/tests/integration/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

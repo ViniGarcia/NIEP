@@ -6,8 +6,7 @@ from sys import path
 ROOT = '/'.join(abspath(__file__).split('/')[:-2])
 path.insert(0, ROOT + '/TOPO-MAN')
 path.insert(0, ROOT + '/VEM')
-
-from Command import CommandDispatcher
+path.insert(0, ROOT)
 
 
 def assert_result(result, ok, code):
@@ -15,8 +14,15 @@ def assert_result(result, ok, code):
         raise AssertionError(str(result.to_dict()))
 
 
-def main():
-    dispatcher = CommandDispatcher()
+def run_checks(dispatcher=None):
+    """Run dispatcher assertions and return a process-style status code."""
+
+    from tests.support import install_optional_dependency_stubs
+
+    install_optional_dependency_stubs()
+    from Command import CommandDispatcher
+
+    dispatcher = dispatcher or CommandDispatcher()
     assert_result(dispatcher.dispatch('status'), True, 'status')
     assert_result(dispatcher.dispatch('unknown'), False, 'unknown_command')
     assert_result(dispatcher.dispatch('define'), False, 'invalid_command_args')
@@ -25,6 +31,11 @@ def main():
     assert_result(dispatcher.dispatch('vm', ['list']), True, 'defined')
     assert_result(dispatcher.dispatch('container', ['shell', 'missing']), False, 'invalid_command_args')
     assert_result(dispatcher.dispatch('vnf', ['management']), False, 'invalid_command_args')
+    return 0
+
+
+def main():
+    run_checks()
     print('[ OK ] command dispatcher')
 
 

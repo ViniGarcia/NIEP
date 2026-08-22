@@ -26,6 +26,7 @@ class VNF:
         self.VNF_UP = False
         self.VNF_STATUS = 0
         self.CLEANUP_ERRORS = []
+        self.DETAIL = ''
         self.VNF_JSON = ''
 
         if path.isfile(configurationPath):
@@ -179,23 +180,29 @@ class VNF:
             self.VNF_UP = False
             self.VNF_OPERATOR = None
             self.CLEANUP_ERRORS = []
+            self.DETAIL = ''
             return 0
 
         cleanup = getattr(self.VM, "cleanupVM", None) or self.VM.downVM
         try:
             resultVm = cleanup()
         except Exception as exc:
-            self.CLEANUP_ERRORS = [{
+            self.CLEANUP_ERRORS = self._structuredCleanupErrors(
+                getattr(self.VM, "CLEANUP_ERRORS", [])
+            )
+            self.CLEANUP_ERRORS.append({
                 "resource_type": "vnf",
                 "resource_id": str(self.ID),
                 "operation": "downVNF",
                 "message": str(exc),
-            }]
+            })
             self.DETAIL = str(exc)
             return -10
 
         if resultVm not in (0, None):
-            self.CLEANUP_ERRORS = list(getattr(self.VM, "CLEANUP_ERRORS", []))
+            self.CLEANUP_ERRORS = self._structuredCleanupErrors(
+                getattr(self.VM, "CLEANUP_ERRORS", [])
+            )
             if not self.CLEANUP_ERRORS:
                 self.CLEANUP_ERRORS = [{
                     "resource_type": "vnf",
@@ -211,6 +218,30 @@ class VNF:
         self.CLEANUP_ERRORS = []
         self.DETAIL = ""
         return 0
+
+    def _structuredCleanupErrors(self, errors):
+        """Normalize VM cleanup details without losing legacy scalar errors."""
+        structured = []
+        if errors is None:
+            return structured
+        if isinstance(errors, (dict, str, bytes)) or not hasattr(errors, "__iter__"):
+            errors = [errors]
+        for error in errors:
+            if isinstance(error, dict):
+                structured.append({
+                    "resource_type": str(error.get("resource_type", "vnf")),
+                    "resource_id": str(error.get("resource_id", self.ID)),
+                    "operation": str(error.get("operation", "downVNF")),
+                    "message": str(error.get("message", error)),
+                })
+            else:
+                structured.append({
+                    "resource_type": "vnf",
+                    "resource_id": str(self.ID),
+                    "operation": "downVNF",
+                    "message": str(error),
+                })
+        return structured
 
 #sleepVNF: down a started VNF but do not remove from hypervisor neither interfaces.
 #         -2 = VNF does not exist

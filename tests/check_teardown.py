@@ -8,25 +8,36 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from tests.support import install_optional_dependency_stubs
+
+install_optional_dependency_stubs()
 sys.path.insert(0, str(ROOT / "TOPO-MAN"))
 sys.path.insert(0, str(ROOT / "VEM"))
 
 
 def install_import_stubs():
-    parser = types.ModuleType("Parser")
-    parser.PlatformParser = object
-    sys.modules["Parser"] = parser
+    if "Parser" not in sys.modules:
+        parser = types.ModuleType("Parser")
+        parser.PlatformParser = object
+        sys.modules["Parser"] = parser
 
-    docker_runtime = types.ModuleType("DockerRuntime")
+    if "DockerRuntime" not in sys.modules:
+        docker_runtime = types.ModuleType("DockerRuntime")
 
-    class DockerRuntimeError(RuntimeError):
-        pass
+        class DockerRuntimeError(RuntimeError):
+            pass
 
-    docker_runtime.DockerRuntimeError = DockerRuntimeError
-    docker_runtime.DEFAULT_DOCKER_RUNTIME = object()
-    sys.modules["DockerRuntime"] = docker_runtime
+        docker_runtime.DockerRuntimeError = DockerRuntimeError
+        docker_runtime.DEFAULT_DOCKER_RUNTIME = object()
+        sys.modules["DockerRuntime"] = docker_runtime
 
-    if importlib.util.find_spec("mininet") is None:
+    try:
+        mininet_available = importlib.util.find_spec("mininet") is not None
+    except ValueError:
+        mininet_available = "mininet" in sys.modules
+    if not mininet_available:
         mininet = types.ModuleType("mininet")
         net = types.ModuleType("mininet.net")
         node = types.ModuleType("mininet.node")
@@ -57,6 +68,7 @@ from Container import Container  # noqa: E402
 from Command import CommandDispatcher  # noqa: E402
 from InfrastructureRuntime import InfrastructureRuntime  # noqa: E402
 from VM import VM  # noqa: E402
+from VNF import VNF  # noqa: E402
 import Service as service_module  # noqa: E402
 from Service import TopologyService  # noqa: E402
 
@@ -262,6 +274,41 @@ def check_multiple_failures_are_aggregated():
         assert_error(error, ERROR_CONTEXT[stage], stage)
 
 
+def check_numeric_cleanup_status_is_a_failure():
+    executor, _ = build_executor()
+    container = executor.CONTAINERS["container1"]
+    container.cleanupContainer = lambda: -7
+    container.DETAIL = "adapter refused cleanup"
+    result = executor.topologyDown()
+    if result != -10 or not executor.CLEANUP_ERRORS:
+        raise AssertionError("numeric cleanup failure was reported as success")
+    error = executor.CLEANUP_ERRORS[0]
+    if error["resource_type"] != "container" or error["message"] != "adapter refused cleanup":
+        raise AssertionError(repr(executor.CLEANUP_ERRORS))
+
+
+def check_legacy_cleanup_errors_are_not_split_or_dropped():
+    executor, _ = build_executor()
+    container = executor.CONTAINERS["container1"]
+    container.CLEANUP_ERRORS = "legacy cleanup failure"
+
+    def fail_cleanup():
+        raise RuntimeError("adapter raised")
+
+    container.cleanupContainer = fail_cleanup
+    if executor.topologyDown() != -10:
+        raise AssertionError("legacy cleanup failure was reported as success")
+    if executor.CLEANUP_ERRORS[0]["message"] != "legacy cleanup failure":
+        raise AssertionError(repr(executor.CLEANUP_ERRORS))
+    if len(executor.CLEANUP_ERRORS) != 2:
+        raise AssertionError("legacy cleanup message was split into multiple errors")
+
+    service = TopologyService()
+    scalar = service._structuredCleanupErrors(7)
+    if len(scalar) != 1 or scalar[0]["message"] != "7":
+        raise AssertionError(repr(scalar))
+
+
 def check_retry_only_repeats_pending_cleanup():
     executor, recorder = build_executor({"container": 1})
     if executor.topologyDown() != -10:
@@ -379,6 +426,8 @@ def check_destroy_reports_persistent_state_failures():
         retry = service.destroy()
         if not retry.ok or service.executor is not None:
             raise AssertionError("persistent-state cleanup could not be retried")
+        if len(calls) != 3:
+            raise AssertionError("persistent state retry repeated a successful removal")
     finally:
         service_module.exists = originalExists
         service_module.rmtree = originalRmtree
@@ -523,6 +572,96 @@ def check_vm_cleanup_attempts_domain_and_all_interfaces():
         raise AssertionError(repr(vm.CLEANUP_ERRORS))
 
 
+class RetryVMRuntimeCleanup:
+    def __init__(self):
+        self.calls = []
+        self.fail_undefine = True
+
+    def exists(self, vm_id):
+        self.calls.append("exists")
+        return True
+
+    def lookup(self, vm_id):
+        self.calls.append("lookup")
+        return object()
+
+    def destroy(self, domain):
+        self.calls.append("destroy")
+
+    def undefine(self, domain):
+        self.calls.append("undefine")
+        if self.fail_undefine:
+            self.fail_undefine = False
+            raise RuntimeError("cannot-undefine-once")
+
+
+class RetryVMNetworkCleanup:
+    def __init__(self):
+        self.calls = []
+        self.fail_release = True
+
+    def release_interfaces(self, interfaces):
+        interface_id = interfaces[0]["ID"]
+        self.calls.append(interface_id)
+        if self.fail_release:
+            self.fail_release = False
+            raise RuntimeError("cannot-release-once")
+
+
+def check_vm_cleanup_retry_skips_completed_domain_operation():
+    vm = object.__new__(VM)
+    vm.ID = "vm-retry"
+    vm.VIRT_VM = None
+    vm.VM_UP = True
+    vm.INTERFACES = [{"ID": "vm-if0"}]
+    vm.RUNTIME = RetryVMRuntimeCleanup()
+    vm.NETWORK = RetryVMNetworkCleanup()
+    vm.CLEANUP_ERRORS = []
+
+    if vm.cleanupVM() != -10 or vm.cleanupVM() != 0:
+        raise AssertionError("VM cleanup retry did not finish")
+    if vm.RUNTIME.calls != ["exists", "lookup", "destroy", "undefine", "undefine"]:
+        raise AssertionError("VM retry repeated a completed operation")
+    if vm.NETWORK.calls != ["vm-if0", "vm-if0"]:
+        raise AssertionError("VM retry skipped the pending interface")
+
+
+class LegacyVNFVMCleanup:
+    def __init__(self, errors, raises=False):
+        self.CLEANUP_ERRORS = errors
+        self.raises = raises
+
+    def cleanupVM(self):
+        if self.raises:
+            raise RuntimeError("legacy VM cleanup raised")
+        return -10
+
+
+def check_vnf_cleanup_normalizes_legacy_errors():
+    vnf = object.__new__(VNF)
+    vnf.ID = "vnf-retry"
+    vnf.VNF_UP = True
+    vnf.VNF_OPERATOR = object()
+    vnf.CLEANUP_ERRORS = []
+    vnf.DETAIL = ""
+    vnf.VM = LegacyVNFVMCleanup("legacy VM cleanup failure")
+
+    if vnf.cleanupVNF() != -10:
+        raise AssertionError("VNF cleanup unexpectedly succeeded")
+    if len(vnf.CLEANUP_ERRORS) != 1:
+        raise AssertionError(repr(vnf.CLEANUP_ERRORS))
+    if vnf.CLEANUP_ERRORS[0]["message"] != "legacy VM cleanup failure":
+        raise AssertionError(repr(vnf.CLEANUP_ERRORS))
+
+    vnf.VM = LegacyVNFVMCleanup(None, raises=True)
+    if vnf.cleanupVNF() != -10:
+        raise AssertionError("VNF exception unexpectedly succeeded")
+    if len(vnf.CLEANUP_ERRORS) != 1:
+        raise AssertionError(repr(vnf.CLEANUP_ERRORS))
+    if vnf.CLEANUP_ERRORS[0]["message"] != "legacy VM cleanup raised":
+        raise AssertionError(repr(vnf.CLEANUP_ERRORS))
+
+
 class FakeInfrastructureCleanup(InfrastructureRuntime):
     def __init__(self):
         self.calls = []
@@ -534,6 +673,22 @@ class FakeInfrastructureCleanup(InfrastructureRuntime):
     def remove_bridge(self, bridgeID):
         self.calls.append("bridge")
         raise RuntimeError("cannot-remove-bridge")
+
+
+class RetryInfrastructureCleanup(InfrastructureRuntime):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+        self.fail_bridge = True
+
+    def destroy_virt_network(self, networkID):
+        self.calls.append("network")
+
+    def remove_bridge(self, bridgeID):
+        self.calls.append("bridge")
+        if self.fail_bridge:
+            self.fail_bridge = False
+            raise RuntimeError("cannot-remove-bridge-once")
 
 
 def check_global_infrastructure_aggregates_subresource_failures():
@@ -548,9 +703,65 @@ def check_global_infrastructure_aggregates_subresource_failures():
         raise AssertionError(repr(infrastructure.CLEANUP_ERRORS))
 
 
+def check_global_infrastructure_retry_skips_completed_resource():
+    infrastructure = RetryInfrastructureCleanup()
+    if infrastructure.cleanup_topology_infrastructure() != -10:
+        raise AssertionError("infrastructure failure unexpectedly succeeded")
+    if infrastructure.cleanup_topology_infrastructure() != 0:
+        raise AssertionError("infrastructure retry did not finish")
+    if infrastructure.calls != ["network", "bridge", "bridge"]:
+        raise AssertionError("infrastructure retry repeated network cleanup")
+
+
+class RetryContainerNetworkCleanup:
+    def __init__(self):
+        self.calls = []
+        self.fail_interface = True
+
+    def release_interfaces(self, interfaces):
+        interface_id = interfaces[0]["ID"]
+        self.calls.append(interface_id)
+        if self.fail_interface:
+            self.fail_interface = False
+            raise RuntimeError("cannot-release-once")
+
+
+class RetryContainerRuntimeCleanup:
+    def __init__(self):
+        self.calls = []
+        self.fail_remove = True
+
+    def remove(self, container_id):
+        self.calls.append(container_id)
+        if self.fail_remove:
+            self.fail_remove = False
+            raise RuntimeError("cannot-remove-once")
+
+
+def check_container_cleanup_retry_skips_completed_interfaces():
+    container = object.__new__(Container)
+    container.ID = "container-retry"
+    container.INTERFACES = [{"ID": "veth0"}, {"ID": "veth1"}]
+    container.NETWORK = RetryContainerNetworkCleanup()
+    container.RUNTIME = RetryContainerRuntimeCleanup()
+    container.CONTAINER = object()
+    container.CLEANUP_ERRORS = []
+    container.DETAIL = ""
+    container.CONTAINER_STATUS = 0
+
+    if container.cleanupContainer() != -10 or container.cleanupContainer() != 0:
+        raise AssertionError("container cleanup retry did not finish")
+    if container.NETWORK.calls != ["veth0", "veth1", "veth0"]:
+        raise AssertionError("container retry repeated a completed interface")
+    if container.RUNTIME.calls != ["container-retry", "container-retry"]:
+        raise AssertionError("container retry skipped the pending removal")
+
+
 def main():
     check_each_stage_is_best_effort()
     check_multiple_failures_are_aggregated()
+    check_numeric_cleanup_status_is_a_failure()
+    check_legacy_cleanup_errors_are_not_split_or_dropped()
     check_retry_only_repeats_pending_cleanup()
     check_rollback_uses_the_teardown_plan()
     check_down_and_clean_preserve_executor_on_failure()
@@ -559,8 +770,12 @@ def main():
     check_destroy_reports_persistent_state_failures()
     check_failed_start_preserves_executor_only_when_needed()
     check_container_cleanup_is_best_effort_per_interface()
+    check_container_cleanup_retry_skips_completed_interfaces()
     check_vm_cleanup_attempts_domain_and_all_interfaces()
+    check_vm_cleanup_retry_skips_completed_domain_operation()
+    check_vnf_cleanup_normalizes_legacy_errors()
     check_global_infrastructure_aggregates_subresource_failures()
+    check_global_infrastructure_retry_skips_completed_resource()
     print("[ OK ] best-effort topology teardown and retry semantics")
 
 

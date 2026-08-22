@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$ROOT_DIR/.venv"
 REQ_FILE="$ROOT_DIR/INSTALLATION/requirements-py3-min.txt"
+DEV_REQ_FILE="$ROOT_DIR/requirements-dev.txt"
 SKIP_PIP_INSTALL="${SKIP_PIP_INSTALL:-0}"
 SKIP_PIP_UPGRADE="${SKIP_PIP_UPGRADE:-0}"
 
@@ -31,8 +32,8 @@ fi
 if [[ "$SKIP_PIP_INSTALL" == "1" ]]; then
   echo "[4/4] SKIP_PIP_INSTALL=1, skipping dependency installation."
 else
-  echo "[4/4] Installing Python dependencies from $REQ_FILE..."
-  "$VENV_DIR/bin/pip" install -r "$REQ_FILE"
+  echo "[4/4] Installing Python dependencies from $REQ_FILE and $DEV_REQ_FILE..."
+  "$VENV_DIR/bin/pip" install -r "$REQ_FILE" -r "$DEV_REQ_FILE"
 fi
 
 cat <<'EOF'

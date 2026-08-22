@@ -22,6 +22,13 @@ def check_output_text(cmd):
 
 
 class InfrastructureRuntime:
+    def __init__(self):
+        # Keep the two infrastructure resources independent.  A bridge can be
+        # removed even when libvirt reports an error (and vice versa), and a
+        # retry must only revisit the operation that did not complete.
+        self._CLEANUP_COMPLETED = set()
+        self.CLEANUP_ERRORS = []
+
     def interfaces_mapping(self):
         ifacesDictionary = {}
 
@@ -97,30 +104,55 @@ class InfrastructureRuntime:
             raise RuntimeError(" | ".join(errors))
 
     def prepare_topology_infrastructure(self):
+        self._CLEANUP_COMPLETED = set()
+        self.CLEANUP_ERRORS = []
         self.ensure_bridge('vbrNIEP')
         configPath = join(dirname(abspath(__file__)), '..', 'CONFS', 'vnNIEP.xml')
         self.ensure_virt_network('vnNIEP', configPath)
 
     def cleanup_topology_infrastructure(self):
+        completed = getattr(self, '_CLEANUP_COMPLETED', None)
+        if completed is None:
+            completed = set()
+            self._CLEANUP_COMPLETED = completed
+
         cleanupErrors = []
-        try:
-            self.destroy_virt_network('vnNIEP')
-        except Exception as exc:
-            cleanupErrors.append({
-                "resource_type": "libvirt_network",
-                "resource_id": "vnNIEP",
-                "operation": "destroy",
-                "message": str(exc),
-            })
-        try:
-            self.remove_bridge('vbrNIEP')
-        except Exception as exc:
-            cleanupErrors.append({
-                "resource_type": "bridge",
-                "resource_id": "vbrNIEP",
-                "operation": "remove",
-                "message": str(exc),
-            })
+        networkKey = ('libvirt_network', 'vnNIEP', 'destroy')
+        if networkKey not in completed:
+            try:
+                status = self.destroy_virt_network('vnNIEP')
+                if status not in (0, None):
+                    raise RuntimeError(
+                        "destroy returned status " + str(status)
+                    )
+            except Exception as exc:
+                cleanupErrors.append({
+                    "resource_type": "libvirt_network",
+                    "resource_id": "vnNIEP",
+                    "operation": "destroy",
+                    "message": str(exc),
+                })
+            else:
+                completed.add(networkKey)
+
+        bridgeKey = ('bridge', 'vbrNIEP', 'remove')
+        if bridgeKey not in completed:
+            try:
+                status = self.remove_bridge('vbrNIEP')
+                if status not in (0, None):
+                    raise RuntimeError(
+                        "remove returned status " + str(status)
+                    )
+            except Exception as exc:
+                cleanupErrors.append({
+                    "resource_type": "bridge",
+                    "resource_id": "vbrNIEP",
+                    "operation": "remove",
+                    "message": str(exc),
+                })
+            else:
+                completed.add(bridgeKey)
+
         self.CLEANUP_ERRORS = cleanupErrors
         return -10 if cleanupErrors else 0
 
