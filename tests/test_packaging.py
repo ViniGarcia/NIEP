@@ -134,14 +134,27 @@ def _failure_details(result: subprocess.CompletedProcess[str]) -> str:
     )
 
 
-def _current_site_packages(tmp_path: Path | None = None) -> Path:
+def _is_niep_site_artifact(path: Path) -> bool:
+    """Identify only package, metadata, and editable-link artifacts for NIEP."""
+
+    name = path.name.casefold()
+    return (
+        name == "niep"
+        or bool(re.fullmatch(r"niep(?:[-_]\d[^/]*)?\.(?:dist-info|egg-info)", name))
+        or bool(re.fullmatch(r"niep(?:[-_]\d[^/]*)?\.egg-link", name))
+        or bool(re.fullmatch(r"__editable__\.niep(?:[-_]\d[^/]*)?\.pth", name))
+        or bool(re.fullmatch(r"__editable___niep(?:_[^/]*)?_finder\.py", name))
+    )
+
+
+def _current_site_packages(tmp_path: Path) -> Path:
     """Return the active test interpreter's site-packages directory.
 
     The isolated wheel interpreter may borrow installed runtime dependencies,
-    but it must not borrow the editable source-tree package.  When the active
-    interpreter belongs to this checkout, create a clean overlay that exposes
-    importable dependencies while omitting editable finders, the source package
-    and stale NIEP distribution metadata.
+    but it must not borrow a package, metadata record, or editable finder for
+    NIEP from any other checkout.  Always create an overlay: the active test
+    interpreter can be in a different checkout, so comparing paths with ROOT
+    is not sufficient to detect stale external installations.
     """
 
     candidates = [Path(value) for value in site.getsitepackages()]
@@ -150,18 +163,10 @@ def _current_site_packages(tmp_path: Path | None = None) -> Path:
         candidates.append(user_site)
     for candidate in candidates:
         if candidate.is_dir():
-            if tmp_path is None or ROOT not in candidate.resolve().parents:
-                return candidate
-
             overlay = tmp_path / "runtime-site-packages"
-            overlay.mkdir()
+            overlay.mkdir(parents=True)
             for child in candidate.iterdir():
-                if (
-                    child.name.startswith("__editable__")
-                    or child.name == "niep"
-                    or child.name.startswith("niep-")
-                    or child.suffix == ".pth"
-                ):
+                if _is_niep_site_artifact(child):
                     continue
                 destination = overlay / child.name
                 try:
@@ -173,6 +178,57 @@ def _current_site_packages(tmp_path: Path | None = None) -> Path:
                         shutil.copy2(child, destination)
             return overlay
     raise AssertionError(f"could not locate site-packages for {sys.executable}")
+
+
+def test_site_packages_overlay_filters_external_niep_installation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An external checkout cannot leak NIEP code or metadata into the child."""
+
+    external = tmp_path / "external-site-packages"
+    external.mkdir()
+    (external / "runtime_dependency").mkdir()
+    (external / "runtime_dependency-1.0.dist-info").mkdir()
+    (external / "niep").mkdir()
+    (external / "Niep-1.1.0.dist-info").mkdir()
+    (external / "niep-1.1.0.egg-info").mkdir()
+    (external / "__editable__.niep-1.1.0.pth").write_text(
+        "import sys; sys.path.insert(0, '/external/niep')\n", encoding="utf-8"
+    )
+    (external / "__editable___niep_1_1_0_finder.py").write_text(
+        "# stale editable finder\n", encoding="utf-8"
+    )
+    (external / "niep.egg-link").write_text("/external/niep\n", encoding="utf-8")
+    preserved_hooks = (
+        "other-package.egg-link",
+        "__editable__.other-1.0.pth",
+        "__editable___other_1_0_finder.py",
+        "distutils-precedence.pth",
+        "unrelated.pth",
+    )
+    for name in preserved_hooks:
+        (external / name).write_text("# hook for another package\n", encoding="utf-8")
+
+    monkeypatch.setattr(site, "getsitepackages", lambda: [str(external)])
+    monkeypatch.setattr(site, "getusersitepackages", lambda: str(tmp_path / "missing-user"))
+
+    overlay = _current_site_packages(tmp_path / "overlay-root")
+
+    assert (overlay / "runtime_dependency").is_dir()
+    assert (overlay / "runtime_dependency-1.0.dist-info").is_dir()
+    for name in preserved_hooks:
+        assert not _is_niep_site_artifact(Path(name))
+        assert (overlay / name).is_file()
+    for name in (
+        "niep",
+        "Niep-1.1.0.dist-info",
+        "niep-1.1.0.egg-info",
+        "__editable__.niep-1.1.0.pth",
+        "__editable___niep_1_1_0_finder.py",
+        "niep.egg-link",
+    ):
+        assert _is_niep_site_artifact(Path(name))
+        assert not (overlay / name).exists()
 
 
 def test_public_modules_import_from_a_cwd_outside_the_checkout(tmp_path: Path) -> None:
