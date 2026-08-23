@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+import math
 
 
 class ResultCode(str, Enum):
@@ -14,6 +15,8 @@ class ResultCode(str, Enum):
     DEFINED = "defined"
     EXECUTER_ERROR = "executer_error"
     INVALID_COMMAND_ARGS = "invalid_command_args"
+    INVALID_REQUEST = "invalid_request"
+    UNSUPPORTED_VERSION = "unsupported_version"
     INVALID_ACTION_ARGS = "invalid_action_args"
     INVALID_SFC_STATUS = "invalid_sfc_status"
     INVALID_VM_STATUS = "invalid_vm_status"
@@ -67,7 +70,12 @@ class ServiceResult:
 
     def __post_init__(self):
         if isinstance(self.code, str):
-            self.code = ResultCode(self.code)
+            try:
+                self.code = ResultCode(self.code)
+            except ValueError:
+                # Protocol extensions may arrive before this compatibility
+                # enum is updated; preserve their string code safely.
+                pass
 
     @classmethod
     def success(cls, code, message="", data=None, status=None, detail=""):
@@ -99,11 +107,18 @@ class ServiceResult:
 
     def _json_safe(self, value):
         if value is None or isinstance(value, (str, int, float, bool)):
+            if isinstance(value, float) and not math.isfinite(value):
+                return None
             return value
         if isinstance(value, list):
             return [self._json_safe(item) for item in value]
         if isinstance(value, tuple):
             return [self._json_safe(item) for item in value]
         if isinstance(value, dict):
-            return {str(key): self._json_safe(item) for key, item in value.items()}
-        return str(value)
+            if any(not isinstance(key, str) for key in value):
+                return None
+            return {key: self._json_safe(item) for key, item in value.items()}
+        # ServiceResult is also used by legacy in-process callers.  Keep its
+        # dictionary representation JSON-safe without invoking an arbitrary
+        # object's __str__/__repr__ at the public boundary.
+        return None

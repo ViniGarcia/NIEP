@@ -97,6 +97,8 @@ make vm-ctl NIEPCTL_ARGS="--json status"
 ```
 
 See [`tutorial/06-service-api.md`](tutorial/06-service-api.md) for the service workflow.
+The local command envelope and compatibility rules are documented in
+[`docs/command-api.md`](docs/command-api.md).
 
 ### How was it created?
 

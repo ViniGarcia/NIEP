@@ -9,9 +9,8 @@ from typing import Annotated, List, Optional
 
 import typer
 
-
-
-from niep.runtime.terminal_session import bridge_terminal
+from niep.application.commands import CommandRequest
+from niep.application.stream import bridge_terminal
 
 
 DEFAULT_SOCKET = "/run/niep.sock"
@@ -35,7 +34,7 @@ app.add_typer(mininet_app, name="mininet")
 
 
 def send_request(socket_path, command, args):
-    payload = json.dumps({"command": command, "args": args}) + "\n"
+    payload = json.dumps(CommandRequest(command, tuple(args)).to_dict()) + "\n"
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         client.connect(socket_path)

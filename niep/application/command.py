@@ -1,193 +1,241 @@
+"""Command use-cases and the legacy ``CommandDispatcher`` facade."""
+
+from __future__ import annotations
+
+import json
+import math
+from collections.abc import Callable, Mapping
+from typing import Any
+
+from niep.application.commands import CommandProtocolError, CommandRequest, CommandResponse
+from niep.application.handlers import (
+    ContainerCommandHandler,
+    MininetCommandHandler,
+    SFCCommandHandler,
+    TopologyCommandHandler,
+    VMCommandHandler,
+    VNFCommandHandler,
+)
+from niep.application.session import TopologySession
+from niep.application.service import (
+    ContainerService,
+    SFCService,
+    TopologyService,
+    VMService,
+    VNFService,
+)
 from niep.domain.result import ResultCode, ServiceResult
-from niep.application.service import ContainerService, TopologyService, VMService, VNFService, SFCService
+
+
+def _json_safe(value: Any) -> Any:
+    """Normalize old service payloads before they cross an interface."""
+
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise TypeError("non-finite command response data")
+        return value
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError("command response object keys must be strings")
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    raise TypeError("unsupported command response data type")
+
+
+def _public_result(result: ServiceResult) -> ServiceResult:
+    """Apply the public command boundary to an existing service result."""
+
+    code = result.code.value if hasattr(result.code, "value") else str(result.code)
+    data = result.data
+    # TopologyService retains these objects for its lifecycle compatibility
+    # tests, but a command response must not leak parser/executor instances.
+    if code in {
+        ResultCode.TOPOLOGY_UP.value,
+        ResultCode.PARSER_ERROR.value,
+        ResultCode.EXECUTER_ERROR.value,
+        ResultCode.CONTAINER_SHELL.value,
+    }:
+        data = None
+    else:
+        try:
+            data = _json_safe(data)
+        except TypeError:
+            # ``defined`` is also the historical success code for aggregate
+            # list commands. Preserve JSON lists while fail-closing the raw
+            # parser/executor object returned by the lifecycle compatibility
+            # service.
+            if code == ResultCode.DEFINED.value:
+                data = None
+            else:
+                return ServiceResult(
+                    ok=False,
+                    code=ResultCode.COMMAND_ERROR,
+                    message="COMMAND RESPONSE CONTAINS UNSUPPORTED DATA",
+                )
+    return ServiceResult(
+        ok=result.ok,
+        code=result.code,
+        message=result.message,
+        data=data,
+        status=result.status,
+        detail=result.detail,
+    )
+
+
+class CommandRouter:
+    """Registry-based command router."""
+
+    def __init__(self, session: TopologySession) -> None:
+        self.session = session
+        topology = TopologyCommandHandler(session)
+        self._topology = topology
+        self._container = ContainerCommandHandler(session)
+        self._vm = VMCommandHandler(session)
+        self._vnf = VNFCommandHandler(session)
+        self._sfc = SFCCommandHandler(session)
+        self._mininet = MininetCommandHandler(session)
+        self._routes: dict[str, Callable[[tuple[str, ...]], ServiceResult]] = {
+            "define": topology.define,
+            "topoup": topology.up,
+            "topodown": topology.down,
+            "topoclean": topology.clean,
+            "topodestroy": topology.destroy,
+            "status": topology.status,
+            "vm": self._vm.handle,
+            "container": self._container.handle,
+            "vnf": self._vnf.handle,
+            "sfc": self._sfc.handle,
+            "mininet": self._mininet.handle,
+        }
+
+    @property
+    def routes(self) -> tuple[str, ...]:
+        return tuple(sorted(self._routes))
+
+    def register(self, command: str, handler: Callable[[tuple[str, ...]], ServiceResult]) -> None:
+        if not command or not isinstance(command, str):
+            raise ValueError("command name must be a non-empty string")
+        if command in self._routes:
+            raise ValueError("command already registered: " + command)
+        self._routes[command] = handler
+
+    def dispatch(self, request: CommandRequest) -> ServiceResult:
+        try:
+            handler = self._routes[request.command]
+        except KeyError:
+            return ServiceResult(ok=False, code=ResultCode.UNKNOWN_COMMAND, message="UNKNOWN COMMAND")
+        try:
+            return handler(request.args)
+        except Exception:
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.COMMAND_ERROR,
+                message="COMMAND EXECUTION FAILED",
+            )
+
+    def open_container_stream(self, args: tuple[str, ...]) -> ServiceResult:
+        """Open a shell for a socket/CLI stream adapter, out of band."""
+
+        return self._container.open_stream(args)
 
 
 class CommandDispatcher:
-    def __init__(self, topology=None):
-        self.topology = topology or TopologyService()
+    """Compatibility facade for legacy callers and the v1 command port."""
+
+    def __init__(self, topology: TopologyService | TopologySession | None = None) -> None:
+        self.session = topology if isinstance(topology, TopologySession) else TopologySession(topology)
+        # Compatibility attribute for existing lifecycle tests.  New
+        # interfaces use ``session`` and never inspect its executor.
+        self.topology = self.session._topology
+        self.router = CommandRouter(self.session)
         self.vm = VMService(self.topology)
         self.container = ContainerService(self.topology)
         self.vnf = VNFService(self.topology)
         self.sfc = SFCService(self.topology)
 
-    def dispatch(self, command, args=None):
-        args = args or []
+    def request(self, command: str, args: list[str] | tuple[str, ...] | None = None) -> CommandRequest:
+        return CommandRequest(command=command, args=tuple(args or ()))
+
+    def dispatch_request(self, request: CommandRequest | Mapping[str, Any]) -> CommandResponse:
         try:
-            return self._dispatch(command, args)
-        except Exception as exc:
-            return ServiceResult(
-                ok=False,
-                code=ResultCode.COMMAND_ERROR,
-                message=str(exc),
-            )
+            if not isinstance(request, CommandRequest):
+                request = CommandRequest.from_dict(request)
+            result = _public_result(self.router.dispatch(request))
+            try:
+                return CommandResponse.from_result(request, result)
+            except CommandProtocolError as exc:
+                return CommandResponse.failure(request.request_id, exc.code, str(exc))
+        except CommandProtocolError as exc:
+            request_id = request.get("request_id", "") if isinstance(request, Mapping) else ""
+            if not isinstance(request_id, str) or not request_id:
+                request_id = "invalid"
+            return CommandResponse.failure(request_id, exc.code, str(exc))
 
-    def _dispatch(self, command, args):
-        if command == 'define':
-            return self._expect_args(args, 1, lambda: self._hide_internal_data(self.topology.define(args[0])))
-        if command == 'topoup':
-            return self._expect_args(args, 0, lambda: self._hide_internal_data(self.topology.up()))
-        if command == 'topodown':
-            return self._expect_args(args, 0, self.topology.down)
-        if command == 'topoclean':
-            return self._expect_args(args, 0, self.topology.clean)
-        if command == 'topodestroy':
-            return self._expect_args(args, 0, self.topology.destroy)
-        if command == 'status':
-            return self._expect_args(args, 0, self.status)
-        if command == 'vm':
-            return self.vm_command(args)
-        if command == 'container':
-            return self.container_command(args)
-        if command == 'vnf':
-            return self.vnf_command(args)
-        if command == 'sfc':
-            return self.sfc_command(args)
-        if command == 'mininet':
-            return self.mininet_command(args)
-
-        return ServiceResult(
-            ok=False,
-            code=ResultCode.UNKNOWN_COMMAND,
-            message="UNKNOWN COMMAND",
-        )
-
-    def status(self):
-        data = {
-            'defined': self.topology.executor is not None,
-            'up': self.topology.is_up(),
-            'vms': self.topology.vm_ids(),
-            'containers': self.topology.container_ids(),
-            'vnfs': self.topology.vnf_ids(),
-            'sfcs': self.topology.sfc_ids(),
-        }
-        return ServiceResult(ok=True, code=ResultCode.STATUS, data=data)
-
-    def vm_command(self, args):
-        if not args:
-            return self._invalid_args("VM COMMAND EXPECTED")
-        if args[0] == 'list':
-            return self._expect_args(args, 1, lambda: ServiceResult(ok=True, code=ResultCode.DEFINED, data=self.topology.vm_ids()))
-        if args[0] == 'management':
-            return self._expect_args(args, 2, lambda: self.vm.management(args[1]))
-        if args[0] == 'ssh':
-            return self._expect_args(args, 4, lambda: self.vm.ssh(args[1], args[2], args[3]))
-        return self._unknown_subcommand('VM')
-
-    def container_command(self, args):
-        if not args:
-            return self._invalid_args("CONTAINER COMMAND EXPECTED")
-        if args[0] == 'list':
-            return self._expect_args(args, 1, lambda: ServiceResult(ok=True, code=ResultCode.DEFINED, data=self.topology.container_ids()))
-        if args[0] == 'exec':
-            if len(args) < 3:
-                return self._invalid_args("CONTAINER EXEC EXPECTS CONTAINER ID AND COMMAND")
-            return self.container.exec(args[1], args[2:])
-        if args[0] == 'shell':
-            return self._invalid_args("CONTAINER SHELL REQUIRES AN INTERACTIVE CLIENT")
-        return self._unknown_subcommand('CONTAINER')
-
-    def vnf_command(self, args):
-        if not args:
-            return self._invalid_args("VNF COMMAND EXPECTED")
-        if args[0] == 'list':
-            return self._expect_args(args, 1, lambda: ServiceResult(ok=True, code=ResultCode.DEFINED, data=self.topology.vnf_ids()))
-        if args[0] == 'management':
-            return self._expect_args(args, 2, lambda: self.vnf.management(args[1]))
-        if args[0] == 'up':
-            return self._expect_args(args, 2, lambda: self.vnf.up(args[1]))
-        if args[0] == 'down':
-            return self._expect_args(args, 2, lambda: self.vnf.down(args[1]))
-        if args[0] == 'action':
-            if len(args) < 3:
-                return self._invalid_args("VNF ACTION EXPECTS VNF ID AND ACTION")
-            return self.vnf.action(args[1], args[2], args[3:])
-        if args[0] == 'script':
-            if len(args) not in (3, 4):
-                return self._invalid_args("VNF SCRIPT EXPECTS VNF ID, SCRIPT AND OPTIONAL ERROR SCRIPT")
-            error_script = args[3] if len(args) == 4 else None
-            return self.vnf.script(args[1], args[2], error_script)
-        return self._unknown_subcommand('VNF')
-
-    def sfc_command(self, args):
-        if not args:
-            return self._invalid_args("SFC COMMAND EXPECTED")
-        if args[0] == 'list':
-            return self._expect_args(args, 1, lambda: ServiceResult(ok=True, code=ResultCode.DEFINED, data=self.topology.sfc_ids()))
-        if args[0] == 'management':
-            return self._expect_args(args, 2, lambda: self.sfc.management(args[1]))
-        if args[0] == 'up':
-            return self._expect_args(args, 2, lambda: self.sfc.up(args[1]))
-        if args[0] == 'down':
-            return self._expect_args(args, 2, lambda: self.sfc.down(args[1]))
-        return self._unknown_subcommand('SFC')
-
-    def mininet_command(self, args):
-        if not self.topology.is_up():
-            return ServiceResult(
-                ok=False,
-                code=ResultCode.TOPOLOGY_NOT_UP,
-                message="TOPOLOGY IS NOT UP",
-            )
-        if not args:
-            return self._invalid_args("MININET COMMAND EXPECTED")
-        if args[0] == 'pingall':
-            return self._expect_args(args, 1, self.mininet_pingall)
-        if args[0] == 'cmd':
-            if len(args) < 3:
-                return self._invalid_args("MININET CMD EXPECTS NODE AND COMMAND")
-            return self.mininet_node_command(args[1], args[2:])
-        return self._unknown_subcommand('MININET')
-
-    def mininet_pingall(self):
-        dropped = self.topology.executor.NET.pingAll()
-        return ServiceResult(
-            ok=True,
-            code=ResultCode.MININET_RESULT,
-            data={'dropped': dropped},
-        )
-
-    def mininet_node_command(self, node_id, command):
+    def dispatch(self, command: str, args: list[str] | tuple[str, ...] | None = None) -> ServiceResult:
         try:
-            node = self.topology.executor.NET.get(node_id)
-        except KeyError:
+            request = self.request(command, args)
+        except CommandProtocolError as exc:
+            return ServiceResult(ok=False, code=ResultCode.COMMAND_ERROR, message=str(exc))
+        return self.dispatch_request(request).to_service_result()
+
+    def status(self) -> ServiceResult:
+        return self.dispatch("status")
+
+    def vm_command(self, args: list[str] | tuple[str, ...]) -> ServiceResult:
+        return self.dispatch("vm", args)
+
+    def container_command(self, args: list[str] | tuple[str, ...]) -> ServiceResult:
+        return self.dispatch("container", args)
+
+    def vnf_command(self, args: list[str] | tuple[str, ...]) -> ServiceResult:
+        return self.dispatch("vnf", args)
+
+    def vnf_actions(self, vnf_id: str) -> ServiceResult:
+        return _public_result(self.router._vnf.actions((vnf_id,)))
+
+    def sfc_command(self, args: list[str] | tuple[str, ...]) -> ServiceResult:
+        return self.dispatch("sfc", args)
+
+    def mininet_command(self, args: list[str] | tuple[str, ...]) -> ServiceResult:
+        return self.dispatch("mininet", args)
+
+    def mininet_pingall(self) -> ServiceResult:
+        return self.dispatch("mininet", ("pingall",))
+
+    def mininet_node_command(self, node_id: str, command: list[str]) -> ServiceResult:
+        return self.dispatch("mininet", ("cmd", node_id, *command))
+
+    def open_stream(self, command: str, args: list[str] | tuple[str, ...]) -> ServiceResult:
+        if command != "container":
             return ServiceResult(
                 ok=False,
-                code=ResultCode.NODE_NOT_FOUND,
-                message="NODE NOT FOUND",
+                code=ResultCode.INVALID_COMMAND_ARGS,
+                message="INTERACTIVE STREAM IS NOT SUPPORTED FOR " + command.upper(),
             )
-        output = node.cmd(' '.join(command))
-        return ServiceResult(
-            ok=True,
-            code=ResultCode.NODE_COMMAND,
-            data={'node': node_id, 'output': output},
-        )
+        return self.router.open_container_stream(tuple(args))
 
-    def _expect_args(self, args, amount, callback):
-        if len(args) != amount:
-            return self._invalid_args("WRONG ARGUMENTS AMOUNT - " + str(amount) + " EXPECTED")
-        return callback()
+    def open_mininet_console(self) -> Any:
+        # Keep the optional Mininet import in the application boundary.  The
+        # legacy interface only requests the use case and receives no NET
+        # object.
+        try:
+            from mininet.cli import CLI
+        except ImportError as exc:  # pragma: no cover - integration-only path
+            raise RuntimeError("Mininet is unavailable; install the integration dependencies") from exc
+        return self.session.with_mininet_console(CLI)
 
-    def _invalid_args(self, message):
-        return ServiceResult(
-            ok=False,
-            code=ResultCode.INVALID_COMMAND_ARGS,
-            message=message,
-        )
+    @staticmethod
+    def result_json(result: ServiceResult) -> str:
+        return json.dumps(_public_result(result).to_dict(), sort_keys=True)
 
-    def _unknown_subcommand(self, subject):
-        return ServiceResult(
-            ok=False,
-            code=ResultCode.UNKNOWN_COMMAND,
-            message="UNKNOWN " + subject + " COMMAND",
-        )
 
-    def _hide_internal_data(self, result):
-        if not result.ok:
-            return result
-        return ServiceResult(
-            ok=True,
-            code=result.code,
-            message=result.message,
-            status=result.status,
-            detail=result.detail,
-        )
+__all__ = [
+    "CommandDispatcher",
+    "CommandRouter",
+    "CommandProtocolError",
+    "CommandRequest",
+    "CommandResponse",
+]

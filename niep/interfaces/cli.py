@@ -1,21 +1,14 @@
 from os import listdir
-from os.path import abspath, commonprefix
-try:  # Mininet is optional until a topology is actually started.
-    from mininet.cli import CLI
-except ImportError:  # pragma: no cover - host-only import fallback
-    class CLI:
-        def __init__(self, *_args, **_kwargs):
-            raise RuntimeError("Mininet is unavailable; install the integration dependencies")
+from os.path import commonprefix
 
 import cmd
 import readline
-import rlcompleter
 import shlex
 
 from niep.domain.result import ResultCode
-from niep.application.service import ContainerService, TopologyService, VMService, VNFService, SFCService
+from niep.application.command import CommandDispatcher
+from niep.application.stream import bridge_terminal
 from niep.paths import cli_memory_path
-from niep.runtime.terminal_session import bridge_terminal
 
 
 def PATHCOMPLETER(line, text):
@@ -40,7 +33,7 @@ def PATHCOMPLETER(line, text):
                 return [(text.replace(" ", "\\ ") + children_dir[0].replace(" ", "\\ ")).replace(prefix, "")]
             else:
                 return [(text.replace(" ", "\\ ") + "/" + children_dir[0].replace(" ", "\\ ")).replace(prefix, "")]
-    except:
+    except OSError:
         pass
 
     last_dir = text.rfind("/")
@@ -66,20 +59,34 @@ class NIEPCLI(cmd.Cmd):
     def __init__(self):
         super().__init__()
         self.prompt = 'niep> '
-        self.NIEPEXE = None
-        self.VMEXEC = None
-        self.CONTAINEREXEC = None
-        self.VNFEXEC = None
-        self.SFCEXEC = None
+        self.dispatcher = CommandDispatcher()
+        self.VM_ID = None
+        self.CONTAINER_ID = None
+        self.VNF_ID = None
+        self.SFC_ID = None
         self.CLICOMP = None
-        self.TOPOLOGY = TopologyService()
-        self.VMSERVICE = VMService(self.TOPOLOGY)
-        self.CONTAINERSERVICE = ContainerService(self.TOPOLOGY)
-        self.VNFSERVICE = VNFService(self.TOPOLOGY)
-        self.SFCSERVICE = SFCService(self.TOPOLOGY)
 
-    def sync_executor(self):
-        self.NIEPEXE = self.TOPOLOGY.executor
+    def _resource_ids(self, aggregate):
+        """Return IDs through the command port, preserving legacy state text."""
+        status = self.dispatcher.dispatch('status')
+        if not status.ok or not status.data.get('defined'):
+            print('NO TOPOLOGY DEFINED')
+            return None
+        if not status.data.get('up'):
+            print('TOPOLOGY IS NOT UP')
+            return None
+        result = self.dispatcher.dispatch(aggregate, ['list'])
+        if not result.ok:
+            self.print_result_error(result)
+            return None
+        return list(result.data or [])
+
+    def _completion_ids(self, aggregate):
+        status = self.dispatcher.dispatch('status')
+        if not status.ok or not status.data.get('defined') or not status.data.get('up'):
+            return None
+        result = self.dispatcher.dispatch(aggregate, ['list'])
+        return list(result.data or []) if result.ok else []
 
     def print_result_error(self, result, include_status=False):
         message = result.cli_message(include_status=include_status)
@@ -211,8 +218,7 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
                 return
 
-            result = self.TOPOLOGY.define(args)
-            self.sync_executor()
+            result = self.dispatcher.dispatch('define', [args])
             if not result.ok:
                 self.print_define_error(result)
                 return
@@ -225,121 +231,87 @@ class NIEPCLI(cmd.Cmd):
 
     def do_topoup(self, args):
         if self.prompt == 'niep> ':
-            if not self.NIEPEXE == None:
-                splited_args = args.split(' ')
-                if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
-                    print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
-                    return
-
-                result = self.TOPOLOGY.up()
-                self.sync_executor()
-                if result.code == ResultCode.ALREADY_EXECUTED:
-                    print(result.message + ' - CODE ' + str(result.status))
-                    return
-                if not result.ok:
-                    self.print_result_error(result, include_status=True)
-                    return
-            else:
-                print('NO TOPOLOGY DEFINED')
+            if args.strip():
+                print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
+                return
+            result = self.dispatcher.dispatch('topoup')
+            if result.code == ResultCode.ALREADY_EXECUTED:
+                print(result.message + ' - CODE ' + str(result.status))
+                return
+            if not result.ok:
+                self.print_result_error(result, include_status=True)
         else:
             print('NIEP PROMPT COMMAND')
 
     def do_topodown(self, args):
         if self.prompt == 'niep> ':
-            if not self.NIEPEXE == None:
-                splited_args = args.split(' ')
-                if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
-                    print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
-                    return
-
-                result = self.TOPOLOGY.down()
-                self.sync_executor()
-                if not result.ok:
-                    self.print_result_error(result, include_status=True)
-                    return
-            else:
-                print('NO TOPOLOGY DEFINED')
+            if args.strip():
+                print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
+                return
+            result = self.dispatcher.dispatch('topodown')
+            if not result.ok:
+                self.print_result_error(result, include_status=True)
         else:
             print('NIEP PROMPT COMMAND')
 
     def do_topoclean(self, args):
         if self.prompt == 'niep> ':
-            splited_args = args.split(' ')
-            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+            if args.strip():
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
-
-            if not self.NIEPEXE == None:
-                self.TOPOLOGY.clean()
-                self.VMEXEC = None
-                self.CONTAINEREXEC = None
-                self.VNFEXEC = None
-                self.SFCEXEC = None
-                self.sync_executor()
-            else:
-                print('NO TOPOLOGY DEFINED')
+            result = self.dispatcher.dispatch('topoclean')
+            if not result.ok:
+                self.print_result_error(result)
+            self.VM_ID = self.CONTAINER_ID = self.VNF_ID = self.SFC_ID = None
         else:
             print('NIEP PROMPT COMMAND' )
 
     def do_topodestroy(self, args):
         if self.prompt == 'niep> ':
-            splited_args = args.split(' ')
-            if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
+            if args.strip():
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
-
-            if not self.NIEPEXE == None:
-                self.TOPOLOGY.destroy()
-                self.VMEXEC = None
-                self.CONTAINEREXEC = None
-                self.VNFEXEC = None
-                self.SFCEXEC = None
-                self.sync_executor()
-            else:
-                 print('NO TOPOLOGY DEFINED')
+            result = self.dispatcher.dispatch('topodestroy')
+            if not result.ok:
+                self.print_result_error(result)
+            self.VM_ID = self.CONTAINER_ID = self.VNF_ID = self.SFC_ID = None
         else:
             print('NIEP PROMPT COMMAND'  )
 
     def do_vm(self, args):
         if self.prompt == 'niep> ':
-            if not self.NIEPEXE == None:
-                if not self.NIEPEXE.STATUS == 0:
-                    print('TOPOLOGY IS NOT UP')
-                    return
-
-                splited_args = args.split(' ')
-                if not len(splited_args) == 1:
-                    print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
-                    return
-
-                if args == 'list':
-                    print('\n############## VMS LIST ###############')
-                    for VM in self.TOPOLOGY.vm_ids():
-                        print(VM)
-                    print('#######################################\n')
-                    return
-
-                if args in self.TOPOLOGY.vm_ids():
-                    self.changecontext(self.prompt, "vm")
-                    self.VMEXEC = self.TOPOLOGY.get_vm(args)
-                    self.prompt = 'vm(' + args + ')> '
-                    return
-                else:
-                    print('VM ' + args + ' NOT FOUND')
-            else:
-                print('NO TOPOLOGY DEFINED')
+            arguments = args.split()
+            if len(arguments) != 1:
+                print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
+                return
+            vm_ids = self._resource_ids('vm')
+            if vm_ids is None:
+                return
+            resource_id = arguments[0]
+            if resource_id == 'list':
+                print('\n############## VMS LIST ###############')
+                for vm_id in vm_ids:
+                    print(vm_id)
+                print('#######################################\n')
+                return
+            if resource_id in vm_ids:
+                self.changecontext(self.prompt, "vm")
+                self.VM_ID = resource_id
+                self.prompt = 'vm(' + resource_id + ')> '
+                return
+            print('VM ' + resource_id + ' NOT FOUND')
         else:
             print('NIEP PROMPT COMMAND')
 
     def complete_vm(self, text, line, begidx, endidx):
 
-        if self.NIEPEXE == None or self.NIEPEXE.STATUS != 0:
+        ids = self._completion_ids('vm')
+        if ids is None:
             return []
-
-        if len(self.TOPOLOGY.vm_ids()) == 0:
+        if len(ids) == 0:
             return ['list']
 
-        args_list = ['list'] + self.TOPOLOGY.vm_ids()
+        args_list = ['list'] + ids
         if len(text) == 0:
             return args_list
         args_sublist = [a for a in args_list if a.startswith(text)]
@@ -360,78 +332,70 @@ class NIEPCLI(cmd.Cmd):
         if self.prompt != 'niep> ':
             print('NIEP PROMPT COMMAND')
             return
-        if self.NIEPEXE is None:
-            print('NO TOPOLOGY DEFINED')
-            return
-        if self.NIEPEXE.STATUS != 0:
-            print('TOPOLOGY IS NOT UP')
-            return
-
-        split_args = args.split()
-        if len(split_args) != 1:
+        arguments = args.split()
+        if len(arguments) != 1:
             print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
             return
-        if args == 'list':
+        container_ids = self._resource_ids('container')
+        if container_ids is None:
+            return
+        resource_id = arguments[0]
+        if resource_id == 'list':
             print('\n########### CONTAINERS LIST ###########')
-            for container_id in self.TOPOLOGY.container_ids():
+            for container_id in container_ids:
                 print(container_id)
             print('#######################################\n')
             return
-        if args in self.TOPOLOGY.container_ids():
+        if resource_id in container_ids:
             self.changecontext(self.prompt, "container")
-            self.CONTAINEREXEC = self.TOPOLOGY.get_container(args)
-            self.prompt = 'container(' + args + ')> '
+            self.CONTAINER_ID = resource_id
+            self.prompt = 'container(' + resource_id + ')> '
             return
-        print('CONTAINER ' + args + ' NOT FOUND')
+        print('CONTAINER ' + resource_id + ' NOT FOUND')
 
     def complete_container(self, text, line, begidx, endidx):
-        if self.NIEPEXE is None or self.NIEPEXE.STATUS != 0:
+        ids = self._completion_ids('container')
+        if ids is None:
             return []
-        args_list = ['list'] + self.TOPOLOGY.container_ids()
+        args_list = ['list'] + ids
         if not text:
             return args_list
         return [item for item in args_list if item.startswith(text)]
 
     def do_vnf(self, args):
         if self.prompt == 'niep> ':
-            if not self.NIEPEXE == None:
-                if not self.NIEPEXE.STATUS == 0:
-                    print('TOPOLOGY IS NOT UP')
-                    return
-
-                splited_args = args.split(' ')
-                if not len(splited_args) == 1:
-                    print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
-                    return
-
-                if args == 'list':
-                    print('\n############## VNFS LIST ##############')
-                    for VNF in self.TOPOLOGY.vnf_ids():
-                        print(VNF)
-                    print('#######################################\n')
-                    return
-
-                if args in self.TOPOLOGY.vnf_ids():
-                    self.changecontext(self.prompt, "vnf")
-                    self.VNFEXEC = self.TOPOLOGY.get_vnf(args)
-                    self.prompt = 'vnf(' + args + ')> '
-                    return
-                else:
-                     print('VNF ' + args + ' NOT FOUND')
-            else:
-                print('NO TOPOLOGY DEFINED')
+            arguments = args.split()
+            if len(arguments) != 1:
+                print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
+                return
+            vnf_ids = self._resource_ids('vnf')
+            if vnf_ids is None:
+                return
+            resource_id = arguments[0]
+            if resource_id == 'list':
+                print('\n############## VNFS LIST ##############')
+                for vnf_id in vnf_ids:
+                    print(vnf_id)
+                print('#######################################\n')
+                return
+            if resource_id in vnf_ids:
+                self.changecontext(self.prompt, "vnf")
+                self.VNF_ID = resource_id
+                self.prompt = 'vnf(' + resource_id + ')> '
+                return
+            print('VNF ' + resource_id + ' NOT FOUND')
         else:
             print('NIEP PROMPT COMMAND')
 
     def complete_vnf(self, text, line, begidx, endidx):
 
-        if self.NIEPEXE == None or self.NIEPEXE.STATUS != 0:
+        ids = self._completion_ids('vnf')
+        if ids is None:
             return []
-
-        if len(self.TOPOLOGY.vnf_ids()) == 0:
+        if len(ids) == 0:
             return ['list']
 
-        args_list = ['list'] + self.TOPOLOGY.vnf_ids()
+        args_list = ['list'] + ids
         if len(text) == 0:
             return args_list
         args_sublist = [a for a in args_list if a.startswith(text)]
@@ -450,44 +414,38 @@ class NIEPCLI(cmd.Cmd):
 
     def do_sfc(self, args):
         if self.prompt == 'niep> ':
-            if not self.NIEPEXE == None:
-                if not self.NIEPEXE.STATUS == 0:
-                    print('TOPOLOGY IS NOT UP')
-                    return
-
-                splited_args = args.split(' ')
-                if not len(splited_args) == 1:
-                    print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
-                    return
-
-                if args == 'list':
-                    print('\n############## SFCS LIST ##############')
-                    for SFC in self.TOPOLOGY.sfc_ids():
-                        print(SFC)
-                    print('#######################################\n')
-                    return
-
-                sfc = self.TOPOLOGY.get_sfc(args)
-                if sfc is not None:
-                    self.changecontext(self.prompt, "sfc")
-                    self.SFCEXEC = sfc
-                    self.prompt = 'sfc(' + args + ')> '
-                    return
-                print('SFC ' + args + ' NOT FOUND')
-            else:
-                print('NO TOPOLOGY DEFINED')
+            arguments = args.split()
+            if len(arguments) != 1:
+                print('WRONG ARGUMENTS AMOUNT - 1 ARGUMENT EXPECTED')
+                return
+            sfc_ids = self._resource_ids('sfc')
+            if sfc_ids is None:
+                return
+            resource_id = arguments[0]
+            if resource_id == 'list':
+                print('\n############## SFCS LIST ##############')
+                for sfc_id in sfc_ids:
+                    print(sfc_id)
+                print('#######################################\n')
+                return
+            if resource_id in sfc_ids:
+                self.changecontext(self.prompt, "sfc")
+                self.SFC_ID = resource_id
+                self.prompt = 'sfc(' + resource_id + ')> '
+                return
+            print('SFC ' + resource_id + ' NOT FOUND')
         else:
             print('NIEP PROMPT COMMAND')
 
     def complete_sfc(self, text, line, begidx, endidx):
 
-        if self.NIEPEXE == None or self.NIEPEXE.STATUS != 0:
+        ids = self._completion_ids('sfc')
+        if ids is None:
             return []
-
-        if len(self.TOPOLOGY.sfc_ids()) == 0:
+        if len(ids) == 0:
             return ['list']
 
-        args_list = ['list'] + self.TOPOLOGY.sfc_ids()
+        args_list = ['list'] + ids
         if len(text) == 0:
             return args_list
         args_sublist = [a for a in args_list if a.startswith(text)]
@@ -506,19 +464,20 @@ class NIEPCLI(cmd.Cmd):
 
     def do_mininet(self, args):
         if self.prompt == 'niep> ':
-            if not self.NIEPEXE == None:
-                if not self.NIEPEXE.STATUS == 0:
-                    print('TOPOLOGY IS NOT UP')
-                    return
-
-                splited_args = args.split(' ')
-                if len(splited_args) == 1 and not len(splited_args[0]) == 0 or len(splited_args) > 1:
-                    print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
-                    return
-
-                CLI(self.NIEPEXE.NET)
-            else:
+            if args.strip():
+                print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
+                return
+            status = self.dispatcher.dispatch('status')
+            if not status.ok or not status.data.get('defined'):
                 print('NO TOPOLOGY DEFINED')
+                return
+            if not status.data.get('up'):
+                print('TOPOLOGY IS NOT UP')
+                return
+            try:
+                self.dispatcher.open_mininet_console()
+            except RuntimeError as exc:
+                print(str(exc))
         else:
             print('NIEP PROMPT COMMAND')
 
@@ -534,7 +493,7 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
 
-            result = self.VMSERVICE.management(self.VMEXEC.ID)
+            result = self.dispatcher.dispatch('vm', ['management', self.VM_ID])
             if not result.ok:
                 self.print_result_error(result)
                 return
@@ -548,7 +507,7 @@ class NIEPCLI(cmd.Cmd):
             if len(splited_args) != 2:
                 print('WRONG ARGUMENTS AMOUNT - 2 ARGUMENTS EXPECTED')
                 return
-            self.VMSERVICE.ssh(self.VMEXEC.ID, splited_args[0], splited_args[1])
+            self.dispatcher.dispatch('vm', ['ssh', self.VM_ID, splited_args[0], splited_args[1]])
         else:
             print('VM PROMPT COMMAND')
 
@@ -570,7 +529,7 @@ class NIEPCLI(cmd.Cmd):
         except ValueError as exc:
             print('INVALID COMMAND: ' + str(exc))
             return
-        result = self.CONTAINERSERVICE.exec(self.CONTAINEREXEC.ID, command)
+        result = self.dispatcher.dispatch('container', ['exec', self.CONTAINER_ID, *command])
         if result.data is not None:
             output = result.data.get('output', '')
             if output:
@@ -588,7 +547,7 @@ class NIEPCLI(cmd.Cmd):
             print('INVALID SHELL COMMAND: ' + str(exc))
             return
 
-        result = self.CONTAINERSERVICE.open_shell(self.CONTAINEREXEC.ID, command)
+        result = self.dispatcher.open_stream('container', ['shell', self.CONTAINER_ID, *command])
         if not result.ok:
             self.print_result_error(result)
             return
@@ -614,7 +573,7 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
 
-            result = self.VNFSERVICE.management(self.VNFEXEC.ID)
+            result = self.dispatcher.dispatch('vnf', ['management', self.VNF_ID])
             if not result.ok:
                 self.print_result_error(result)
                 return
@@ -629,7 +588,7 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
 
-            result = self.VNFSERVICE.up(self.VNFEXEC.ID)
+            result = self.dispatcher.dispatch('vnf', ['up', self.VNF_ID])
             if not result.ok:
                 if result.code == ResultCode.INVALID_VNF_STATUS and isinstance(result.data, dict):
                     print('INVALID VNF STATUS (VNF_STATUS=' + str(result.data.get('VNF_STATUS')) + ', VM_STATUS=' + str(result.data.get('VM_STATUS')) + ')')
@@ -646,7 +605,7 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
 
-            result = self.VNFSERVICE.down(self.VNFEXEC.ID)
+            result = self.dispatcher.dispatch('vnf', ['down', self.VNF_ID])
             if not result.ok:
                 self.print_result_error(result)
                 return
@@ -661,7 +620,7 @@ class NIEPCLI(cmd.Cmd):
                 return
 
             if len(splited_args) > 0:
-                result = self.VNFSERVICE.action(self.VNFEXEC.ID, splited_args[0], splited_args[1:])
+                result = self.dispatcher.dispatch('vnf', ['action', self.VNF_ID, splited_args[0], *splited_args[1:]])
                 self.print_vnf_action_result(result, splited_args[0])
 
         else:
@@ -669,8 +628,8 @@ class NIEPCLI(cmd.Cmd):
 
     def complete_vnfaction(self, text, line, begidx, endidx):
 
-        args_list = list(self.VNFEXEC.controlVNF("list", []).keys())
-        args_list.sort()
+        status = self.dispatcher.vnf_actions(self.VNF_ID)
+        args_list = sorted((status.data or {}).keys()) if status.ok and isinstance(status.data, dict) else []
 
         line_arg = line.split(' ')
         if len(line_arg) == 2:
@@ -701,9 +660,9 @@ class NIEPCLI(cmd.Cmd):
                 return
 
             if len(splited_args) == 1:
-                result = self.VNFSERVICE.script(self.VNFEXEC.ID, splited_args[0], None)
+                result = self.dispatcher.dispatch('vnf', ['script', self.VNF_ID, splited_args[0]])
             else:
-                result = self.VNFSERVICE.script(self.VNFEXEC.ID, splited_args[0], splited_args[1])
+                result = self.dispatcher.dispatch('vnf', ['script', self.VNF_ID, splited_args[0], splited_args[1]])
 
             self.print_script_result(result)
 
@@ -730,7 +689,7 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
 
-            result = self.SFCSERVICE.management(self.SFCEXEC.ID)
+            result = self.dispatcher.dispatch('sfc', ['management', self.SFC_ID])
             if not result.ok:
                 self.print_result_error(result)
                 return
@@ -746,7 +705,7 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
 
-            result = self.SFCSERVICE.up(self.SFCEXEC.ID)
+            result = self.dispatcher.dispatch('sfc', ['up', self.SFC_ID])
             if not result.ok:
                 self.print_result_error(result)
                 return
@@ -760,7 +719,7 @@ class NIEPCLI(cmd.Cmd):
                 print('WRONG ARGUMENTS AMOUNT - 0 ARGUMENTS EXPECTED')
                 return
 
-            result = self.SFCSERVICE.down(self.SFCEXEC.ID)
+            result = self.dispatcher.dispatch('sfc', ['down', self.SFC_ID])
             if not result.ok:
                 self.print_result_error(result)
                 return
@@ -778,10 +737,9 @@ class NIEPCLI(cmd.Cmd):
             self.prompt = 'niep> '
             return
 
-        if not self.NIEPEXE == None:
-            if self.NIEPEXE.STATUS == 0:
-                self.TOPOLOGY.down()
-                self.sync_executor()
+        status = self.dispatcher.dispatch('status')
+        if status.ok and status.data.get('up'):
+            self.dispatcher.dispatch('topodown')
 
         return True
 
@@ -798,7 +756,7 @@ class NIEPCLI(cmd.Cmd):
             readline.set_history_length(100)
             readline.read_history_file(str(cli_memory_path("NIEPMEM")))
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     def postloop(self):
@@ -814,7 +772,7 @@ class NIEPCLI(cmd.Cmd):
             elif self.prompt.startswith("sfc"):
                 readline.write_history_file(str(cli_memory_path("SFCMEM")))
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     def changecontext(self, current, succeeding):
@@ -845,7 +803,7 @@ class NIEPCLI(cmd.Cmd):
                 readline.read_history_file(str(cli_memory_path("SFCMEM")))
 
             return True
-        except Exception as e:
+        except Exception:
             return False
 
 ##################################################################################################################################

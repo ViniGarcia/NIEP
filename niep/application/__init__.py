@@ -7,6 +7,10 @@ host without Mininet/libvirt/Docker.
 
 __all__ = [
     "CommandDispatcher",
+    "CommandProtocolError",
+    "CommandRequest",
+    "CommandResponse",
+    "CommandRouter",
     "ContainerService",
     "SFCService",
     "TopologyService",
@@ -28,6 +32,10 @@ __all__ = [
     "OperationStepState",
     "TopologyState",
     "TopologyStateMachine",
+    "TopologySession",
+    "ExecutorSnapshot",
+    "ExecutorTopologyPort",
+    "LegacyExecutorAdapter",
 ]
 
 
@@ -74,6 +82,27 @@ def __getattr__(name):
         from .command import CommandDispatcher
 
         return CommandDispatcher
+    if name in {"CommandProtocolError", "CommandRequest", "CommandResponse", "CommandRouter"}:
+        from .command import CommandProtocolError, CommandRequest, CommandResponse, CommandRouter
+
+        return {
+            "CommandProtocolError": CommandProtocolError,
+            "CommandRequest": CommandRequest,
+            "CommandResponse": CommandResponse,
+            "CommandRouter": CommandRouter,
+        }[name]
+    if name == "TopologySession":
+        from .session import TopologySession
+
+        return TopologySession
+    if name in {"ExecutorSnapshot", "ExecutorTopologyPort", "LegacyExecutorAdapter"}:
+        from .executor_port import ExecutorSnapshot, ExecutorTopologyPort, LegacyExecutorAdapter
+
+        return {
+            "ExecutorSnapshot": ExecutorSnapshot,
+            "ExecutorTopologyPort": ExecutorTopologyPort,
+            "LegacyExecutorAdapter": LegacyExecutorAdapter,
+        }[name]
     if name in {"ContainerService", "SFCService", "TopologyService", "VMService", "VNFService"}:
         from . import service
 
