@@ -15,16 +15,17 @@ make vm-daemon
 ```
 
 This starts the daemon inside the Vagrant VM as root, using `/run/niep.sock` by
-default. The socket is created with mode `0600` and then made group-accessible
-as `root:niep` with its final mode `0660`. The installer adds its target user to
-the `niep` group, so authorized users can run `niepctl` without `sudo`; users
-outside the group cannot access the socket. Log out and back in after
-installation before using this access for the first time.
+default. The socket is created as `root:niep` with mode `0660`. Linux peer
+credentials are checked in addition to filesystem permissions: root and
+members of the explicit `niep` group may invoke daemon operations, while other
+local users are rejected before dispatch. Treat `niep` as a root-equivalent
+group and add only intended operators. Log out and back in after installation
+before using this access for the first time.
 
 To use a different socket:
 
 ```bash
-make vm-daemon NIEP_SOCKET=/tmp/niep-dev.sock
+make vm-daemon NIEP_SOCKET=/run/niep-dev.sock
 ```
 
 ## Send Commands
@@ -87,7 +88,7 @@ For a custom socket, export it so both commands and completion use the same
 daemon:
 
 ```bash
-export NIEP_SOCKET=/tmp/niep-dev.sock
+export NIEP_SOCKET=/run/niep-dev.sock
 ```
 
 Every command has contextual help:
@@ -157,8 +158,10 @@ niepctl \
   container shell doc-alpine /bin/sh
 ```
 
-The daemon handles one socket client at a time, so an interactive shell keeps
-that daemon connection occupied until the shell exits.
+The daemon uses bounded client workers, so an interactive shell does not block
+ordinary clients. Interactive sessions have a conservative concurrency and
+idle lifetime limit; disconnecting or timing out always closes the private
+stream.
 
 VNF commands:
 

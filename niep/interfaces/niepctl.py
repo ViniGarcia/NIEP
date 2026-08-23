@@ -4,6 +4,7 @@ import os
 import shlex
 import socket
 import sys
+import time
 from pathlib import Path
 from typing import Annotated, List, Optional
 
@@ -14,6 +15,9 @@ from niep.application.stream import bridge_terminal
 
 
 DEFAULT_SOCKET = "/run/niep.sock"
+MAX_REQUEST_BYTES = 64 * 1024
+CLIENT_TIMEOUT = 10.0
+CLIENT_SESSION_TIMEOUT = 300.0
 
 app = typer.Typer(
     name="niepctl",
@@ -35,30 +39,63 @@ app.add_typer(mininet_app, name="mininet")
 
 def send_request(socket_path, command, args):
     payload = json.dumps(CommandRequest(command, tuple(args)).to_dict()) + "\n"
+    encoded = payload.encode("utf-8")
+    if len(encoded) > MAX_REQUEST_BYTES:
+        raise ValueError("request exceeds the 64 KiB socket limit")
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
+        client.settimeout(CLIENT_TIMEOUT)
         client.connect(socket_path)
-        client.sendall(payload.encode("utf-8"))
-        chunks = []
+        client.sendall(encoded)
+        shutdown = getattr(client, "shutdown", None)
+        if shutdown is not None:
+            shutdown(socket.SHUT_WR)
+        frame = None
+        buffer = bytearray()
+        size = 0
+        deadline = time.monotonic() + CLIENT_TIMEOUT
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("NIEP daemon response timed out")
+            client.settimeout(remaining)
             chunk = client.recv(4096)
             if not chunk:
+                if frame is None:
+                    raise RuntimeError("NIEP daemon closed before a complete response frame")
                 break
-            chunks.append(chunk)
-            if b"\n" in chunk:
-                break
+            size += len(chunk)
+            if size > MAX_REQUEST_BYTES:
+                raise ValueError("response exceeds the socket limit")
+            if frame is not None:
+                raise RuntimeError("NIEP daemon sent bytes after the response frame")
+            buffer.extend(chunk)
+            if b"\n" in buffer:
+                payload_part, _, trailing = bytes(buffer).partition(b"\n")
+                if trailing:
+                    raise RuntimeError("NIEP daemon sent bytes after the response frame")
+                frame = payload_part
     finally:
         client.close()
-    return json.loads(b"".join(chunks).decode("utf-8"))
+    return json.loads(frame.decode("utf-8"))
 
 
 def receive_line(client):
     data = b""
+    deadline = time.monotonic() + CLIENT_TIMEOUT
     while b"\n" not in data:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("NIEP daemon response timed out")
+        setter = getattr(client, "settimeout", None)
+        if setter is not None:
+            setter(remaining)
         chunk = client.recv(4096)
         if not chunk:
             break
         data += chunk
+        if len(data) > MAX_REQUEST_BYTES:
+            raise RuntimeError("NIEP daemon response exceeds the socket limit")
     line, separator, remaining = data.partition(b"\n")
     if not separator:
         raise RuntimeError("NIEP daemon closed the connection before sending a response")
@@ -86,7 +123,14 @@ def json_enabled(ctx):
 def request(ctx, command, args=None):
     try:
         return send_request(socket_path(ctx), command, args or [])
-    except (ConnectionError, FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+    except (
+        ConnectionError,
+        FileNotFoundError,
+        json.JSONDecodeError,
+        OSError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
         typer.echo("Could not communicate with the NIEP daemon: " + str(exc), err=True)
         raise typer.Exit(1)
 
@@ -181,9 +225,13 @@ def run_interactive_shell(socket_path_value, args):
         typer.echo("container shell requires an interactive terminal", err=True)
         return 2
 
-    payload = json.dumps({"command": "container", "args": args}) + "\n"
+    payload = json.dumps(CommandRequest("container", tuple(args)).to_dict()) + "\n"
+    if len(payload.encode("utf-8")) > MAX_REQUEST_BYTES:
+        typer.echo("container shell request exceeds the 64 KiB socket limit", err=True)
+        return 2
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
+        client.settimeout(CLIENT_TIMEOUT)
         client.connect(socket_path_value)
         client.sendall(payload.encode("utf-8"))
         response, remaining = receive_line(client)
@@ -192,7 +240,8 @@ def run_interactive_shell(socket_path_value, args):
             if response.get("detail"):
                 typer.echo("DETAIL: " + response.get("detail"), err=True)
             return 1
-        bridge_terminal(client, initial_output=remaining)
+        client.settimeout(None)
+        bridge_terminal(client, initial_output=remaining, timeout=CLIENT_SESSION_TIMEOUT)
         return 0
     except (ConnectionError, FileNotFoundError, OSError, RuntimeError) as exc:
         typer.echo("Could not open the container shell: " + str(exc), err=True)
