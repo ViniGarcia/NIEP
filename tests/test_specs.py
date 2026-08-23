@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
 import pytest
 
 from tools import check_specs
@@ -57,3 +60,24 @@ def test_tutorial_docs_and_smokes_use_repository_root_as_cwd() -> None:
     assert "cwd=ROOT" in (check_specs.ROOT / "tools/smoke/run_cli_smoke.py").read_text(
         encoding="utf-8"
     )
+
+
+def test_socket_smoke_uses_interpreter_scoped_niepctl_entrypoint() -> None:
+    if sys.platform == "win32":
+        pytest.skip("socket smoke requires the Linux-only grp module")
+    try:
+        import grp  # noqa: F401
+    except ImportError:
+        pytest.skip("socket smoke requires the Linux-only grp module")
+    from tools.smoke import run_socket_smoke
+
+    source = (check_specs.ROOT / "tools/smoke/run_socket_smoke.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'ROOT / "tools" / "niepctl"' not in source
+    expected = Path(sys.executable).with_name(
+        "niepctl.exe" if sys.platform == "win32" else "niepctl"
+    )
+    if not expected.is_file():
+        pytest.skip(f"niepctl entrypoint is not installed beside {sys.executable}")
+    assert run_socket_smoke.niepctl_entrypoint() == expected

@@ -26,6 +26,19 @@ SOCKET_PATH = "/run/niep.sock"
 from niep.interfaces.niepctl import receive_line, send_request
 
 
+def niepctl_entrypoint() -> Path:
+    """Return the console script installed beside this smoke's interpreter."""
+
+    executable_name = "niepctl.exe" if os.name == "nt" else "niepctl"
+    executable = Path(sys.executable).with_name(executable_name)
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise RuntimeError(
+            "socket smoke requires the installed 'niepctl' entrypoint beside "
+            f"{sys.executable}; install NIEP in that interpreter environment"
+        )
+    return executable
+
+
 def expect(response, ok, code):
     if response.get("ok") != ok or response.get("code") != code:
         raise AssertionError(str(response))
@@ -83,7 +96,7 @@ def expect_terminal_exit(child):
 
 def run_niepctl_shell(path):
     child = pexpect.spawn(
-        str(ROOT / "tools" / "niepctl"),
+        str(niepctl_entrypoint()),
         [
             "--socket",
             path,
@@ -118,7 +131,7 @@ def complete_niepctl(path, words, current_word):
         }
     )
     completed = subprocess.run(
-        [str(ROOT / "tools" / "niepctl")],
+        [str(niepctl_entrypoint())],
         cwd=ROOT,
         env=environment,
         text=True,
@@ -219,7 +232,7 @@ def main():
 
         client = subprocess.run(
             [
-                str(ROOT / "tools" / "niepctl"),
+                str(niepctl_entrypoint()),
                 "--json",
                 "status",
             ],
@@ -254,7 +267,7 @@ def main():
 
         client = subprocess.run(
             [
-                str(ROOT / "tools" / "niepctl"),
+                str(niepctl_entrypoint()),
                 "--socket",
                 SOCKET_PATH,
                 "container",
@@ -277,7 +290,7 @@ def main():
 
         client = subprocess.run(
             [
-                str(ROOT / "tools" / "niepctl"),
+                str(niepctl_entrypoint()),
                 "--socket",
                 SOCKET_PATH,
                 "container",
