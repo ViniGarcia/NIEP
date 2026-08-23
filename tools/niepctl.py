@@ -6,7 +6,7 @@ from importlib import import_module
 import sys
 
 warnings.warn(
-    "tools/niepctl.py is deprecated; use the installed 'niepctl' entry point",
+    "tools/niepctl.py is deprecated; use the installed 'niepctl' entry point; removal planned for NIEP 1.3.0",
     DeprecationWarning,
     stacklevel=2,
 )

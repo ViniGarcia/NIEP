@@ -19,6 +19,8 @@ if [[ ! -x "${PYTHON}" ]] || ! "${PYTHON}" -c "import niep, typer" >/dev/null 2>
   PYTHON=python3
 fi
 
+echo "WARNING: tools/niepctl is deprecated; use the installed 'niepctl' entry point; removal planned for NIEP 1.3.0" >&2
+
 # Keep the documented shim useful even on a minimal host where the optional
 # CLI dependency has not been installed yet.  Full command handling is still
 # delegated to the package as soon as Typer is available.

@@ -45,7 +45,7 @@ make vm-cli
 At the `niep>` prompt:
 
 ```text
-define ../tutorial/examples/click-forward-topology.json
+define tutorial/examples/click-forward-topology.json
 topoup
 vnf list
 vnf click-forward
@@ -55,7 +55,7 @@ vnfmanagement
 Load and start the policy function:
 
 ```text
-vnfaction POST_FUNCTION ../tutorial/examples/click/policy-forward.click
+vnfaction POST_FUNCTION tutorial/examples/click/policy-forward.click
 vnfaction GET_FUNCTION
 vnfaction POST_START
 vnfaction GET_RUNNING
@@ -64,14 +64,14 @@ vnfaction GET_RUNNING
 Or use the script:
 
 ```text
-vnfscript ../tutorial/examples/click/policy-forward-start.ns
+vnfscript tutorial/examples/click/policy-forward-start.ns
 ```
 
 If a Click function is already running, stop it before replacing the file. `POST_FUNCTION` writes a new `func.click`, but the running Click process keeps using the old function until restarted:
 
 ```text
 vnfaction POST_STOP
-vnfaction POST_FUNCTION ../tutorial/examples/click/policy-forward.click
+vnfaction POST_FUNCTION tutorial/examples/click/policy-forward.click
 vnfaction POST_START
 vnfaction GET_RUNNING
 ```
@@ -79,7 +79,7 @@ vnfaction GET_RUNNING
 Or use:
 
 ```text
-vnfscript ../tutorial/examples/click/policy-forward-reload.ns
+vnfscript tutorial/examples/click/policy-forward-reload.ns
 ```
 
 Return to the main prompt and open Mininet:

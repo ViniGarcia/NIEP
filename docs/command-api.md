@@ -1,6 +1,6 @@
 # Local command API
 
-The daemon, `niepctl` and the legacy interactive CLI share the versioned
+The daemon, `niepctl` and the interactive CLI share the versioned
 application command port. Its wire protocol is `niep.command` version `1`.
 
 ## Request envelope
@@ -64,3 +64,9 @@ legacy executor fields and methods into the typed topology port. `TopologyServic
 uses that port (and keeps only a deprecated raw-executor shim for old in-process
 callers); handlers use session operations, snapshots and resource services
 without reading legacy fields.
+
+The old `CLI/CLI.py`, `CLI/Launcher.py`, `CLI/HTTP.py`, `tools/*.py` and the
+`tools/niepctl` shell wrapper are retained only for the `1.2.x` compatibility
+cycle. They emit a deprecation warning (or the shell equivalent) and are
+scheduled for removal no earlier than `1.3.0`; see
+[`migration-1.2.md`](migration-1.2.md).

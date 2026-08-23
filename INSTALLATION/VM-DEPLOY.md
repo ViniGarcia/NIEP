@@ -1,5 +1,7 @@
 # Vagrant deployment
 
+The alpha prerelease documented by this deployment guide is `1.2.0a1`.
+
 NIEP's reproducible VM uses the libvirt provider and the pinned
 `generic/ubuntu2204` box version `4.3.12`.
 

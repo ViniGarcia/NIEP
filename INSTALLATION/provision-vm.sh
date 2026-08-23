@@ -110,7 +110,7 @@ su - "${TARGET_USER}" -c "cd ${QUOTED_REPO} && VENV_SYSTEM_SITE_PACKAGES=1 ./INS
 
 echo "[7/7] Installing stable local command links..."
 chmod +x "${REPO_DIR}/tools/niepctl"
-ln -sfn "${REPO_DIR}/tools/niepctl" /usr/local/bin/niepctl
+ln -sfn "${REPO_DIR}/.venv/bin/niepctl" /usr/local/bin/niepctl
 ln -sfn "${REPO_DIR}/tools/niep_doctor.py" /usr/local/bin/niep-doctor
 
 cat <<EOF

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from os.path import join
+import warnings
 
 from niep.application.executer import Executer
 from niep.application.executor_port import ExecutorTopologyPort, LegacyExecutorAdapter
@@ -63,11 +64,23 @@ class TopologyService:
     @property
     def executor(self):
         """Deprecated raw-executor shim; use snapshots and lifecycle methods."""
+        warnings.warn(
+            "TopologyService.executor is deprecated; use typed topology ports; "
+            "removal planned for NIEP 1.3.0",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         compatibility = getattr(self._port, "compatibility_executor", None)
         return compatibility() if callable(compatibility) else None
 
     @executor.setter
     def executor(self, value):
+        warnings.warn(
+            "TopologyService.executor is deprecated; use typed topology ports; "
+            "removal planned for NIEP 1.3.0",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if value is None:
             self._port.detach()
             return

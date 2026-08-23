@@ -17,7 +17,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CLI_DIR = ROOT / "CLI"
 
 
 @dataclass(frozen=True)
@@ -38,7 +37,7 @@ SCENARIOS = {
     "mininet": Scenario(
         name="mininet",
         commands=[
-            Step("define ../tutorial/examples/mininet-ping.json"),
+            Step("define tutorial/examples/mininet-ping.json"),
             Step("topoup", delay_after=2),
             Step("mininet"),
             Step("pingall"),
@@ -54,7 +53,7 @@ SCENARIOS = {
     "vm": Scenario(
         name="vm",
         commands=[
-            Step("define ../tutorial/examples/vm-basic.json"),
+            Step("define tutorial/examples/vm-basic.json"),
             Step("topoup", delay_after=20),
             Step("vm doc-tinycore"),
             Step("vmmanagement"),
@@ -70,10 +69,10 @@ SCENARIOS = {
     "click": Scenario(
         name="click",
         commands=[
-            Step("define ../tutorial/examples/click-forward-topology.json"),
+            Step("define tutorial/examples/click-forward-topology.json"),
             Step("topoup", delay_after=25),
             Step("vnf click-forward"),
-            Step("vnfaction POST_FUNCTION ../tutorial/examples/click/policy-forward.click"),
+            Step("vnfaction POST_FUNCTION tutorial/examples/click/policy-forward.click"),
             Step("vnfaction POST_START", delay_after=2),
             Step("exit"),
             Step("mininet"),
@@ -93,8 +92,8 @@ SCENARIOS = {
 
 def run_scenario(scenario: Scenario) -> tuple[int, str]:
     proc = subprocess.Popen(
-        ["sudo", sys.executable, "CLI.py"],
-        cwd=CLI_DIR,
+        ["sudo", sys.executable, "-m", "niep.interfaces.cli"],
+        cwd=ROOT,
         text=True,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,

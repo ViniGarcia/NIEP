@@ -1,0 +1,33 @@
+# Release documentation and legal notices are part of the source archive.
+include LICENSE
+include README.md
+include CHANGELOG.md
+include Makefile
+include pyproject.toml
+recursive-include docs *
+recursive-include INSTALLATION *
+recursive-include tutorial *
+recursive-include constraints *
+recursive-include tests *
+
+# Keep the compatibility source paths and launchers auditable in the sdist.
+# Large VM disk images remain provisioning inputs, not Python distribution
+# contents; the XML descriptors and CLI history assets are small and retained.
+recursive-include CLI *.py
+recursive-include CLI/CLIMEM *
+include CLI/PACKAGE/.placeholder
+recursive-include TOPO-MAN *.py
+recursive-include VEM *.py
+recursive-include VEM/IMAGES *.xml
+recursive-include tools *
+
+# POX is a deployment asset: keep it in the sdist with its own notices, while
+# the setuptools package boundary continues to exclude it from the wheel.
+recursive-include OFCONTROLLERS/pox *
+include OFCONTROLLERS/pox/LICENSE
+include OFCONTROLLERS/pox/NOTICE
+
+# Local planning notes are never release inputs, even when building from a
+# dirty developer checkout.
+exclude REFATORACOES.md
+prune plano-refatoracao

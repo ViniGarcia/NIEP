@@ -16,7 +16,7 @@ NIEP creates the virtual wiring, but TinyCore still needs an IP address on the d
 At the `niep>` prompt:
 
 ```text
-define ../tutorial/examples/vm-host-link.json
+define tutorial/examples/vm-host-link.json
 topoup
 vm doc-tinycore-link
 vmmanagement

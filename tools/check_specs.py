@@ -35,12 +35,12 @@ def _parser_types():
 
 
 EXAMPLES = {
-    "mininet": "../tutorial/examples/mininet-ping.json",
-    "vm": "../tutorial/examples/vm-basic.json",
-    "vm-host-link": "../tutorial/examples/vm-host-link.json",
-    "click": "../tutorial/examples/click-forward-topology.json",
-    "container": "../tutorial/examples/container-host-link.json",
-    "container-router": "../tutorial/examples/container-router.json",
+    "mininet": "tutorial/examples/mininet-ping.json",
+    "vm": "tutorial/examples/vm-basic.json",
+    "vm-host-link": "tutorial/examples/vm-host-link.json",
+    "click": "tutorial/examples/click-forward-topology.json",
+    "container": "tutorial/examples/container-host-link.json",
+    "container-router": "tutorial/examples/container-router.json",
 }
 
 
@@ -96,7 +96,7 @@ def check_example(name: str, path: str) -> list[str]:
 
 
 def main() -> int:
-    chdir(ROOT / "CLI")
+    chdir(ROOT)
     failed = False
     for name, path in EXAMPLES.items():
         errors = check_example(name, path)

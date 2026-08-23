@@ -1,3 +1,11 @@
+import warnings
+
+warnings.warn(
+    "CLI/HTTP.py is deprecated; use niepctl and niepd; removal planned for NIEP 1.3.0",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 import os
 import sys
 import time

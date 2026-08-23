@@ -56,11 +56,11 @@ Then, in another VM shell:
 
 ```bash
 cd /home/vagrant/NIEP
-./tools/niepctl --json status
-./tools/niepctl --json define tutorial/examples/mininet-ping.json
-./tools/niepctl --json topoup
-./tools/niepctl --json mininet pingall
-./tools/niepctl --json topodown
+.venv/bin/niepctl --json status
+.venv/bin/niepctl --json define tutorial/examples/mininet-ping.json
+.venv/bin/niepctl --json topoup
+.venv/bin/niepctl --json mininet pingall
+.venv/bin/niepctl --json topodown
 ```
 
 ## Shell Completion

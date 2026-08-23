@@ -91,6 +91,22 @@ def test_topology_service_accepts_a_typed_port_without_legacy_field_access():
     assert service.is_defined() is False
 
 
+def test_topology_service_executor_compatibility_property_warns_with_deadline():
+    service = TopologyService()
+    legacy = SimpleNamespace()
+
+    with pytest.warns(
+        DeprecationWarning,
+        match="use typed topology ports.*removal planned for NIEP 1.3.0",
+    ):
+        service.executor = legacy
+    with pytest.warns(
+        DeprecationWarning,
+        match="use typed topology ports.*removal planned for NIEP 1.3.0",
+    ):
+        assert service.executor is legacy
+
+
 @pytest.mark.parametrize("up_result", [0, 7, None])
 def test_legacy_executor_without_lifecycle_or_status_uses_operation_result(up_result):
     class Legacy:

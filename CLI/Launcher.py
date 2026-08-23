@@ -4,13 +4,13 @@
 import sys
 import warnings
 
-from niep.interfaces.cli import NIEPCLI
-
 warnings.warn(
-    "CLI/Launcher.py is deprecated; use the NIEP package",
+    "CLI/Launcher.py is deprecated; use niep.interfaces.cli; removal planned for NIEP 1.3.0",
     DeprecationWarning,
     stacklevel=2,
 )
+
+from niep.interfaces.cli import NIEPCLI
 
 
 def main():

@@ -1,7 +1,7 @@
 NIEP: NFV Infrastructure Emulation Platform
 ========================================================
 
-*Status: Beta -- Version: 1.1 -- Python 3 port*
+*Status: Beta prerelease -- Version: 1.2.0a1 -- Python 3 port*
 
 ### What is NIEP?
 
@@ -37,7 +37,7 @@ make vm-cli
 Inside the NIEP prompt, load a tutorial example:
 
 ```text
-niep> define ../tutorial/examples/mininet-ping.json
+niep> define tutorial/examples/mininet-ping.json
 niep> topoup
 niep> mininet
 mininet> pingall
@@ -51,11 +51,10 @@ sudo ./INSTALLATION/installer.sh --repo "$PWD" --user "$USER"
 
 The installer delegates to `INSTALLATION/provision-vm.sh`, which is also used by Vagrant. Make sure your CPU supports hardware virtualization and that it is enabled in the host firmware.
 
-Run NIEP from the `CLI/` directory:
+Run the canonical interactive interface from the repository root:
 
 ```bash
-cd CLI
-sudo ../.venv/bin/python CLI.py
+sudo .venv/bin/python -m niep.interfaces.cli
 ```
 
 An editable source install discovers repository assets automatically. A wheel
@@ -99,6 +98,9 @@ make vm-ctl NIEPCTL_ARGS="--json status"
 See [`tutorial/06-service-api.md`](tutorial/06-service-api.md) for the service workflow.
 The local command envelope and compatibility rules are documented in
 [`docs/command-api.md`](docs/command-api.md).
+Migration details for old module paths and launchers are in
+[`docs/migration-1.2.md`](docs/migration-1.2.md); the release policy is in
+[`docs/release-checklist.md`](docs/release-checklist.md).
 
 ### How was it created?
 

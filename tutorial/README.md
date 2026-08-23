@@ -2,11 +2,11 @@
 
 This tutorial is organized as a short sequence of runnable examples, from the simplest Mininet topology to a Click-on-OSv VNF with policy enforcement.
 
-Run NIEP from the `CLI/` directory. All example paths below assume the prompt is started with:
+Run the canonical interactive interface from the repository root:
 
 ```bash
-cd /home/vagrant/NIEP/CLI
-sudo ../.venv/bin/python CLI.py
+cd /home/vagrant/NIEP
+sudo .venv/bin/python -m niep.interfaces.cli
 ```
 
 ## Sequence

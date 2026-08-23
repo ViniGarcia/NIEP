@@ -10,7 +10,7 @@ This example starts only the VM. It validates libvirt/KVM, the TinyCore base ima
 At the `niep>` prompt:
 
 ```text
-define ../tutorial/examples/vm-basic.json
+define tutorial/examples/vm-basic.json
 topoup
 vm list
 vm doc-tinycore

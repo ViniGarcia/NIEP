@@ -53,18 +53,18 @@ niep/iperf3:local
 
 ## Start The Topology
 
-From the NIEP CLI:
+From the canonical NIEP CLI:
 
 ```bash
-cd /home/vagrant/NIEP/CLI
-sudo ../.venv/bin/python CLI.py
+cd /home/vagrant/NIEP
+sudo .venv/bin/python -m niep.interfaces.cli
 ```
 
 ```text
-niep> define ../tutorial/examples/container-iperf-click-shaper.json
+niep> define tutorial/examples/container-iperf-click-shaper.json
 niep> topoup
 niep> vnf click-shaper
-vnf(click-shaper)> vnfaction POST_FUNCTION ../tutorial/examples/click/udp-shaper.click
+vnf(click-shaper)> vnfaction POST_FUNCTION tutorial/examples/click/udp-shaper.click
 vnf(click-shaper)> vnfaction POST_START
 vnf(click-shaper)> exit
 ```

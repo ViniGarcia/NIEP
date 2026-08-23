@@ -1,5 +1,9 @@
 # NIEP reproducible environment
 
+The current alpha prerelease is `1.2.0a1`. Install the package entry points
+`niepctl` and `niepd`; the old `tools/*.py` launchers remain only as deprecated
+compatibility paths through the `1.2.x` line.
+
 The supported development matrix is Python 3.10, 3.11 or 3.12 on Ubuntu
 22.04.  The Vagrant definition pins `generic/ubuntu2204` to box version
 `4.3.12`, the version installed on the reference host.  The box is the

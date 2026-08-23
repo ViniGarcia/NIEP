@@ -13,6 +13,7 @@ import importlib.metadata
 import importlib.util
 import os
 from pathlib import Path
+import re
 import shutil
 import site
 import subprocess
@@ -29,6 +30,41 @@ ROOT = Path(__file__).resolve().parents[1]
 LEGACY_RESULT = ROOT / "TOPO-MAN" / "Result.py"
 LEGACY_SPEC = ROOT / "TOPO-MAN" / "Spec.py"
 LEGACY_RUNTIME = ROOT / "VEM" / "TerminalSession.py"
+
+# Every compatibility module is kept in the release until 1.3.0.  Keeping the
+# inventory executable prevents a newly migrated module from silently losing
+# its documented import path.
+LEGACY_SHIMS = (
+    (ROOT / "TOPO-MAN/Command.py", "niep.application.command"),
+    (ROOT / "TOPO-MAN/Executer.py", "niep.application.executer"),
+    (ROOT / "TOPO-MAN/InfrastructureRuntime.py", "niep.runtime.infrastructure"),
+    (ROOT / "TOPO-MAN/Parser.py", "niep.application.parser"),
+    (ROOT / "TOPO-MAN/Result.py", "niep.domain.result"),
+    (ROOT / "TOPO-MAN/Service.py", "niep.application.service"),
+    (ROOT / "TOPO-MAN/SocketServer.py", "niep.interfaces.socket_server"),
+    (ROOT / "TOPO-MAN/Spec.py", "niep.domain.spec"),
+    (ROOT / "VEM/ClickOnOSv.py", "niep.runtime.click_on_osv"),
+    (ROOT / "VEM/Container.py", "niep.runtime.container"),
+    (ROOT / "VEM/ContainerNetworkRuntime.py", "niep.runtime.container_network"),
+    (ROOT / "VEM/DockerRuntime.py", "niep.runtime.docker"),
+    (ROOT / "VEM/LibvirtRuntime.py", "niep.runtime.libvirt"),
+    (ROOT / "VEM/SFC.py", "niep.runtime.sfc"),
+    (ROOT / "VEM/TerminalSession.py", "niep.runtime.terminal_session"),
+    (ROOT / "VEM/VM.py", "niep.runtime.vm"),
+    (ROOT / "VEM/VMImageStore.py", "niep.runtime.vm_image_store"),
+    (ROOT / "VEM/VMNetworkRuntime.py", "niep.runtime.vm_network"),
+    (ROOT / "VEM/VNF.py", "niep.runtime.vnf"),
+)
+
+LEGACY_LAUNCHERS = (
+    (ROOT / "CLI/CLI.py", "python -m niep.interfaces.cli"),
+    (ROOT / "CLI/Launcher.py", "niep.interfaces.cli"),
+    (ROOT / "tools/niepctl.py", "niepctl"),
+    (ROOT / "tools/niepd.py", "niepd"),
+    (ROOT / "tools/niepctl", "installed 'niepctl' entry point"),
+)
+
+LEGACY_HTTP_INTERFACE = ROOT / "CLI/HTTP.py"
 
 # Result and Spec are the first neutral modules migrated by task 03.  Keeping
 # this list explicit makes a missing public module an actionable failure,
@@ -98,14 +134,14 @@ def _failure_details(result: subprocess.CompletedProcess[str]) -> str:
     )
 
 
-def _current_site_packages() -> Path:
+def _current_site_packages(tmp_path: Path | None = None) -> Path:
     """Return the active test interpreter's site-packages directory.
 
     The isolated wheel interpreter may borrow installed runtime dependencies,
-    but it must not borrow the editable source-tree package.  Adding this
-    directory to ``PYTHONPATH`` exposes its importable dependencies while
-    deliberately not processing its ``.pth`` files (including the editable
-    ``niep`` link).
+    but it must not borrow the editable source-tree package.  When the active
+    interpreter belongs to this checkout, create a clean overlay that exposes
+    importable dependencies while omitting editable finders, the source package
+    and stale NIEP distribution metadata.
     """
 
     candidates = [Path(value) for value in site.getsitepackages()]
@@ -114,7 +150,28 @@ def _current_site_packages() -> Path:
         candidates.append(user_site)
     for candidate in candidates:
         if candidate.is_dir():
-            return candidate
+            if tmp_path is None or ROOT not in candidate.resolve().parents:
+                return candidate
+
+            overlay = tmp_path / "runtime-site-packages"
+            overlay.mkdir()
+            for child in candidate.iterdir():
+                if (
+                    child.name.startswith("__editable__")
+                    or child.name == "niep"
+                    or child.name.startswith("niep-")
+                    or child.suffix == ".pth"
+                ):
+                    continue
+                destination = overlay / child.name
+                try:
+                    destination.symlink_to(child, target_is_directory=child.is_dir())
+                except OSError:
+                    if child.is_dir():
+                        shutil.copytree(child, destination)
+                    else:
+                        shutil.copy2(child, destination)
+            return overlay
     raise AssertionError(f"could not locate site-packages for {sys.executable}")
 
 
@@ -238,6 +295,8 @@ def test_legacy_niepctl_shim_help_works_from_another_cwd(tmp_path: Path) -> None
     assert result.returncode == 0, _failure_details(result)
     help_output = (result.stdout + result.stderr).lower()
     assert any(token in help_output for token in ("usage", "options", "commands", "help"))
+    assert "deprecated" in help_output
+    assert "1.3.0" in help_output
 
 
 def test_distribution_does_not_bundle_vendored_pox(tmp_path: Path) -> None:
@@ -326,9 +385,12 @@ def test_distribution_does_not_bundle_vendored_pox(tmp_path: Path) -> None:
     # anything from the network.  A site-packages directory supplied through
     # PYTHONPATH does not process its .pth files, so the editable checkout
     # link cannot make the source tree win module resolution.
-    imported_environment["PYTHONPATH"] = str(_current_site_packages())
+    imported_environment["PYTHONPATH"] = str(_current_site_packages(tmp_path))
     imported_environment["NIEP_ROOT"] = str(ROOT)
-    imported_environment["NIEP_EXPECTED_VERSION"] = importlib.metadata.version("niep")
+    # The active host may still have an editable metadata record from the
+    # previous release. The wheel under test is intentionally the source of
+    # truth for this isolated assertion.
+    imported_environment["NIEP_EXPECTED_VERSION"] = "1.2.0a1"
     imported = subprocess.run(
         [
             str(venv_python),
@@ -419,6 +481,44 @@ def test_legacy_shims_warn_and_preserve_module_identity() -> None:
         with pytest.warns(DeprecationWarning, match="use " + alternative):
             legacy = _load_legacy_module(name, path)
         assert legacy is importlib.import_module(modern_name)
+
+
+def test_all_legacy_python_shims_warn_with_destination_and_removal_version() -> None:
+    assert len(LEGACY_SHIMS) == 19
+    for index, (path, modern_name) in enumerate(LEGACY_SHIMS):
+        assert path.is_file(), path
+        with pytest.warns(
+            DeprecationWarning,
+            match=rf"use {re.escape(modern_name)}.*removal planned for NIEP 1\.3\.0",
+        ):
+            legacy = _load_legacy_module(f"niep_legacy_shim_{index}", path)
+        assert legacy is importlib.import_module(modern_name)
+
+
+def test_legacy_launchers_declare_warning_destination_and_removal_version() -> None:
+    assert len(LEGACY_LAUNCHERS) == 5
+    for index, (path, destination) in enumerate(LEGACY_LAUNCHERS):
+        source = path.read_text(encoding="utf-8")
+        if path.suffix == ".py":
+            assert "DeprecationWarning" in source, path
+            with pytest.warns(DeprecationWarning, match="removal planned for NIEP 1\\.3\\.0"):
+                _load_legacy_module(f"niep_legacy_launcher_{index}", path)
+        else:
+            assert "WARNING:" in source, path
+        assert destination in source, path
+        assert "removal planned for NIEP 1.3.0" in source, path
+
+
+def test_legacy_http_interface_declares_deprecation_policy() -> None:
+    source = LEGACY_HTTP_INTERFACE.read_text(encoding="utf-8")
+    assert "DeprecationWarning" in source
+    assert "use niepctl and niepd" in source
+    assert "removal planned for NIEP 1.3.0" in source
+    with pytest.warns(
+        DeprecationWarning,
+        match="use niepctl and niepd.*removal planned for NIEP 1\\.3\\.0",
+    ):
+        _load_legacy_module("niep_legacy_http", LEGACY_HTTP_INTERFACE)
 
 
 def test_result_and_spec_keep_legacy_wire_shapes() -> None:

@@ -40,7 +40,7 @@ The topology references it through `CONTAINERS`:
 
 ```json
 "CONTAINERS": [
-  "../tutorial/examples/alpine-container.json"
+  "alpine-container.json"
 ]
 ```
 
@@ -49,14 +49,14 @@ The topology references it through `CONTAINERS`:
 Start NIEP:
 
 ```bash
-cd /home/vagrant/NIEP/CLI
-sudo ../.venv/bin/python CLI.py
+cd /home/vagrant/NIEP
+sudo .venv/bin/python -m niep.interfaces.cli
 ```
 
 Load and start the topology:
 
 ```text
-niep> define ../tutorial/examples/container-host-link.json
+niep> define tutorial/examples/container-host-link.json
 niep> topoup
 ```
 
@@ -95,7 +95,7 @@ make vm-ctl NIEPCTL_ARGS="--json topodown"
 
 ## Access A Container
 
-The legacy interactive NIEP CLI provides a container context:
+The interactive NIEP CLI provides a container context:
 
 ```text
 niep> container list
@@ -167,7 +167,7 @@ container creation time:
 Start the topology:
 
 ```text
-niep> define ../tutorial/examples/container-router.json
+niep> define tutorial/examples/container-router.json
 niep> topoup
 niep> mininet
 ```

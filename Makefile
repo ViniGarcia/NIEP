@@ -41,10 +41,10 @@ vm-doctor: vm-sync
 	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEP_PYTHON) tools/niep_doctor.py --strict"
 
 vm-cli:
-	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) CLI/CLI.py"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) -m niep.interfaces.cli"
 
 vm-daemon:
-	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) tools/niepd.py --socket $(NIEP_SOCKET)"
+	vagrant ssh -- -t "cd $(NIEP_DIR) && sudo $(NIEP_PYTHON) -m niep.interfaces.niepd --socket $(NIEP_SOCKET)"
 
 vm-ctl:
 	vagrant ssh -- -t "cd $(NIEP_DIR) && $(NIEPCTL) --socket $(NIEP_SOCKET) $(NIEPCTL_ARGS)"

@@ -63,13 +63,13 @@ make vm-libvirt-perms  # allow libvirt/QEMU to read NIEP VM images
 make vm-reset-tutorial-vm   # remove generated tutorial VMs/domains
 ```
 
-## Working Directory Rule
+## Canonical interactive interface
 
-Run the CLI from `CLI/`:
+Run the package module from the repository root:
 
 ```bash
-cd /home/vagrant/NIEP/CLI
-sudo ../.venv/bin/python CLI.py
+cd /home/vagrant/NIEP
+sudo .venv/bin/python -m niep.interfaces.cli
 ```
 
 You should see:
@@ -78,4 +78,4 @@ You should see:
 niep>
 ```
 
-All tutorial commands use paths such as `../tutorial/examples/mininet-ping.json` from that prompt.
+All tutorial commands use paths such as `tutorial/examples/mininet-ping.json` from that prompt.

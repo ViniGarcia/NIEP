@@ -11,7 +11,7 @@ h1 10.10.0.1/24 -- s1 -- h2 10.10.0.2/24
 At the `niep>` prompt:
 
 ```text
-define ../tutorial/examples/mininet-ping.json
+define tutorial/examples/mininet-ping.json
 topoup
 mininet
 ```
