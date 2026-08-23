@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
-from niep.application.mininet_adapter import MininetTopologyAdapter
+import niep.application.executer as executer_module
+from niep.application.executer import Executer
+from niep.application.mininet_adapter import (
+    AppliedTopology,
+    MininetTopologyAdapter,
+    TopologyApplicationError,
+)
 from niep.application.planner import TopologyPlanner
 from niep.domain.spec import (
     ConnectionSpec,
@@ -155,6 +162,124 @@ def test_apply_orders_nodes_links_build_and_post_build_configuration():
     assert any(event[0] == "setIP" and event[2] == "10.0.0.1/24" for event in events[build_index + 1 :])
     assert any(event[0] == "cmd" and "mn-eth0" in event[2] for event in events[build_index + 1 :])
     assert applied.hosts["h1"].name == "h1"
+
+
+def test_apply_failure_after_local_pox_returns_partial_handles_and_original_cause():
+    switch = MininetSwitchSpec("s1")
+    plan = build_plan(switches=(switch,))
+    events = []
+    pox = object()
+
+    class FailingControllerMininet(FakeMininet):
+        def addController(self, ident, **_kwargs):
+            self.events.append(("addController", ident))
+            raise RuntimeError("controller creation failed")
+
+    adapter = MininetTopologyAdapter(
+        mininet_cls=lambda **kwargs: FailingControllerMininet(events, **kwargs),
+        cleanup_cls=lambda: FakeCleanup(events),
+        intf_cls=lambda name, node=None, mac=None: _fake_intf(events, name, node, mac),
+        remote_controller_cls=object,
+        local_pox=lambda: pox,
+    )
+
+    with pytest.raises(TopologyApplicationError) as raised:
+        adapter.apply(plan, runtime_nodes={"hosts": {}, "switches": {}})
+
+    error = raised.value
+    assert error.partial.net is not None
+    assert error.partial.pox is pox
+    assert error.partial.switches["s1"].name == "s1"
+    record = error.to_dict()
+    assert record["message"] == "controller creation failed"
+    assert record["cause"]["message"] == "controller creation failed"
+
+
+def test_apply_failure_after_nodes_and_links_returns_partial_bindings():
+    h1 = host("h1", interface("02:00:00:00:00:01"))
+    switch = MininetSwitchSpec("s1")
+    plan = build_plan(
+        hosts=(h1,),
+        switches=(switch,),
+        connections=(ConnectionSpec("h1", "s1", h1.INTERFACES[0].mac),),
+    )
+    events = []
+
+    class FailingLinkMininet(FakeMininet):
+        def addLink(self, left, right):
+            self.events.append(("addLink", left.name, right.name))
+            raise RuntimeError("link creation failed")
+
+    adapter = MininetTopologyAdapter(
+        mininet_cls=lambda **kwargs: FailingLinkMininet(events, **kwargs),
+        cleanup_cls=lambda: FakeCleanup(events),
+        intf_cls=lambda name, node=None, mac=None: _fake_intf(events, name, node, mac),
+        remote_controller_cls=object,
+    )
+
+    with pytest.raises(TopologyApplicationError) as raised:
+        adapter.apply(
+            plan,
+            runtime_nodes={"hosts": runtime_hosts(h1), "switches": {}},
+        )
+
+    partial = raised.value.partial
+    assert partial.hosts["h1"].name == "h1"
+    assert partial.switches["s1"].name == "s1"
+    assert partial.net is not None
+    assert raised.value.to_dict()["cause"]["message"] == "link creation failed"
+
+
+def test_executor_adopts_partial_topology_before_best_effort_rollback(monkeypatch):
+    calls = []
+
+    class Net:
+        def stop(self):
+            calls.append("net")
+            return 0
+
+    class Infrastructure:
+        def start_local_pox(self):
+            return object()
+
+        def stop_process(self, _process):
+            calls.append("pox")
+            return 0
+
+    configuration = SimpleNamespace(
+        STATUS=0,
+        ID="partial-topology",
+        VMS=[],
+        VNFS=[],
+        CONTAINERS=[],
+        SFCS=[],
+        MNHOSTS=[],
+        MNSWITCHES=[],
+        MNCONTROLLER=[],
+        MNOVSES=[],
+    )
+    executor = Executer(configuration, infrastructure=Infrastructure())
+    executor._MININET_PLAN = SimpleNamespace(switch_controller_id=None)
+    partial = AppliedTopology(net=Net(), pox=object())
+
+    class FailingAdapter:
+        def __init__(self, **_kwargs):
+            pass
+
+        def apply(self, *_args, **_kwargs):
+            raise TopologyApplicationError(RuntimeError("late link failure"), partial)
+
+    monkeypatch.setattr(executer_module, "MininetTopologyAdapter", FailingAdapter)
+
+    with pytest.raises(TopologyApplicationError) as raised:
+        executor._mininet_apply()
+
+    assert executor.NET is partial.net
+    assert executor.POX is partial.pox
+    assert executor.DETAIL == "late link failure"
+    assert raised.value.to_dict()["cause"]["message"] == "late link failure"
+    assert executor._compensate_mininet() == 0
+    assert calls == ["net", "pox"]
 
 
 def test_h_h_binds_intf2_to_the_target_host():

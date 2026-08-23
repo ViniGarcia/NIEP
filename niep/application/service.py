@@ -7,6 +7,10 @@ from niep.application.parser import PlatformParser
 from niep.domain.result import ResultCode, ServiceResult
 from niep.paths import asset_directory
 from niep.runtime.errors import RuntimeFailure, cleanup_failure_record
+from niep.application.lifecycle import (
+    TopologyState,
+    TopologyStateMachine,
+)
 
 
 PARSERERRORS = {-1: "Invalid definition file path or invalid key included",
@@ -32,7 +36,8 @@ EXECUTERERRORS = {-1: "Mininet network interfaces mapping failed",
 
 class TopologyService:
     def __init__(self, runtime_factory=None, executor_factory=None, parser_factory=None):
-        self.executor = None
+        self._executor = None
+        self._lifecycle = TopologyStateMachine(TopologyState.UNDEFINED)
         # Keep all materialization seams injectable for host-only tests and
         # alternate runtime adapters.
         self.runtime_factory = (runtime_factory if runtime_factory is not None
@@ -42,7 +47,100 @@ class TopologyService:
         self.parser_factory = (parser_factory if parser_factory is not None
                                else PlatformParser)
 
+    @property
+    def executor(self):
+        return self._executor
+
+    @executor.setter
+    def executor(self, value):
+        self._executor = value
+        if value is None:
+            # The command that releases the adapter performs the validated
+            # DOWN/FAILED -> UNDEFINED or DESTROYED transition explicitly.
+            return
+        runtime_state = getattr(value, "lifecycle_state", None)
+        if runtime_state is None:
+            # Legacy executors have no typed state yet.  Materialization is the
+            # compatibility boundary; subsequent commands use this state.
+            self._lifecycle.force(TopologyState.DEFINED)
+        else:
+            target = TopologyState(runtime_state)
+            if self.state == target:
+                return
+            if self._lifecycle.can_transition(target):
+                self._lifecycle.transition(target)
+            else:
+                # Reconciliation of an externally-created legacy executor is
+                # the only remaining compatibility case for force().
+                self._lifecycle.force(target)
+
+    @property
+    def state(self):
+        return self._lifecycle.state
+
+    @property
+    def lifecycle_state(self):
+        return self._lifecycle.state
+
+    def _transition(self, target, *, force=False):
+        target = TopologyState(target)
+        if force:
+            return self._lifecycle.force(target)
+        if self.state == target:
+            return target
+        return self._lifecycle.transition(target)
+
+    def _sync_runtime_state(self, result=None):
+        """Adapt a legacy executor result once at the service boundary."""
+
+        runtime_state = getattr(self.executor, "lifecycle_state", None)
+        if runtime_state is not None:
+            target = TopologyState(runtime_state)
+            if self.state == target:
+                return self.state
+            if self._lifecycle.can_transition(target):
+                self._transition(target)
+            else:
+                self._transition(target, force=True)
+            return self.state
+        # Old injected executors expose only STATUS.  Keep that conversion in
+        # this compatibility helper; service decisions below use typed state.
+        status = getattr(self.executor, "STATUS", result)
+        self._transition(
+            TopologyState.UP if status == 0 else TopologyState.FAILED,
+            force=True,
+        )
+        return self.state
+
     def define(self, definition_path):
+        replace_executor = False
+        if self.executor is not None:
+            runtime_state = getattr(self.executor, "lifecycle_state", None)
+            state = TopologyState(runtime_state) if runtime_state is not None else self.state
+            if state == TopologyState.DOWN:
+                # DOWN is a fully reconciled, safe replacement boundary.  Do
+                # not discard the old executor until the new definition has
+                # parsed/materialized successfully below.
+                replace_executor = True
+            elif state == TopologyState.DEFINED:
+                journal = getattr(self.executor, "journal", None)
+                active_resources = any(
+                    bool(getattr(self.executor, name, {}))
+                    for name in ("VMS", "VNFS", "CONTAINERS", "HOSTS", "SWITCHES", "OVSSWITCHES", "CONTROLLERS")
+                )
+                safe_empty = (
+                    not bool(getattr(self.executor, "CLEANUP_REQUIRED", False))
+                    and not bool(getattr(self.executor, "CLEANUP_ERRORS", []))
+                    and not active_resources
+                    and not (journal and len(journal))
+                )
+                replace_executor = safe_empty
+            if not replace_executor:
+                return ServiceResult(
+                    ok=False,
+                    code=ResultCode.ALREADY_EXECUTED,
+                    message="TOPOLOGY MUST BE CLEANED BEFORE REDEFINITION",
+                )
         try:
             parser = self.parser_factory(definition_path)
         except Exception as exc:
@@ -91,6 +189,10 @@ class TopologyService:
                 status=executor.STATUS,
             )
 
+        if replace_executor:
+            self._executor = None
+            if self.state != TopologyState.UNDEFINED:
+                self._transition(TopologyState.UNDEFINED)
         self.executor = executor
         return ServiceResult(ok=True, code=ResultCode.DEFINED, data=executor)
 
@@ -98,24 +200,38 @@ class TopologyService:
         if self.executor is None:
             return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
-        if self.executor.STATUS is not None:
+        if self.state == TopologyState.UP:
             return ServiceResult(
                 ok=False,
                 code=ResultCode.ALREADY_EXECUTED,
                 message="THIS COMMAND WAS ALREADY EXECUTED FOR THIS TOPOLOGY",
-                status=self.executor.STATUS,
+                status=getattr(self.executor, "STATUS", None),
             )
+        if self.state not in {
+            TopologyState.DEFINED,
+            TopologyState.DOWN,
+            TopologyState.FAILED,
+        }:
+            return ServiceResult(
+                ok=False,
+                code=ResultCode.TOPOLOGY_UP_FAILED,
+                message="TOPOLOGY CANNOT START FROM " + self.state.value.upper(),
+            )
+        self._transition(TopologyState.STARTING)
 
         try:
-            self.executor.topologyUp()
+            result = self.executor.topologyUp()
         except Exception as exc:
             detail = str(exc)
             cleanupErrors = self._rollbackFailedStart(detail)
+            if self.executor is not None:
+                self._sync_runtime_state()
             rollbackDetail = getattr(self.executor, 'DETAIL', '')
             if rollbackDetail and rollbackDetail not in detail:
                 detail += " | " + rollbackDetail
             if not cleanupErrors:
                 self.executor = None
+                self._transition(TopologyState.UNDEFINED)
             return ServiceResult(
                 ok=False,
                 code=ResultCode.TOPOLOGY_UP_FAILED,
@@ -128,13 +244,17 @@ class TopologyService:
                 status=getattr(self.executor, 'STATUS', None) if self.executor is not None else None,
                 detail=detail,
             )
-        if self.executor.STATUS != 0:
-            status = self.executor.STATUS
+        state = self._sync_runtime_state(result)
+        if state != TopologyState.UP:
+            status = getattr(self.executor, "STATUS", result if isinstance(result, int) else None)
             detail = getattr(self.executor, 'DETAIL', '')
             cleanupErrors = self._rollbackFailedStart(detail)
+            if self.executor is not None:
+                self._sync_runtime_state(result)
             detail = getattr(self.executor, 'DETAIL', '') or detail
             if not cleanupErrors:
                 self.executor = None
+                self._transition(TopologyState.UNDEFINED)
             return ServiceResult(
                 ok=False,
                 code=ResultCode.TOPOLOGY_UP_FAILED,
@@ -148,32 +268,42 @@ class TopologyService:
                 detail=detail,
             )
 
+        self._transition(TopologyState.UP)
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_UP, data=self.executor)
 
     def down(self):
         if self.executor is None:
             return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
+        if self.state == TopologyState.UP:
+            self._transition(TopologyState.STOPPING)
+
         failure = self._teardown("Topology cleanup failed; the executor was preserved for retry")
         if failure is not None:
             return failure
 
+        self._transition(TopologyState.DOWN)
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_DOWN)
 
     def clean(self):
         if self.executor is None:
             return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
+        if self.state == TopologyState.UP:
+            self._transition(TopologyState.STOPPING)
         failure = self._teardown("Topology cleanup failed; the topology remains defined for retry")
         if failure is not None:
             return failure
         self.executor = None
+        self._transition(TopologyState.UNDEFINED)
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_CLEAN)
 
     def destroy(self):
         if self.executor is None:
             return ServiceResult(ok=False, code=ResultCode.NO_TOPOLOGY, message="NO TOPOLOGY DEFINED")
 
+        if self.state == TopologyState.UP:
+            self._transition(TopologyState.STOPPING)
         failure = self._teardown(
             "Topology cleanup failed; persistent images were not removed and the executor was preserved"
         )
@@ -186,11 +316,18 @@ class TopologyService:
             self.executor.CLEANUP_REQUIRED = False
             self.executor.STATUS = -10
             self.executor.DETAIL = self._cleanupDetail(imageErrors)
+            runtime_state = getattr(self.executor, "lifecycle_state", None)
+            if runtime_state is not None:
+                target = TopologyState(runtime_state)
+                if target == TopologyState.DOWN:
+                    self.executor._lifecycle_transition(TopologyState.CLEANUP_PENDING)
+            self._transition(TopologyState.CLEANUP_PENDING)
             return self._cleanupFailure(
                 "Persistent topology state could not be removed; the executor was preserved for retry"
             )
 
         self.executor = None
+        self._transition(TopologyState.DESTROYED)
         return ServiceResult(ok=True, code=ResultCode.TOPOLOGY_DESTROYED)
 
     def _rollbackFailedStart(self, startupDetail):
@@ -223,7 +360,7 @@ class TopologyService:
             return None
 
         try:
-            status = self.executor.topologyDown()
+            result = self.executor.topologyDown()
         except Exception as exc:
             error = cleanup_failure_record(
                 exc,
@@ -242,17 +379,44 @@ class TopologyService:
             return self._cleanupFailure(failureMessage)
 
         if (
-            status not in (0, None)
-            or bool(getattr(self.executor, 'CLEANUP_REQUIRED', False))
-            or self.executor.STATUS is not None
+            not hasattr(self.executor, "lifecycle_state")
+            and result in (0, None)
+            and getattr(self.executor, "STATUS", None) is None
         ):
+            # Older teardown doubles return success while leaving STATUS at
+            # its initial None value.  This is a compatibility adaptation, not
+            # a lifecycle decision based on a runtime code.
+            state = self._transition(TopologyState.DOWN, force=True)
+        else:
+            state = self._sync_runtime_state(result)
+        if state not in {TopologyState.DOWN, TopologyState.DEFINED}:
             return self._cleanupFailure(failureMessage)
         return None
 
     def _cleanupRequired(self):
+        runtime_state = getattr(self.executor, "lifecycle_state", None)
+        if runtime_state is not None:
+            runtime_state = TopologyState(runtime_state)
+            if runtime_state in {
+                TopologyState.UP,
+                TopologyState.STARTING,
+                TopologyState.STOPPING,
+                TopologyState.FAILED,
+                TopologyState.CLEANUP_PENDING,
+            }:
+                return True
+            if runtime_state == TopologyState.DEFINED:
+                # Down is also the materialization boundary: it reconciles a
+                # defined executor to DOWN even when no runtime resource was
+                # started.  This keeps the executor and service states aligned
+                # for define -> down -> up and repeated cleanup commands.
+                return True
+            return False
         if hasattr(self.executor, 'CLEANUP_REQUIRED'):
             return bool(self.executor.CLEANUP_REQUIRED)
-        return self.executor.STATUS is not None
+        # Legacy adapters without the teardown flag are adapted once at this
+        # boundary.  Lifecycle decisions use the typed service state.
+        return self.state not in {TopologyState.DOWN, TopologyState.UNDEFINED}
 
     def _cleanupFailure(self, message):
         errors = self._structuredCleanupErrors(
@@ -349,7 +513,16 @@ class TopologyService:
         return structured
 
     def is_up(self):
-        return self.executor is not None and self.executor.STATUS == 0
+        if self.executor is None:
+            return False
+        if self.state == TopologyState.UP:
+            return True
+        # Compatibility-only adaptation for injected pre-lifecycle doubles.
+        # Native executors always expose ``lifecycle_state`` and therefore do
+        # not consult numeric STATUS here.
+        if not hasattr(self.executor, "lifecycle_state") and getattr(self.executor, "STATUS", None) == 0:
+            self._transition(TopologyState.UP, force=True)
+        return self.state == TopologyState.UP
 
     def vm_ids(self):
         if not self.is_up():

@@ -2,6 +2,14 @@
 
 from .result import ResultCode, ServiceResult
 from .topology import DescriptorDocument, TopologyDocument, ValidationIssue, ValidationResult
+from .lifecycle import (
+    InvalidTopologyTransition,
+    OperationJournal,
+    OperationStep,
+    OperationStepState,
+    TopologyState,
+    TopologyStateMachine,
+)
 from .spec import (
     ConnectionSpec,
     ContainerSpec,
@@ -34,4 +42,10 @@ __all__ = [
     "TopologyDocument",
     "ValidationIssue",
     "ValidationResult",
+    "InvalidTopologyTransition",
+    "OperationJournal",
+    "OperationStep",
+    "OperationStepState",
+    "TopologyState",
+    "TopologyStateMachine",
 ]

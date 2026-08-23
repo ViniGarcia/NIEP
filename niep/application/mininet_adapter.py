@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
 from .planner import EndpointKind, InterfaceAssignment, LinkPlan, LinkStrategy, TopologyPlan
+from niep.runtime.errors import RuntimeFailure
 
 
 @dataclass
@@ -25,6 +26,23 @@ class AppliedTopology:
     @property
     def NET(self):
         return self.net
+
+
+class TopologyApplicationError(RuntimeFailure):
+    """Typed adapter failure carrying resources created before the failure."""
+
+    def __init__(self, cause: BaseException, partial: AppliedTopology):
+        self.partial = partial
+        super().__init__(
+            "mininet.apply",
+            "mininet",
+            "topology",
+            cause=cause,
+        )
+
+
+# Compatibility spelling for callers that scope the error to Mininet.
+MininetApplyError = TopologyApplicationError
 
 
 class MininetTopologyAdapter:
@@ -74,49 +92,57 @@ class MininetTopologyAdapter:
         if not plan.ok:
             raise ValueError("cannot apply an invalid topology plan: " + plan.detail())
         net = self.mininet_cls(topo=None, build=False)
-        self.cleanup_cls().cleanup()
-        runtime = runtime_nodes or self._runtime_nodes(runtime_configuration)
         applied = AppliedTopology(
             net=net,
             switch_controller_id=plan.switch_controller_id,
-            runtime_hosts=dict(runtime.get("hosts", {})),
         )
+        try:
+            runtime = runtime_nodes or self._runtime_nodes(runtime_configuration)
+            applied.runtime_hosts = dict(runtime.get("hosts", {}))
+            self.cleanup_cls().cleanup()
 
-        # Preserve the legacy creation order: hosts, regular switches,
-        # controllers, then OVS switches.  This affects generated interface
-        # names and is part of the public compatibility surface.
-        for node in plan.nodes:
-            if node.endpoint.kind is EndpointKind.HOST:
-                elem = net.addHost(node.id)
-                applied.hosts[node.id] = elem
-                self._bind(runtime.get("hosts", {}).get(node.id), elem)
-        for node in plan.nodes:
-            if node.endpoint.kind is EndpointKind.SWITCH:
-                elem = net.addSwitch(node.id)
-                applied.switches[node.id] = elem
-                self._bind(runtime.get("switches", {}).get(node.id), elem)
-        for controller in plan.controllers:
-            if controller.local and self.local_pox is not None:
-                applied.pox = self.local_pox()
-            elem = net.addController(
-                controller.id,
-                controller=self.remote_controller_cls,
-                ip=controller.ip,
-                port=controller.port,
-            )
-            applied.controllers[controller.id] = elem
-            self._bind(runtime.get("controllers", {}).get(controller.id), elem)
-        for node in plan.nodes:
-            if node.endpoint.kind is EndpointKind.OVS_SWITCH:
-                elem = net.addSwitch(node.id)
-                applied.ovs_switches[node.id] = elem
-                self._bind(runtime.get("ovs_switches", {}).get(node.id), elem)
+            # Preserve the legacy creation order: hosts, regular switches,
+            # controllers, then OVS switches.  This affects generated
+            # interface names and is part of the public compatibility
+            # surface.
+            for node in plan.nodes:
+                if node.endpoint.kind is EndpointKind.HOST:
+                    elem = net.addHost(node.id)
+                    applied.hosts[node.id] = elem
+                    self._bind(runtime.get("hosts", {}).get(node.id), elem)
+            for node in plan.nodes:
+                if node.endpoint.kind is EndpointKind.SWITCH:
+                    elem = net.addSwitch(node.id)
+                    applied.switches[node.id] = elem
+                    self._bind(runtime.get("switches", {}).get(node.id), elem)
+            for controller in plan.controllers:
+                if controller.local and self.local_pox is not None:
+                    applied.pox = self.local_pox()
+                elem = net.addController(
+                    controller.id,
+                    controller=self.remote_controller_cls,
+                    ip=controller.ip,
+                    port=controller.port,
+                )
+                applied.controllers[controller.id] = elem
+                self._bind(runtime.get("controllers", {}).get(controller.id), elem)
+            for node in plan.nodes:
+                if node.endpoint.kind is EndpointKind.OVS_SWITCH:
+                    elem = net.addSwitch(node.id)
+                    applied.ovs_switches[node.id] = elem
+                    self._bind(runtime.get("ovs_switches", {}).get(node.id), elem)
 
-        for link in plan.links:
-            self._apply_link(link, applied)
-        net.build()
-        self._configure_hosts(plan, applied, runtime)
-        return applied
+            for link in plan.links:
+                self._apply_link(link, applied)
+            net.build()
+            self._configure_hosts(plan, applied, runtime)
+            return applied
+        except Exception as exc:
+            # The caller must be able to compensate handles allocated before
+            # any node, link, controller, or post-build configuration failed.
+            # Keep the original exception as the typed cause and expose the
+            # partial topology for deterministic best-effort cleanup.
+            raise TopologyApplicationError(exc, applied) from exc
 
     def _apply_link(self, link: LinkPlan, applied: AppliedTopology) -> None:
         if link.strategy in (LinkStrategy.HOST_HOST, LinkStrategy.HOST_SWITCH, LinkStrategy.SWITCH_SWITCH):
@@ -264,4 +290,9 @@ class MininetTopologyAdapter:
         }
 
 
-__all__ = ["AppliedTopology", "MininetTopologyAdapter"]
+__all__ = [
+    "AppliedTopology",
+    "MininetApplyError",
+    "MininetTopologyAdapter",
+    "TopologyApplicationError",
+]

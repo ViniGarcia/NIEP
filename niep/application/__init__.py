@@ -20,6 +20,14 @@ __all__ = [
     "TopologyPlanningError",
     "PlanningError",
     "MininetTopologyAdapter",
+    "MininetApplyError",
+    "TopologyApplicationError",
+    "InvalidTopologyTransition",
+    "OperationJournal",
+    "OperationStep",
+    "OperationStepState",
+    "TopologyState",
+    "TopologyStateMachine",
 ]
 
 
@@ -40,6 +48,24 @@ def __getattr__(name):
         from .mininet_adapter import MininetTopologyAdapter
 
         return MininetTopologyAdapter
+    if name in {"MininetApplyError", "TopologyApplicationError"}:
+        from .mininet_adapter import MininetApplyError, TopologyApplicationError
+
+        return {
+            "MininetApplyError": MininetApplyError,
+            "TopologyApplicationError": TopologyApplicationError,
+        }[name]
+    if name in {
+        "InvalidTopologyTransition",
+        "OperationJournal",
+        "OperationStep",
+        "OperationStepState",
+        "TopologyState",
+        "TopologyStateMachine",
+    }:
+        from . import lifecycle
+
+        return getattr(lifecycle, name)
     if name == "RuntimeFactory":
         from .factory import RuntimeFactory
 
