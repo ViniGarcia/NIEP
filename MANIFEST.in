@@ -27,6 +27,11 @@ recursive-include OFCONTROLLERS/pox *
 include OFCONTROLLERS/pox/LICENSE
 include OFCONTROLLERS/pox/NOTICE
 
+# Never publish generated Python bytecode or cache directories, even when a
+# release is built after running the test suite in the source checkout.
+global-exclude *.py[cod]
+global-exclude __pycache__
+
 # Local planning notes are never release inputs, even when building from a
 # dirty developer checkout.
 exclude REFATORACOES.md
