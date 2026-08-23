@@ -104,6 +104,22 @@ def test_setuptools_package_boundary_excludes_vendored_pox() -> None:
     assert (ROOT / "OFCONTROLLERS/pox/NOTICE").is_file()
 
 
+def test_release_checklist_installs_wheel_with_pinned_dependencies() -> None:
+    checklist = (ROOT / "docs/release-checklist.md").read_text(encoding="utf-8")
+
+    # ``--no-deps`` is valid for the build-only wheel command, but a clean
+    # functional install must exercise the wheel metadata and lock runtime
+    # dependencies with the release constraints.
+    assert "pip wheel . --no-deps --no-build-isolation" in checklist
+    assert "pip install --no-deps" not in checklist.replace("\\\n", " ")
+    assert 'pip install --no-deps "$release_tmp"/wheel/*.whl' not in checklist
+    assert (
+        'pip install \\\n'
+        '  --constraint "$release_tmp/niep-1.2.0a1/constraints/py3-linux.txt" \\\n'
+        '  "$release_tmp"/wheel/*.whl'
+    ) in checklist
+
+
 def test_source_distribution_contains_release_material_and_pox_notices(tmp_path: Path) -> None:
     output_dir = tmp_path / "sdist"
     # Build after deliberately creating generated artifacts in recursive

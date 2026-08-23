@@ -44,7 +44,12 @@ python3 -m venv "$release_tmp/venv"
   pip==24.3.1 setuptools==75.6.0 wheel==0.45.1
 "$release_tmp/venv/bin/python" -m pip wheel . --no-deps --no-build-isolation \
   --wheel-dir "$release_tmp/wheel"
-"$release_tmp/venv/bin/python" -m pip install --no-deps "$release_tmp"/wheel/*.whl
+# Functional install: resolve the wheel's declared runtime dependencies under
+# the same pinned constraints. The unquoted glob is intentional so the shell
+# expands the single candidate wheel before pip receives it.
+"$release_tmp/venv/bin/python" -m pip install \
+  --constraint "$release_tmp/niep-1.2.0a1/constraints/py3-linux.txt" \
+  "$release_tmp"/wheel/*.whl
 cd "$release_tmp"
 "$release_tmp/venv/bin/python" -c 'import niep; print(niep.__version__)'
 "$release_tmp/venv/bin/niepctl" --help
