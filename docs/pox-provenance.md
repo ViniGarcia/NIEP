@@ -33,14 +33,34 @@ recorded rather than inventing an upstream identifier. Future POX updates must
 record the exact upstream ref, source archive SHA-256, retrieval date and a
 machine-readable patch manifest before merge.
 
-## Reproducing the current baseline
+## Omitted library files recovered on 2026-09-07
+
+A fresh Vagrant copy of the tracked source at `2f87b31` could not start POX:
+`pox.lib.util` imports `pox.lib.iter`, but that module was absent from Git.
+The root `lib/` ignore rule had hidden six source files already present in the
+local deployment tree. The Mininet connected-host and Click policy scenarios
+therefore failed even though the non-privileged baseline passed.
+
+The ignore exception now permits POX library source files. The six existing
+files are restored without content changes; their relative paths, SHA-256
+digests and source limitation are recorded in
+[`pox-restored-files.json`](pox-restored-files.json). This is a correction to
+the tracked deployment boundary, not an upstream refresh. The exact upstream
+revision of those local files remains unknown, as for the original import.
+The controller-import regression runs without root and catches missing imports
+before network integration; the sdist inventory requires all six files.
+
+The tree identifiers above describe the historical baseline before this
+recovery. They must not be presented as hashes of the restored working tree.
+
+## Reproducing the historical baseline
 
 From a checkout containing the release commit:
 
 ```bash
-git rev-parse HEAD:OFCONTROLLERS/pox
+git rev-parse 2f87b31:OFCONTROLLERS/pox
 git rev-parse 19802a2^:OFCONTROLLERS/pox
-git ls-tree -r --full-tree HEAD -- OFCONTROLLERS/pox | sha256sum
+git ls-tree -r --full-tree 2f87b31 -- OFCONTROLLERS/pox | sha256sum
 git diff --stat 9014a02 19802a2 -- OFCONTROLLERS/pox
 git diff --name-status 9014a02 19802a2 -- OFCONTROLLERS/pox
 git archive --format=tar HEAD -- OFCONTROLLERS/pox | sha256sum
