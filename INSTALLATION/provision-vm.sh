@@ -55,7 +55,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
   python3 python3-venv python3-pip python3-libvirt python3-pexpect \
   qemu-kvm qemu-utils libvirt-daemon-system libvirt-clients virt-manager \
   bridge-utils net-tools iproute2 sshpass git git-lfs curl \
-  docker.io docker-compose-v2 openvswitch-switch mininet
+  openvswitch-switch mininet
 
 enable_service() {
   local service="$1"
@@ -68,7 +68,7 @@ enable_service() {
   fi
 }
 
-echo "[2/7] Enabling libvirt, Docker and Open vSwitch daemons..."
+echo "[2/7] Enabling libvirt, the existing Docker daemon and Open vSwitch..."
 enable_service libvirtd
 enable_service docker
 enable_service openvswitch-switch
