@@ -209,7 +209,7 @@ class VM:
         if self.VCPU <= 0:
             self.VM_STATUS = -3
             return -3
-        if not self.DISK in ['tinycore12', 'click-on-osv']:
+        if not self.DISK in ['tinycore12', 'click-on-osv', 'alpine-http']:
             self.VM_STATUS = -4
             return -4
         if self.MANAGEMENT_MAC == '':
@@ -269,7 +269,7 @@ class VM:
         if self.VCPU <= 0:
             self.VM_STATUS = -3
             return -3
-        if not self.DISK in ['tinycore12', 'click-on-osv']:
+        if not self.DISK in ['tinycore12', 'click-on-osv', 'alpine-http']:
             self.VM_STATUS = -4
             return -4
         if self.MANAGEMENT_MAC == '':

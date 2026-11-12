@@ -1,0 +1,29 @@
+<domain type="kvm">
+  <name>bench-vm01</name>
+  <uuid>fd31d445-da1b-4d46-a797-15581a2a0e58</uuid>
+  <memory unit="KiB">262144</memory>
+  <currentMemory unit="KiB">262144</currentMemory>
+  <vcpu>1</vcpu>
+  <os><type arch="x86_64" machine="pc">hvm</type><boot dev="hd" /></os>
+  <features><acpi /><apic /></features>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <disk type="file" device="disk">
+      <driver name="qemu" type="qcow2" />
+      <source file="/home/marcelo/projects/NIEP/VEM/IMAGES/bench-vm01/alpine-http.qcow2" />
+      <target dev="vda" bus="virtio" />
+    </disk>
+    <controller type="pci" index="0" model="pci-root" />
+    <interface type="network">
+      <mac address="52:54:02:20:10:00" />
+      <source network="default" />
+      <model type="virtio" />
+      <address type="pci" domain="0x0000" bus="0x00" slot="0x03" function="0x0" />
+    </interface>
+    <serial type="pty"><target port="0" /></serial>
+    <console type="pty"><target type="serial" port="0" /></console>
+    <memballoon model="none" />
+  <interface type="bridge"><mac address="52:54:02:20:10:01" /><source bridge="br-bench0" /><model type="virtio" /><address type="pci" domain="0x0000" bus="0x00" slot="0x0a" function="0x0" /></interface></devices>
+</domain>

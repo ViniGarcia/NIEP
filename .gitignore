@@ -132,3 +132,8 @@ dmypy.json
 
 # Vagrant stuff
 .vagrant/
+
+# Generated Alpine benchmark images and retained package inputs
+/benchmarks/images/alpine-http/output/
+/benchmarks/images/alpine-http/cache/
+*.qcow2

@@ -1,0 +1,30 @@
+#!/sbin/openrc-run
+# NIEP fixes the management NIC at PCI slot 03; other NIC names are discovered.
+description="Generate interface configuration from PCI identity and optional MAC mappings"
+depend() {
+    need localmount
+    after mdev hwdrivers
+    before networking
+}
+start() {
+    ebegin "Configuring NIEP interfaces"
+    printf 'auto lo\niface lo inet loopback\n' > /etc/network/interfaces
+    for device in /sys/class/net/*; do
+        iface=${device##*/}
+        [ "$iface" != lo ] || continue
+        mac=$(cat "$device/address")
+        address=$(awk -v mac="$mac" 'tolower($1) == mac {print $2; exit}' /etc/niep-network.conf)
+        if [ -z "$address" ]; then
+            case $(readlink -f "$device/device") in
+                */0000:00:03.0|*/0000:00:03.0/*) address=dhcp;;
+                *) address=manual;;
+            esac
+        fi
+        printf '\nauto %s\n' "$iface" >> /etc/network/interfaces
+        case $address in
+            dhcp|manual) printf 'iface %s inet %s\n' "$iface" "$address";;
+            *) printf 'iface %s inet static\n    address %s\n' "$iface" "$address";;
+        esac >> /etc/network/interfaces
+    done
+    eend 0
+}

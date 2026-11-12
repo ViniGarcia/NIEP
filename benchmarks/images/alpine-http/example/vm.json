@@ -1,0 +1,14 @@
+{
+  "ID": "bench-vm01",
+  "MEMORY": 256,
+  "VCPU": 1,
+  "DISK": "alpine-http",
+  "MANAGEMENT_MAC": "52:54:02:20:10:00",
+  "INTERFACES": [
+    {
+      "ID": "br-bench0",
+      "MAC": "52:54:02:20:10:01",
+      "LINK_MAC": "02:00:00:20:10:fe"
+    }
+  ]
+}

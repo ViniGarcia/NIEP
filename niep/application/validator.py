@@ -138,7 +138,7 @@ class TopologyValidator:
         if not isinstance(vcpu, int) or isinstance(vcpu, bool) or vcpu <= 0:
             self._add(-3, "VM field VCPU must be a positive integer", field=field + ".VCPU", file=doc.path, value=vcpu); valid = False
         disk = raw.get("DISK")
-        if disk not in {"tinycore12", "click-on-osv"}:
+        if disk not in {"tinycore12", "click-on-osv", "alpine-http"}:
             self._add(-3, "VM field DISK is invalid", field=field + ".DISK", file=doc.path, value=disk); valid = False
         management = raw.get("MANAGEMENT_MAC")
         if not self.check_mac(management):

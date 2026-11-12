@@ -7,7 +7,7 @@
     </nat>
     <interface dev='vbrNIEP-nic'/>
   </forward>
-  <bridge name='virbr1' stp='on' delay='0'/>
+  <bridge name='virbrNIEP' stp='on' delay='0'/>
   <mac address='52:54:00:a3:6b:f2'/>
   <domain name='vnNIEP'/>
   <ip address='192.168.100.1' netmask='255.255.255.0'>

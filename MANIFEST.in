@@ -36,3 +36,12 @@ global-exclude __pycache__
 # dirty developer checkout.
 exclude REFATORACOES.md
 prune plano-refatoracao
+
+# Reproducible benchmark image sources; exclude generated disks and APK caches.
+include benchmarks/images/alpine-http/*.sh
+include benchmarks/images/alpine-http/*.py
+include benchmarks/images/alpine-http/*.md
+include benchmarks/images/alpine-http/packages.sha256
+include benchmarks/images/alpine-http/guest/*
+include benchmarks/images/alpine-http/example/*.json
+include benchmarks/images/alpine-http/example/network-map
