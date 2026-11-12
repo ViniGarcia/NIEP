@@ -115,7 +115,7 @@ ci-history:
 	$(PYTHON) tools/ci/check_privileged_history.py --history docs/ci/privileged-history.json
 
 ci-tool-tests:
-	$(PYTHON) -m pytest tests/test_ci_tools.py -m unit
+	$(PYTHON) -m pytest tests/test_ci_tools.py tests/test_privileged_checks.py -m unit
 
 ci-check: ci-lint ci-docs ci-history ci-tool-tests
 

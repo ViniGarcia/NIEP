@@ -22,6 +22,38 @@ runner. O job `heavy-throughput` é separado e informativo: cobre o cenário
 iperf/Click, que tem limites de bitrate e perda no próprio teste e pode variar
 com a carga do host.
 
+O executor `tools/ci/run_privileged_checks.py` roda no host Vagrant e chama
+somente alvos cujos testes executam dentro da VM. Com `--scenario all`, executa
+sequencialmente as etapas de `make vm-test-all`: estática, dispatcher, falhas e
+teardown, specs, seis cenários de integração e smokes de CLI/socket. Um cenário
+individual é identificado como validação `partial`; iperf é `throughput`.
+Somente `all` recebe o escopo `complete`.
+
+```bash
+python3 tools/ci/run_privileged_checks.py \
+  --scenario all --output build/ci/privileged
+```
+
+O diretório de saída deve ser novo para cada tentativa. Cada etapa possui log
+próprio com stdout/stderr, duração e código de saída em `summary.json`. A primeira
+falha interrompe a sequência e seu código é devolvido ao workflow; etapas ainda
+não executadas ficam como `not_run`. O resumo é atualizado durante a execução:
+um relatório que ficou em `running` após interrupção não comprova sucesso.
+Provisionamento, diagnóstico e destruição continuam sob responsabilidade do
+workflow, com diagnóstico antes da limpeza mesmo após falhas.
+
+O rsync do Vagrant exclui `build/`, `dist/`, cache do pytest e arquivos de
+cobertura. Assim, uma etapa posterior não apaga relatórios produzidos na VM
+nem recebe artefatos antigos do host. Os testes de host do workflow continuam
+publicando seus próprios relatórios; a evidência privilegiada fica no host
+Vagrant, no diretório escolhido pelo executor.
+
+O relatório identifica revisão e estado do Git quando disponíveis. Em cópias
+sem `.git`, usar `--revision` para identificar a base; `worktree_dirty: null`
+significa que a limpeza da árvore não foi comprovada. Mudanças locais devem
+ser acompanhadas de patch e inventário de arquivos, conforme o
+[registro de validação](validation-record.md).
+
 Até haver evidência suficiente, somente os jobs host da matriz são candidatos
 a checks obrigatórios de merge. O histórico necessário para promover a
 integração privilegiada é mantido em
@@ -44,6 +76,10 @@ Quando existirem pelo menos dez IDs distintos e bem-sucedidos, a política pode
 ser revisada e o job tornado obrigatório por branch protection. O arquivo
 começa vazio de propósito: nenhuma execução privilegiada é alegada neste
 checkout.
+
+Não adicionar execuções locais ao histórico como se fossem IDs do GitHub
+Actions. Conservar o escopo e revisar os artefatos antes de considerar a promoção:
+um sucesso de cenário parcial não demonstra aprovação do conjunto completo.
 
 ## Diagnósticos e recuperação
 

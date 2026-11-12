@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import errno
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,25 @@ import pytest
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_vendored_controller_imports_without_runtime_dependencies() -> None:
+    # The help entry point imports the controller bootstrap without opening a
+    # listening socket. Missing vendored libraries must fail in the host gate.
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("COV_CORE_", "COVERAGE_"))
+    }
+    result = subprocess.run(
+        [sys.executable, "pox.py", "--help"],
+        cwd=ROOT / "OFCONTROLLERS/pox",
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_release_version_is_consistent() -> None:
@@ -213,6 +233,12 @@ def test_source_distribution_contains_release_material_and_pox_notices(tmp_path:
         "LICENSE",
         "OFCONTROLLERS/pox/LICENSE",
         "OFCONTROLLERS/pox/NOTICE",
+        "OFCONTROLLERS/pox/pox/lib/iter.py",
+        "OFCONTROLLERS/pox/pox/lib/config_eval.py",
+        "OFCONTROLLERS/pox/pox/lib/interfaceio/__init__.py",
+        "OFCONTROLLERS/pox/pox/lib/ioworker/io_loop.py",
+        "OFCONTROLLERS/pox/pox/lib/packet/gre.py",
+        "OFCONTROLLERS/pox/pox/lib/packet/vxlan.py",
         "CLI/CLI.py",
         "CLI/HTTP.py",
         "CLI/Launcher.py",
@@ -230,6 +256,7 @@ def test_source_distribution_contains_release_material_and_pox_notices(tmp_path:
     assert not any("/__pycache__/" in f"/{name}" for name in names)
     assert not any(name.endswith((".pyc", ".pyo")) for name in names)
     assert not any(
-        name == root + "REFATORACOES.md" or name.startswith(root + "plano-refatoracao/")
+        name in {root + "REFATORACOES.md", root + "notes.md"}
+        or name.startswith((root + "plano-refatoracao/", root + "plano-finalizacao-refatoracao/"))
         for name in names
     )

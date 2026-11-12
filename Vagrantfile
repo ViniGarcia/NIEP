@@ -9,7 +9,9 @@ Vagrant.configure("2") do |config|
   # Sync current repository into guest.
   config.vm.synced_folder ".", "/home/vagrant/NIEP",
     type: "rsync",
-    rsync__exclude: [".venv/", ".git/", ".vagrant/"]
+    # Keep guest reports between test stages and do not import host build output.
+    rsync__exclude: [".venv/", ".git/", ".vagrant/", "build/", "dist/",
+                    ".pytest_cache/", ".coverage*"]
 
   config.vm.provider :libvirt do |libvirt|
     libvirt.cpus = 4

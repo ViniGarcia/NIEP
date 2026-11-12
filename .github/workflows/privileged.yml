@@ -65,10 +65,10 @@ jobs:
           make check-images 2>&1 | tee build/ci/check-images.log
           make vm-up 2>&1 | tee build/ci/vm-up.log
 
-      - name: Run deterministic integration scenarios
+      - name: Run complete validation or the selected partial scenario
         run: |
-          set -o pipefail
-          make vm-test-integration INTEGRATION_ARGS="$INTEGRATION_ARGS" 2>&1 | tee build/ci/integration.log
+          python3 tools/ci/run_privileged_checks.py \
+            --scenario "$INTEGRATION_ARGS" --output build/ci/privileged
 
       - name: Collect diagnostics (always)
         if: always()
@@ -129,8 +129,8 @@ jobs:
 
       - name: Run throughput-sensitive scenario
         run: |
-          set -o pipefail
-          make vm-test-iperf-shaper 2>&1 | tee build/ci/iperf-click-shaper.log
+          python3 tools/ci/run_privileged_checks.py \
+            --scenario iperf-click-shaper --output build/ci/throughput
 
       - name: Collect diagnostics (always)
         if: always()
