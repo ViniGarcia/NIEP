@@ -26,7 +26,9 @@ COMMON_FIELDS = ('run_id', 'scenario_id', 'kind', 'count', 'repeat', 'instance')
 STARTUP_FIELDS = COMMON_FIELDS + ('started_at', 'define_ms', 'topoup_ms', 'ready_ms', 'status', 'error')
 USAGE_FIELDS = COMMON_FIELDS + ('sample_index', 'sample_timestamp', 'elapsed_seconds',
                                 'memory_bytes', 'cpu_percent', 'status', 'error')
-SCHEMAS = {'startup': STARTUP_FIELDS, 'usage': USAGE_FIELDS}
+RUNTIME_FIELDS = COMMON_FIELDS + ('runtime_id', 'started_at', 'start_call_ms',
+                                  'runtime_ready_ms', 'probe_path', 'status', 'error')
+SCHEMAS = {'startup': STARTUP_FIELDS, 'usage': USAGE_FIELDS, 'runtime_startup': RUNTIME_FIELDS}
 
 
 def mean(values):
@@ -193,19 +195,50 @@ class Client:
         return response.get('data')
 
 
+def runtime_rows(client, capture_id, instances, kind, count, repeat, *, wait, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        snapshot = client.call('startup-timing', 'snapshot')
+        if snapshot.get('capture_id') != capture_id:
+            raise RuntimeError('Startup timing capture changed during the trial')
+        records = {(row['kind'], row['id']): row for row in snapshot['resources']}
+        pending = any(records.get((kind, ident), {}).get('status') == 'pending' for ident in instances)
+        if not wait or not pending or time.monotonic() >= deadline:
+            break
+        time.sleep(.1)
+    final = client.call('startup-timing', 'disable')
+    if final.get('capture_id') != capture_id:
+        raise RuntimeError('Startup timing capture changed while stopping probes')
+    records = {(row['kind'], row['id']): row for row in final['resources']}
+    rows = []
+    for ident in instances:
+        source = records.get((kind, ident), {})
+        row = dict.fromkeys(RUNTIME_FIELDS, '')
+        row.update({key: source[key] for key in RUNTIME_FIELDS if key in source})
+        row.update(kind=kind, count=count, repeat=repeat, instance=ident)
+        if not source:
+            row.update(status='not_started', error='No runtime start event was recorded')
+        rows.append(row)
+    return rows
+
+
 def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
-          observe_seconds=0, stats_interval=1, settle_seconds=2, save_samples=lambda rows: None):
+          observe_seconds=0, stats_interval=1, settle_seconds=2, save_samples=lambda rows: None,
+          capture_runtime=False, save_runtime=lambda rows: None):
     rows = [dict.fromkeys(STARTUP_FIELDS, '') for _ in instances]
     for row, ident in zip(rows, instances):
         row.update(kind=kind, count=count, repeat=repeat, instance=ident, status='failed')
     defined = False
     cleanup_errors = []
     interrupted = False
+    capture_id = None
     try:
         before = time.perf_counter()
         client.call('define', str(path))
         defined = True
         define_ms = (time.perf_counter() - before) * 1000
+        if capture_runtime:
+            capture_id = client.call('startup-timing', 'arm', str(timeout), '0.1')['capture_id']
         start = time.perf_counter()
         client.call('topoup')
         topoup_ms = (time.perf_counter() - start) * 1000
@@ -256,13 +289,26 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
                 row['status'] = 'metrics_failed'
             row['error'] = str(exc)
     finally:
-        if defined:
-            # Always attempt destroy even if stop fails. Never continue after uncertain cleanup.
-            for command in ('topodown', 'topodestroy'):
+        try:
+            if capture_id is not None:
                 try:
-                    client.call(command)
+                    save_runtime(runtime_rows(client, capture_id, instances, kind, count, repeat,
+                                              wait=not interrupted and all(r['status'] == 'ready' for r in rows),
+                                              timeout=timeout))
                 except Exception as exc:
-                    cleanup_errors.append(f'{command}: {exc}')
+                    failures = [dict.fromkeys(RUNTIME_FIELDS, '') for _ in instances]
+                    for row, ident in zip(failures, instances):
+                        row.update(kind=kind, count=count, repeat=repeat, instance=ident,
+                                   status='collection_failed', error=str(exc))
+                    save_runtime(failures)
+        finally:
+            if defined:
+                # Always attempt destroy even if stop fails. Never continue after uncertain cleanup.
+                for command in ('topodown', 'topodestroy'):
+                    try:
+                        client.call(command)
+                    except Exception as exc:
+                        cleanup_errors.append(f'{command}: {exc}')
     if cleanup_errors:
         for row in rows:
             row.update(status='cleanup_failed', error=(row['error'] + '; ' if row['error'] else '') +
@@ -271,24 +317,27 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
 
 
 @contextmanager
-def results_files(directory):
-    """Append to both raw-data CSVs under one output-directory lock."""
+def results_files(directory, runtime_timing=False):
+    """Append to raw-data CSVs under one output-directory lock."""
+    schemas = {name: fields for name, fields in SCHEMAS.items()
+               if runtime_timing or name != 'runtime_startup'}
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
     try:
         try:
             fcntl.flock(directory_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError(f'Another benchmark is writing {directory}') from exc
-        # Validate both files before changing either of them.
-        for name, fields in SCHEMAS.items():
+        # Validate all headers before changing any files.
+        for name, fields in schemas.items():
             path = directory / f'{name}.csv'
             if path.exists() and path.stat().st_size:
                 with path.open(newline='') as source:
-                    if next(csv.reader(source), None) != list(fields):
+                    header = next(csv.reader(source), None)
+                    if header != list(fields):
                         raise RuntimeError(f'Incompatible CSV header in {path}; choose another --output')
         with ExitStack() as stack:
             files = {}
-            for name, fields in SCHEMAS.items():
+            for name, fields in schemas.items():
                 handle = stack.enter_context((directory / f'{name}.csv').open('a+', newline=''))
                 handle.seek(0, os.SEEK_END)
                 writer = csv.DictWriter(handle, fieldnames=fields)
@@ -320,7 +369,9 @@ def main():
     parser.add_argument('--socket', default=os.environ.get('NIEP_SOCKET', '/run/niep.sock'))
     parser.add_argument('--image', default='niep-bench-http:alpine3.20')
     parser.add_argument('--output', type=Path, default=Path('benchmarks/startup/output'),
-                        help='Shared directory for startup.csv and usage.csv (append on each run)')
+                        help='Shared directory for startup.csv, usage.csv and runtime_startup.csv (append on each run)')
+    parser.add_argument('--skip-runtime-timing', action='store_true',
+                        help='Disable per-instance runtime startup probes (enabled by default)')
     parser.add_argument('--generate-only', action='store_true')
     parser.add_argument('--keep-going', action='store_true',
                         help='Continue after a failed trial (cleanup failures always stop)')
@@ -349,8 +400,8 @@ def main():
         if args.generate_only:
             print(f'Topologies: {directory}', flush=True)
             return 0
-        with results_files(args.output) as files:
-            print(f'Results: {args.output / "startup.csv"}, {args.output / "usage.csv"}', flush=True)
+        with results_files(args.output, runtime_timing=not args.skip_runtime_timing) as files:
+            print('Results: ' + ', '.join(str(args.output / f'{name}.csv') for name in files), flush=True)
             return execute(args, plans, files)
 
 
@@ -367,6 +418,11 @@ def execute(args, plans, files):
             raise RuntimeError('Invalid stats response')
     except RuntimeError as exc:
         raise RuntimeError('Resource stats unavailable; restart the updated niepd. ' + str(exc)) from exc
+    if not args.skip_runtime_timing:
+        try:
+            client.call('startup-timing', 'snapshot')
+        except RuntimeError as exc:
+            raise RuntimeError('Restart updated niepd for integrated startup timing, or use --skip-runtime-timing') from exc
     if 'vm' in args.kinds:
         subprocess.run([sys.executable, str(Path(__file__).with_name('prepare-image.py')),
                         str(args.vm_image), '--count', str(max(args.counts))], check=True)
@@ -386,15 +442,26 @@ def execute(args, plans, files):
         for repeat in range(1, args.repeats + 1):
             metadata['scenario_id'] = uuid4().hex
             started_at = datetime.now(timezone.utc).isoformat()
+            runtime_records = []
+
+            def save_runtime(records):
+                runtime_records.extend(records)
+                save('runtime_startup', records)
+
             rows, cleanup_failed = trial(client, path, instances, kind, count, repeat,
                                           args.timeout, args.interval,
                                           observe_seconds=args.observe_seconds, stats_interval=args.stats_interval,
                                           settle_seconds=args.settle_seconds,
-                                          save_samples=lambda rows: save('usage', rows))
+                                          save_samples=lambda rows: save('usage', rows),
+                                          capture_runtime=not args.skip_runtime_timing, save_runtime=save_runtime)
             for row in rows:
                 row['started_at'] = started_at
             save('startup', rows)
             success = all(row['status'] == 'ready' for row in rows)
+            timing_failed = any(row['status'] != 'ready' for row in runtime_records)
+            if timing_failed:
+                print('Runtime startup timing incomplete; see runtime_startup.csv', file=sys.stderr)
+            failed |= timing_failed
             failed |= not success
             print(f'{kind} n={count} repeat={repeat}: '
                   f'{rows[0]["all_ready_ms"]} ms' if success else
@@ -406,7 +473,7 @@ def execute(args, plans, files):
             if any(row['status'] == 'interrupted' for row in rows):
                 print('Interrupted; partial results saved and cleanup attempted.', file=sys.stderr)
                 return 130
-            if cleanup_failed or (not success and not args.keep_going):
+            if cleanup_failed or ((not success or timing_failed) and not args.keep_going):
                 return 1
     return int(failed)
 

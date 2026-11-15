@@ -113,15 +113,16 @@ the idle check is not an exclusive lock.
 
 ## Results and interpretation
 
-Each execution appends raw measurements to two CSVs in
+Each execution appends raw measurements to three CSVs in
 `benchmarks/startup/output/` (`--output DIR` selects another shared directory):
 
 | File | Rows | Measurements |
 | --- | --- | --- |
 | `startup.csv` | One per instance per scenario/repetition | `started_at`, `define_ms`, `topoup_ms`, `ready_ms`, `status`, `error` |
+| `runtime_startup.csv` | One per instance per scenario/repetition | `start_call_ms`, `runtime_ready_ms`, `probe_path`, `status`, `error` |
 | `usage.csv` | One per instance per poll | `sample_index`, `sample_timestamp`, `elapsed_seconds`, `memory_bytes`, `cpu_percent`, `status`, `error` |
 
-Both files include `run_id`, `scenario_id`, `kind` (`vm` or `container`), `count`
+All three files include `run_id`, `scenario_id`, `kind` (`vm` or `container`), `count`
 (number of instances in the scenario), `repeat`, and `instance`. `run_id` identifies
 an invocation; a fresh `scenario_id` identifies each scenario/repetition, including
 repeated sizes in the same invocation. Join on **`run_id`, `scenario_id`, `instance`**
@@ -138,7 +139,7 @@ JOIN usage AS u
  AND s.instance = u.instance;
 ```
 
-The files contain no configuration JSON, image metadata, summary columns, or
+The files contain no configuration JSON, summary columns, or
 record-type column. Existing rows are retained and headers are written once.
 The previous combined `results.csv` is preserved as historical data and is no
 longer updated or automatically imported. Incompatible headers in the new CSVs
@@ -240,16 +241,34 @@ Previously recorded timeout rows are retained; rerun affected scenarios, e.g.:
   --output /tmp/niep-figures
 ```
 
-Five figures are generated in each language (ten PNGs total). Portuguese titles,
+Eight figures are generated in each language (sixteen PNGs total). Portuguese titles,
 axes and legends are under `plots/pt/`; English versions are under `plots/en/`.
 Only PNG is generated:
 
+- `topoup_time`: blocking topology startup command duration versus instance count.
 - `startup_time`: time until all instances answer HTTP versus instance count.
+- `runtime_start_call`: mean per-instance runtime start API duration (ms) versus count.
+- `runtime_http_ready`: mean per-instance runtime start-to-HTTP duration (ms) versus count.
 - `cpu_mean`: mean aggregate CPU versus instance count.
 - `memory_mean`: mean aggregate memory versus instance count.
 - `cpu_per_instance`: VM/container bars normalized to usage per instance,
   pooling the selected scenario sizes.
 - `memory_per_instance`: the analogous normalized memory bars.
+
+The two runtime timing curves read `runtime_startup.csv` when present and join
+`run_id`, `scenario_id`, `instance` back to the selected successful startup trials.
+They use only complete runtime captures. For each trial,
+the individual durations are averaged once across its instances; plotted means
+and standard deviations then use those trial-level means. These are per-instance
+durations, not the total startup time or a sum over N. Historical runs without
+runtime instrumentation show no observation for those curves, rather than zero.
+
+`topoup_time` takes exactly one `topoup_ms` value per scenario/repetition,
+converted to seconds. The repeated copies in instance rows do not count as
+independent observations. Different `topoup_ms` values in the same scenario are
+rejected as inconsistent; missing timings are not replaced by zero. Error bars
+show variation across repetitions of each scenario size. This command duration
+ends before the subsequent HTTP scan, settling wait, and resource polling.
 
 Startup time is the maximum `ready_ms` across all instances in a successful
 scenario/repetition, converted to seconds. For resources, complete polling rounds
@@ -282,3 +301,98 @@ to the startup graph, while missing resource metrics are never replaced by zero.
 Re-run plotting after the benchmark completes to refresh all figures; existing
 figures in the chosen output directory are replaced. The backend is `Agg`, so a
 GUI or display server is not required. No derived columns are written to CSV.
+
+## Per-instance runtime startup in the main trial
+
+The normal command now measures the **same VM/container instances** used by the
+scenario and writes a third CSV automatically:
+
+```sh
+.venv/bin/python benchmarks/startup/run.py --counts 1 2 --repeats 1
+```
+
+Update/restart `niepd` before using this feature. The benchmark checks support
+before launching a topology. No second boot or separate script is required.
+Use `--skip-runtime-timing` to disable it and retain the two-CSV workflow.
+The existing 2-second settling period and 10-second CPU/memory observation window
+remain after the whole topology answers HTTP.
+
+Before `topoup`, the script arms a one-shot capture in the daemon. Hooks directly
+around libvirt's `domain.create()` and Docker's `container.start()` capture each
+start. HTTP probes begin concurrently with those actual API calls, rather than
+waiting for `topoup` or Mininet to finish. Image lookup, disk copying, domain
+XML definition and container object creation happen before these timers.
+Mininet link attachment, switch startup and later topology management are not
+prerequisites for the readiness probes.
+
+`runtime_startup.csv` contains the same foreign keys **`run_id`, `scenario_id`,
+`kind`, `count`, `repeat`, `instance`** as `startup.csv` and `usage.csv`.
+These rows measure the same instances as the topology trial. Fields:
+
+- `started_at`: UTC time immediately before invoking the runtime start API.
+- `start_call_ms`: wall-clock duration until that API returns (including runtime
+  communication and the work it performs to start the already-prepared instance).
+  For VMs this invokes libvirt domain startup; for containers this invokes the
+  Docker Engine start operation. It is not an HTTP readiness or complete boot
+  time. Subsequent Docker reload/status checks are outside this interval.
+- `runtime_ready_ms`: from that same API invocation until the first observed
+  HTTP 200 with exact body `ok`. Because probing is concurrent, this can even be
+  smaller than `start_call_ms` if HTTP responds before the API returns.
+- `runtime_id`: the actual VM UUID or Docker container ID.
+- `probe_path`: `libvirt_management_dhcp` for VMs; `container_loopback` for
+  containers. Loopback is probed inside the existing container's network namespace
+  using `nsenter`; no second container or guest credentials are involved.
+- `status`, `error`: readiness, timeout, start/probe or collection failures.
+
+The daemon uses monotonic clocks and a 100 ms probe interval. VM management
+address discovery, network/HTTP initialization and observation delay are part
+of `runtime_ready_ms`. Container observations include launching the small probe
+process in its namespace. These add measurement overhead and yield observational
+upper bounds, not exact guest-kernel or application process boot durations.
+The probe runs while other instances and the NIEP topology are starting: resource
+contention remains. The subsequent settling wait does not enter startup timers.
+
+The original `startup.csv` `ready_ms` still measures from just before `topoup`
+to HTTP observed through the shared Mininet data network. The third CSV starts
+later and probes another network path. Comparing these is useful, but subtracting
+them is not an exact decomposition of NIEP orchestration overhead.
+
+No derived statistics or configuration JSON is stored. For example:
+
+```sql
+SELECT s.kind, s.count, s.instance, s.ready_ms, r.runtime_ready_ms, r.start_call_ms
+FROM startup s JOIN runtime_startup r
+  ON s.run_id = r.run_id AND s.scenario_id = r.scenario_id AND s.instance = r.instance
+WHERE r.status = 'ready';
+```
+
+For manual diagnostics, the command API/CLI supports:
+
+```sh
+niepctl --json startup-timing arm 180 0.1
+niepctl topoup
+niepctl --json startup-timing snapshot
+niepctl --json startup-timing disable
+```
+
+A capture applies to one `topoup`, never to unrelated later starts. Topology stop,
+clean/destroy or a failed start cancels pending probes. The main benchmark saves
+one timing row per expected instance before cleanup, including missing-event or
+collection errors, and checks that the capture identity has not changed.
+
+## Sequential launch and observation latency
+
+NIEP's operation journal executes lifecycle steps sequentially: each VM is
+created/configured/started before advancing to the next; each container is
+created/started and connected before the next. Once started, its guest/process
+continues initialization concurrently with later orchestration. The scheduler
+does not wait for one instance to answer HTTP before launching the next.
+
+`ready_ms` also includes the main script's sequential observation path. After
+`topoup`, it invokes a new `niepctl mininet cmd h1 curl ...` for each target in
+turn. At large N, process/CLI/socket and probe costs delay when the last ready
+endpoint is observed. `runtime_ready_ms` uses concurrent probes starting at each
+actual runtime start and avoids waiting for this global scan. These raw durations
+cannot be multiplied by N to predict the full scenario time: object creation,
+network setup, switch/controller startup, resource contention and observation
+latency are different components, and boot progress overlaps.

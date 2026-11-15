@@ -40,7 +40,7 @@ def number(row, field):
     return value
 
 
-def aggregate(startup, usage, run_ids):
+def aggregate(startup, usage, run_ids, runtime=()):
     """One observation per complete scenario/repetition, never per polling row."""
     scenarios = defaultdict(list)
     for row in startup:
@@ -51,6 +51,9 @@ def aggregate(startup, usage, run_ids):
         key = (row['run_id'], row['scenario_id'])
         if key in scenarios:
             polls[key][row['sample_index']].append(row)
+    runtime_groups = defaultdict(list)
+    for row in runtime:
+        runtime_groups[(row['run_id'], row['scenario_id'])].append(row)
     results, skipped = [], 0
     for key, rows in scenarios.items():
         first = rows[0]
@@ -64,7 +67,21 @@ def aggregate(startup, usage, run_ids):
             continue
         result = dict(run_id=key[0], scenario_id=key[1], kind=kind, count=count,
                       startup_seconds=max(number(row, 'ready_ms') for row in rows) / 1000,
-                      memory_mib=None, cpu_percent=None)
+                      memory_mib=None, cpu_percent=None, topoup_seconds=None,
+                      runtime_start_call_ms=None, runtime_http_ready_ms=None)
+        topoup_values = {number(row, 'topoup_ms') for row in rows if row.get('topoup_ms') not in ('', None)}
+        if len(topoup_values) > 1:
+            raise ValueError(f'Inconsistent topoup_ms in scenario {key}')
+        if topoup_values:
+            result['topoup_seconds'] = topoup_values.pop() / 1000
+        timings = runtime_groups[key]
+        if (len(timings) == count and {r['instance'] for r in timings} == instances
+                and all(r['status'] == 'ready' and r['kind'] == kind and r['count'] == first['count']
+                        and r['repeat'] == first['repeat'] for r in timings)):
+            for field, metric in (('start_call_ms', 'runtime_start_call_ms'),
+                                  ('runtime_ready_ms', 'runtime_http_ready_ms')):
+                if all(r.get(field) not in ('', None) for r in timings):
+                    result[metric] = statistics.fmean(number(r, field) for r in timings)
         memory_totals, cpu_totals = [], []
         for samples in polls[key].values():
             if (len(samples) != count or {r['instance'] for r in samples} != instances
@@ -91,7 +108,7 @@ def mean_sd(values):
 def curve_points(scenarios, kind, metric):
     groups = defaultdict(list)
     for row in scenarios:
-        if row['kind'] == kind and row[metric] is not None:
+        if row['kind'] == kind and row.get(metric) is not None:
             groups[row['count']].append(row[metric])
     return [(count, *mean_sd(values), len(values)) for count, values in sorted(groups.items())]
 
@@ -101,7 +118,7 @@ def per_instance_points(scenarios, metric):
     # of its entity count or number of polling snapshots.
     groups = defaultdict(list)
     for row in scenarios:
-        if row[metric] is not None:
+        if row.get(metric) is not None:
             groups[row['kind']].append(row[metric] / row['count'])
     return [(kind, *mean_sd(groups[kind]), len(groups[kind])) for kind in KINDS if groups[kind]]
 
@@ -121,9 +138,12 @@ def render(scenarios, output, selection, language='en'):
     no_data = 'Sem observações completas' if portuguese else 'No complete observations'
     xlabel = 'Número de instâncias' if portuguese else 'Number of instances'
     curve_labels = {
+        'topoup_seconds': ('Duração do topoup por cenário', 'Duração do comando topoup (s)'),
         'startup_seconds': ('Tempo de inicialização da topologia', 'Tempo até todas as instâncias responderem HTTP (s)'),
         'cpu_percent': ('Uso médio de CPU do cenário', 'Uso agregado de CPU (%) — 100% por núcleo'),
         'memory_mib': ('Uso médio de memória do cenário', 'Uso agregado de memória (MiB)'),
+        'runtime_start_call_ms': ('Duração média da chamada de start por instância', 'Duração da chamada ao runtime (ms)'),
+        'runtime_http_ready_ms': ('Tempo médio de start até HTTP por instância', 'Tempo do start do runtime até HTTP pronto (ms)'),
     }
     bar_labels = {
         'memory_mib': ('Uso de memória por instância entre cenários', 'Memória média por instância (MiB)'),
@@ -137,9 +157,12 @@ def render(scenarios, output, selection, language='en'):
         plt.close(fig)
 
     for metric, name, title, ylabel in (
+        ('topoup_seconds', 'topoup_time', 'topoup duration per scenario', 'topoup command duration (s)'),
         ('startup_seconds', 'startup_time', 'Topology startup time', 'Time until all instances respond to HTTP (s)'),
         ('cpu_percent', 'cpu_mean', 'Mean scenario CPU usage', 'Aggregate CPU usage (%) — 100% per core'),
         ('memory_mib', 'memory_mean', 'Mean scenario memory usage', 'Aggregate memory usage (MiB)'),
+        ('runtime_start_call_ms', 'runtime_start_call', 'Mean start API duration per instance', 'Runtime start API duration (ms)'),
+        ('runtime_http_ready_ms', 'runtime_http_ready', 'Mean runtime start-to-HTTP time per instance', 'Runtime start to HTTP readiness (ms)'),
     ):
         if portuguese:
             title, ylabel = curve_labels[metric]
@@ -212,10 +235,14 @@ def main():
         missing = set(selected) - set(available)
         if missing:
             raise ValueError(f'Unknown run IDs: {sorted(missing)}')
-    scenarios, skipped = aggregate(startup, usage, set(selected))
+    runtime_path = args.input / 'runtime_startup.csv'
+    runtime = read_csv(runtime_path, common | {'start_call_ms', 'runtime_ready_ms'}) if runtime_path.exists() else []
+    scenarios, skipped = aggregate(startup, usage, set(selected), runtime)
     if not scenarios:
         raise ValueError('No successful, complete scenarios in the selected runs')
     print(f'Selected runs: {", ".join(selected)}; complete scenarios: {len(scenarios)}; skipped: {skipped}')
+    captured = sum(row['runtime_http_ready_ms'] is not None for row in scenarios)
+    print(f'In-topology runtime timing scenarios: {captured}/{len(scenarios)}')
     for kind in KINDS:
         for count, mean, sd, n in curve_points(scenarios, kind, 'startup_seconds'):
             deviation = f'{sd:.3f}s' if n > 1 else 'n/a (one trial)'
