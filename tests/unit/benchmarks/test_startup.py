@@ -14,7 +14,9 @@ BENCH = runpy.run_path(str(Path(__file__).resolve().parents[3] / 'benchmarks/sta
 def test_generated_topologies_have_unique_interfaces(tmp_path, kind, count):
     path, instances = BENCH['generate'](tmp_path, kind, count, 'local:test')
     topology = json.loads(path.read_text())
-    assert len(topology['CONNECTIONS']) == count
+    assert len(topology['CONNECTIONS']) == count + 1
+    assert len(topology['MININET']['HOSTS']) == 1
+    assert topology['MININET']['SWITCHES'] == ['s1']
     assert len(set(instances)) == count
     specs = [json.loads((tmp_path / f'{ident}.json').read_text()) for ident in instances]
     assert len({spec['INTERFACES'][0]['MAC'] for spec in specs}) == count
@@ -272,7 +274,7 @@ def test_counts_reject_non_positive_integers(value):
         positive_count(value)
 
 
-@pytest.mark.parametrize('index', [0, 1, 63, 239, 240, 255, 256, 65536, (1 << 22) - 1])
+@pytest.mark.parametrize('index', [0, 1, 63, 239, 240, 255, 256, 65536, (1 << 22) - 1, (1 << 24) - 4])
 def test_guest_procedural_address_matches_topology(index):
     import subprocess
     from niep.domain.startup_addressing import addresses, mac
@@ -281,7 +283,7 @@ def test_guest_procedural_address_matches_topology(index):
     # Exercise the actual POSIX guest implementation, including octet carries.
     result = subprocess.run(['sh', '-c', function + '\nstartup_address "$1"',
                              'test', mac(index, 1)], text=True, capture_output=True, check=True)
-    assert result.stdout == addresses(index)[1] + '/30'
+    assert result.stdout == addresses(index)[1] + '/8'
     assert len(mac(index, 1).split(':')) == 6
     assert mac(index, 1) != mac(index, 2)
 
@@ -293,5 +295,25 @@ def test_generated_addresses_are_unique_across_a_large_scenario(tmp_path):
     host_ips = {h['INTERFACES'][0]['IP'] for h in topology['MININET']['HOSTS']}
     endpoints = [json.loads((tmp_path / f'{ident}.json').read_text()) for ident in instances]
     endpoint_ips = {e['INTERFACES'][0]['IP'] for e in endpoints}
-    assert len(host_ips | endpoint_ips) == 514
-    assert endpoints[256]['INTERFACES'][0]['IP'] == addresses(256)[1] + '/30'
+    assert len(host_ips) == 1
+    assert len(endpoint_ips) == 257
+    assert not host_ips & endpoint_ips
+    assert len(host_ips | endpoint_ips) == 258
+    assert endpoints[256]['INTERFACES'][0]['IP'] == addresses(256)[1] + '/8'
+
+
+def test_shared_switch_probes_every_instance_from_the_same_host(tmp_path):
+    from niep.domain.startup_addressing import addresses
+    probes = []
+
+    class ProbeClient(Client):
+        def call(self, *args):
+            if args[0] == 'mininet':
+                probes.append(args)
+            return super().call(*args)
+
+    rows, failed = BENCH['trial'](ProbeClient(), tmp_path, ['vm1', 'vm2'], 'vm', 2, 1, 1, 0)
+    assert not failed
+    assert all(row['status'] == 'ready' for row in rows)
+    assert all(probe[2] == 'h1' for probe in probes)
+    assert [probe[-1] for probe in probes] == [f'http://{addresses(i)[1]}:8080/health' for i in range(2)]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure NIEP topology startup through HTTP on independent Mininet links."""
+"""Measure NIEP topology startup through HTTP on a shared Mininet switch."""
 import argparse
 import csv
 from contextlib import contextmanager, ExitStack
@@ -18,7 +18,7 @@ import tempfile
 from uuid import uuid4
 from datetime import datetime, timezone
 
-from niep.domain.startup_addressing import addresses, mac, positive_count, validate_count
+from niep.domain.startup_addressing import PREFIX_LENGTH, addresses, mac, positive_count, validate_count
 
 
 COUNTS = (1, 2, 4, 8, 16, 32, 64)
@@ -109,17 +109,19 @@ def data_mac(index):
 def generate(directory, kind, count, image):
     validate_count(count)
     directory.mkdir(parents=True, exist_ok=True)
-    hosts, connections, resources = [], [], []
+    host_ip = addresses(0)[0]
+    host_mac = mac(0, 3)
+    hosts = [{'ID': 'h1', 'INTERFACES': [{'MAC': host_mac, 'IP': f'{host_ip}/{PREFIX_LENGTH}'}]}]
+    connections = [{'IN/OUT': 'h1', 'IN/OUTIFACE': host_mac, 'OUT/IN': 's1'}]
+    resources = []
     for i in range(count):
         ident = f'st-{kind}{i + 1:02d}'
-        host = f'h{i + 1}'
         data_address = data_mac(i)
-        host_mac = mac(i, 3)
-        host_ip, endpoint_ip = addresses(i)
-        iface = {'ID': f'stb{i:02d}', 'MAC': data_address, 'IP': endpoint_ip + '/30',
+        endpoint_ip = addresses(i)[1]
+        iface = {'ID': f'stb{i:02d}', 'MAC': data_address, 'IP': f'{endpoint_ip}/{PREFIX_LENGTH}',
                  'LINK_MAC': mac(i, 4)}
         if kind == 'vm':
-            iface.pop('IP')  # Guest derives its /30 address from the data MAC at boot.
+            iface.pop('IP')  # Guest derives its shared-LAN address from the data MAC at boot.
             spec = {'ID': ident, 'MEMORY': 256, 'VCPU': 1, 'DISK': 'alpine-http',
                     'MANAGEMENT_MAC': mac(i, 2),
                     'INTERFACES': [iface]}
@@ -130,12 +132,11 @@ def generate(directory, kind, count, image):
         filename = f'{ident}.json'
         (directory / filename).write_text(json.dumps(spec, indent=2) + '\n')
         resources.append(filename)
-        hosts.append({'ID': host, 'INTERFACES': [{'MAC': host_mac, 'IP': host_ip + '/30'}]})
-        connections.append({'IN/OUT': host, 'IN/OUTIFACE': host_mac,
+        connections.append({'IN/OUT': 's1',
                             'OUT/IN': ident, 'OUT/INIFACE': data_address})
     topology = {'ID': f'Startup{kind}{count}', 'VMS': resources if kind == 'vm' else [],
                 'CONTAINERS': resources if kind == 'container' else [], 'VNFS': [], 'SFCS': [],
-                'MININET': {'HOSTS': hosts, 'SWITCHES': [], 'CONTROLLERS': [], 'OVSWITCHES': []},
+                'MININET': {'HOSTS': hosts, 'SWITCHES': ['s1'], 'CONTROLLERS': [], 'OVSWITCHES': []},
                 'CONNECTIONS': connections}
     path = directory / 'topology.json'
     path.write_text(json.dumps(topology, indent=2) + '\n')
@@ -219,7 +220,7 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
                 if remaining <= 0:
                     break
                 endpoint_ip = addresses(i)[1]
-                response = client.call('mininet', 'cmd', f'h{i + 1}', 'curl',
+                response = client.call('mininet', 'cmd', 'h1', 'curl',
                                        '--noproxy', endpoint_ip, '--silent', '--show-error',
                                        '--max-time', str(min(0.3, remaining)), '--write-out',
                                        '%{http_code}', f'http://{endpoint_ip}:8080/health')

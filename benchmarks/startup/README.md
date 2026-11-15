@@ -3,8 +3,10 @@
 Run from the repository root with an idle NIEP daemon. The default sizes are
 1, 2, 4, 8, 16, 32 and 64, first VMs and then containers, with three trials per
 size. `--counts` accepts positive integers, for example `--counts 3 7 64 257`.
-Each instance has an independent link to its own Mininet probe host. No
-controller or switch startup is included. Run one benchmark at a time and avoid
+Each scenario has one Mininet probe host `h1`, one common switch `s1`, and all
+VMs or containers attached to that switch. All data NICs share `10.0.0.0/8`.
+NIEP starts its regular switch with its implicit local POX controller; switch
+and controller startup are included in `topoup` timing. Run one benchmark at a time and avoid
 sending other lifecycle commands to the daemon during a run.
 
 ## Prepare outside the measured interval
@@ -40,15 +42,19 @@ service and do not need `--network-map` for this benchmark.
 
 ## Procedural addressing
 
-The benchmark's static `network-map` has been removed. Zero-based instance index
-`i` determines all MACs and a unique `/30` subnet in `10.0.0.0/8`. The host uses
-subnet address + 1; the VM/container uses + 2. For example:
+The benchmark's static `network-map` has been removed. The probe host uses
+`10.0.0.1/8`; zero-based instance index `i` selects address `10.0.0.0 + i + 2`,
+with the same `/8` prefix. There is one shared broadcast domain:
 
-| Instance | Host | VM/container | Subnet |
-| --- | --- | --- | --- |
-| 1 | 10.0.0.1 | 10.0.0.2 | 10.0.0.0/30 |
-| 2 | 10.0.0.5 | 10.0.0.6 | 10.0.0.4/30 |
-| 3 | 10.0.0.9 | 10.0.0.10 | 10.0.0.8/30 |
+```text
+                    +-- VM/container 1: 10.0.0.2/8
+h1: 10.0.0.1/8 -- s1 +-- VM/container 2: 10.0.0.3/8
+                    +-- VM/container N: 10.0.0.(N+1)/8 (with octet carries)
+```
+
+`h1` probes every endpoint sequentially using its own unique destination IP.
+VM and container scenarios use the same topology and addresses in separate
+trials. VM management remains on the separate libvirt DHCP network.
 
 MACs encode the index in four bytes: data `02:01:xx:xx:xx:xx`, management
 `02:02:xx:xx:xx:xx`, probe host `02:03:xx:xx:xx:xx`, bridge
@@ -58,13 +64,15 @@ use DHCP. An explicit `/etc/niep-network.conf` entry takes precedence, preservin
 custom-image and tutorial behavior; avoid overriding benchmark data MACs there.
 The optional map mechanism remains available for unrelated custom topologies.
 
-The old repeated data IPs were safe because links were isolated. The new plan
-also gives every host and endpoint a distinct IP within a scenario. It supports
-4,194,304 `/30` links; counts beyond this IPv4 pool are rejected explicitly.
-Host memory, disk, interface and runtime capacity impose practical limits much
+There are 16,777,213 endpoint addresses in this `/8` after reserving the network,
+broadcast and probe-host addresses. Counts beyond this pool are rejected.
+Host memory, disk, switch-port and runtime capacity impose practical limits much
 sooner. Reusing these deterministic IDs/MACs across simultaneous benchmark runs
-is unsupported. MAC generation handles octet carries and does not overflow at
-240 or 256 instances.
+is unsupported. MAC/IP generation handles octet carries.
+
+This shared-switch version changes the network and startup overhead compared
+with historical isolated-link trials. Keep those runs separate when comparing
+results; `run_id` and timestamps distinguish executions.
 
 The container uses Alpine 3.20.10 and BusyBox extras 1.36.1-r31, matching the VM
 workload. Both serve the exact two bytes `ok` at port 8080, path `/health`.

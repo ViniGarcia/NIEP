@@ -115,8 +115,8 @@ regenerated into `/etc/network/interfaces` on every boot, so there is no persist
 interface-name/MAC binding from the build host.
 
 The startup benchmark now reserves data MACs `02:01:00:xx:xx:xx` for
-procedural addressing. For these MACs the guest derives a unique `/30` endpoint
-address in `10.0.0.0/8`, matching `benchmarks/startup/run.py`; no static map is
+procedural addressing. For these MACs the guest derives a unique endpoint
+address on the shared `10.0.0.0/8` network, matching `benchmarks/startup/run.py`; no static map is
 needed. Explicit map entries still take precedence. Existing tutorial/example
 MACs retain their configured behavior. See `benchmarks/startup/README.md` for the
 address plan and the one-time update of existing base images.

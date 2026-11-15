@@ -1,7 +1,8 @@
-"""Deterministic identities for isolated startup-benchmark links."""
+"""Deterministic identities for the shared startup-benchmark LAN."""
 from ipaddress import IPv4Address
 
-MAX_INSTANCES = 1 << 22  # Number of /30 links in 10.0.0.0/8.
+MAX_INSTANCES = (1 << 24) - 3  # /8 minus network, broadcast and probe host.
+PREFIX_LENGTH = 8
 
 
 def positive_count(value):
@@ -14,7 +15,7 @@ def positive_count(value):
 def validate_count(count):
     positive_count(count)
     if count > MAX_INSTANCES:
-        raise ValueError(f'count exceeds the IPv4 address pool ({MAX_INSTANCES} /30 links)')
+        raise ValueError(f'count exceeds the IPv4 address pool ({MAX_INSTANCES} endpoints)')
 
 
 def mac(index, role):
@@ -26,5 +27,5 @@ def mac(index, role):
 def addresses(index):
     if not 0 <= index < MAX_INSTANCES:
         raise ValueError('instance index exceeds the IPv4 address pool')
-    network = int(IPv4Address('10.0.0.0')) + index * 4
-    return str(IPv4Address(network + 1)), str(IPv4Address(network + 2))
+    network = int(IPv4Address('10.0.0.0'))
+    return str(IPv4Address(network + 1)), str(IPv4Address(network + index + 2))
