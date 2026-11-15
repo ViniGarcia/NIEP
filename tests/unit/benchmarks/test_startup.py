@@ -135,7 +135,7 @@ def test_image_preflight_requires_procedural_guest_support(tmp_path, monkeypatch
     assert source.read_bytes() == b'original'
 
 
-def test_repeated_runs_append_two_joinable_raw_csvs(tmp_path, monkeypatch):
+def test_repeated_runs_append_joinable_raw_csvs(tmp_path, monkeypatch):
     import csv
     import sys
     from types import SimpleNamespace
@@ -179,7 +179,17 @@ def test_repeated_runs_append_two_joinable_raw_csvs(tmp_path, monkeypatch):
     for startup, usage in zip(tables['startup'], tables['usage']):
         assert all(startup[key] == usage[key] for key in BENCH['COMMON_FIELDS'])
     assert tables['startup'][0]['scenario_id'] != tables['startup'][1]['scenario_id']
-    assert {p.name for p in tmp_path.iterdir()} == {'startup.csv', 'usage.csv'}
+    with (tmp_path / 'host_memory.csv').open(newline='') as handle:
+        host_rows = list(csv.DictReader(handle))
+    assert len(host_rows) == 4
+    for index, startup_row in enumerate(tables['startup']):
+        pair = host_rows[2 * index:2 * index + 2]
+        assert [r['phase'] for r in pair] == ['before_topoup', 'before_topodown']
+        assert all(all(r[key] == startup_row[key] for key in
+                       ('run_id', 'scenario_id', 'kind', 'count', 'repeat')) for r in pair)
+        assert all(r['status'] == 'sampled' and int(r['mem_total_bytes']) > 0 for r in pair)
+        assert all('delta' not in key and 'used' not in key for key in pair[0])
+    assert {p.name for p in tmp_path.iterdir()} == {'startup.csv', 'usage.csv', 'host_memory.csv'}
 
 
 def test_csv_with_incompatible_header_is_preserved(tmp_path):
@@ -403,3 +413,122 @@ def test_integrated_timing_creates_third_csv_for_same_instances(tmp_path, monkey
     assert sum(event[0] == 'topodestroy' for event in events) == 1
     assert next(i for i, e in enumerate(events) if e[:2] == ('startup-timing', 'arm')) < next(
         i for i, e in enumerate(events) if e[0] == 'topoup')
+
+
+def test_host_memory_snapshot_preserves_raw_counters_in_bytes(tmp_path):
+    meminfo = tmp_path / 'meminfo'
+    meminfo.write_text('MemTotal: 1024 kB\nMemAvailable: 700 kB\nMemFree: 500 kB\n'
+                       'Buffers: 20 kB\nCached: 200 kB\nHugePages_Total: 0\n')
+    row = BENCH['host_memory_snapshot']('before_topoup', 'vm', 64, 2, meminfo)
+    assert row['status'] == 'sampled'
+    assert row['mem_total_bytes'] == 1024 * 1024
+    assert row['mem_available_bytes'] == 700 * 1024
+    assert row['mem_free_bytes'] == 500 * 1024
+    assert row['buffers_bytes'] == 20 * 1024
+    assert row['cached_bytes'] == 200 * 1024
+    assert row['sample_timestamp'].endswith('+00:00')
+    assert not any('delta' in field or 'used' in field for field in row)
+
+
+@pytest.mark.parametrize('text', [None, 'MemTotal: 100 kB\n',
+                                 'MemTotal: 100 MB\n', 'MemTotal: -1 kB\n'])
+def test_host_memory_snapshot_reports_unavailable_counters_without_zero_fallback(tmp_path, text):
+    path = tmp_path / 'meminfo'
+    if text is not None:
+        path.write_text(text)
+    row = BENCH['host_memory_snapshot']('before_topodown', 'container', 1, 1, path)
+    assert row['status'] == 'metrics_error'
+    assert row['error']
+    assert row['mem_total_bytes'] == row['mem_available_bytes'] == ''
+
+
+def test_host_snapshots_are_adjacent_to_start_stop_and_after_runtime_collection(tmp_path, monkeypatch):
+    events, saved = [], []
+
+    class OrderedClient(Client):
+        def call(self, *args):
+            events.append(args[:2] if args[0] == 'startup-timing' else args[:1])
+            if args[0] == 'startup-timing':
+                return dict(capture_id='capture', resources=[dict(kind='vm', id='vm1', status='ready')])
+            return super().call(*args)
+
+    def snapshot(phase, kind, count, repeat):
+        events.append((phase,))
+        return dict(phase=phase, kind=kind, count=count, repeat=repeat, status='sampled',
+                    mem_total_bytes=1024, mem_available_bytes=800 if phase == 'before_topoup' else 700)
+
+    def save_host(records):
+        events.append(('save_host',))
+        saved.extend(records)
+
+    def observe(*_args, **_kwargs):
+        events.append(('observe',))
+        return [dict(sample_index=1, memory_bytes=100, cpu_percent=1, status='sampled')]
+
+    monkeypatch.setitem(BENCH['trial'].__globals__, 'host_memory_snapshot', snapshot)
+    monkeypatch.setitem(BENCH['trial'].__globals__, 'observe', observe)
+    rows, failed = BENCH['trial'](OrderedClient(), tmp_path, ['vm1'], 'vm', 1, 1, 1, 0,
+                                  capture_runtime=True, save_host_memory=save_host, observe_seconds=1)
+    assert not failed and rows[0]['status'] == 'ready'
+    assert events[events.index(('topoup',)) - 1] == ('before_topoup',)
+    assert events[events.index(('topodown',)) - 1] == ('before_topodown',)
+    assert events.index(('startup-timing', 'disable')) < events.index(('before_topodown',))
+    assert events.index(('observe',)) < events.index(('before_topodown',))
+    assert events.index(('topodestroy',)) < events.index(('save_host',))
+    assert [row['phase'] for row in saved] == ['before_topoup', 'before_topodown']
+
+
+@pytest.mark.parametrize('operation', ['define', 'topoup', 'topodown', 'mininet'])
+def test_host_snapshots_on_lifecycle_failures(tmp_path, operation):
+    saved = []
+    client = Client(fail=operation)
+    BENCH['trial'](client, tmp_path, ['vm1'], 'vm', 1, 1, 1, 0, save_host_memory=saved.extend)
+    assert [row['phase'] for row in saved] == ([] if operation == 'define' else
+                                              ['before_topoup', 'before_topodown'])
+    if operation != 'define':
+        assert client.calls[-1] == 'topodestroy'
+
+
+def test_host_memory_error_preserves_readiness_and_cleanup(tmp_path, monkeypatch):
+    snapshot = BENCH['host_memory_snapshot']
+    monkeypatch.setitem(BENCH['trial'].__globals__, 'host_memory_snapshot',
+                        lambda *args: snapshot(*args, meminfo_path=tmp_path / 'missing'))
+    client, saved = Client(), []
+    rows, failed = BENCH['trial'](client, tmp_path, ['vm1'], 'vm', 1, 1, 1, 0,
+                                  save_host_memory=saved.extend)
+    assert not failed and rows[0]['status'] == 'ready'
+    assert len(saved) == 2 and all(row['status'] == 'metrics_error' for row in saved)
+    assert client.calls[-2:] == ['topodown', 'topodestroy']
+
+
+def test_execute_reports_host_memory_failure_without_discarding_ready_startup(tmp_path, monkeypatch):
+    import csv
+    from types import SimpleNamespace
+
+    class IdleClient(Client):
+        def call(self, *args):
+            if args[0] == 'status':
+                return {'defined': False}
+            if args[0] == 'stats':
+                return {'resources': []}
+            return super().call(*args)
+
+    client = IdleClient()
+    module = BENCH['execute'].__globals__
+    snapshot = module['host_memory_snapshot']
+    monkeypatch.setitem(module, 'host_memory_snapshot',
+                        lambda *args: snapshot(*args, meminfo_path=tmp_path / 'missing'))
+    monkeypatch.setitem(module, 'Client', lambda *_args: client)
+    monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs: None)
+    args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=True,
+                           kinds=['container'], image='local:test', repeats=1, timeout=1,
+                           interval=0, observe_seconds=0, stats_interval=1, settle_seconds=0,
+                           keep_going=False)
+    with BENCH['results_files'](tmp_path) as files:
+        assert BENCH['execute'](args, [('container', 1, tmp_path, ['c1'])], files) == 1
+    with (tmp_path / 'startup.csv').open() as source:
+        assert list(csv.DictReader(source))[0]['status'] == 'ready'
+    with (tmp_path / 'host_memory.csv').open() as source:
+        snapshots = list(csv.DictReader(source))
+        assert len(snapshots) == 2 and all(r['status'] == 'metrics_error' for r in snapshots)
+    assert client.calls[-2:] == ['topodown', 'topodestroy']

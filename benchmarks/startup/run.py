@@ -31,7 +31,36 @@ USAGE_FIELDS = COMMON_FIELDS + ('sample_index', 'sample_timestamp', 'elapsed_sec
                                 'memory_bytes', 'cpu_percent', 'status', 'error')
 RUNTIME_FIELDS = COMMON_FIELDS + ('runtime_id', 'started_at', 'start_call_ms',
                                   'runtime_ready_ms', 'probe_path', 'status', 'error')
-SCHEMAS = {'startup': STARTUP_FIELDS, 'usage': USAGE_FIELDS, 'runtime_startup': RUNTIME_FIELDS}
+HOST_MEMORY_COUNTERS = {'MemTotal': 'mem_total_bytes', 'MemAvailable': 'mem_available_bytes',
+                        'MemFree': 'mem_free_bytes', 'Buffers': 'buffers_bytes', 'Cached': 'cached_bytes'}
+HOST_MEMORY_FIELDS = ('run_id', 'scenario_id', 'kind', 'count', 'repeat', 'phase',
+                      'sample_timestamp', *HOST_MEMORY_COUNTERS.values(), 'status', 'error')
+SCHEMAS = {'startup': STARTUP_FIELDS, 'usage': USAGE_FIELDS, 'runtime_startup': RUNTIME_FIELDS,
+           'host_memory': HOST_MEMORY_FIELDS}
+
+
+def host_memory_snapshot(phase, kind, count, repeat, meminfo_path=Path('/proc/meminfo')):
+    """Record raw Linux host counters; delta/used-memory calculations belong in analysis."""
+    row = dict.fromkeys(HOST_MEMORY_FIELDS, '')
+    row.update(phase=phase, kind=kind, count=count, repeat=repeat,
+               sample_timestamp=datetime.now(timezone.utc).isoformat(), status='metrics_error')
+    try:
+        fields = {parts[0].rstrip(':'): parts[1:] for line in meminfo_path.read_text().splitlines()
+                  if (parts := line.split())}
+        counters = {}
+        for source, target in HOST_MEMORY_COUNTERS.items():
+            value, unit = fields[source]
+            if unit != 'kB' or int(value) < 0:
+                raise ValueError(f'Invalid {source} counter')
+            counters[target] = int(value) * 1024
+        if not 0 <= counters['mem_available_bytes'] <= counters['mem_total_bytes']:
+            raise ValueError('MemAvailable exceeds MemTotal')
+        if counters['mem_total_bytes'] == 0:
+            raise ValueError('MemTotal is zero')
+        row.update(counters, status='sampled')
+    except (OSError, KeyError, ValueError) as exc:
+        row['error'] = f'Host memory unavailable: {exc}'
+    return row
 
 
 def mean(values):
@@ -257,7 +286,7 @@ def probe_http(client, count, start, timeout, interval):
 
 def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
           observe_seconds=0, stats_interval=1, settle_seconds=2, save_samples=lambda rows: None,
-          capture_runtime=False, save_runtime=lambda rows: None):
+          capture_runtime=False, save_runtime=lambda rows: None, save_host_memory=lambda rows: None):
     rows = [dict.fromkeys(STARTUP_FIELDS, '') for _ in instances]
     for row, ident in zip(rows, instances):
         row.update(kind=kind, count=count, repeat=repeat, instance=ident,
@@ -266,6 +295,7 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
     cleanup_errors = []
     interrupted = False
     capture_id = None
+    host_snapshots = []
     try:
         before = time.perf_counter()
         client.call('define', str(path))
@@ -273,6 +303,7 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
         define_ms = (time.perf_counter() - before) * 1000
         if capture_runtime:
             capture_id = client.call('startup-timing', 'arm', str(timeout), '0.1')['capture_id']
+        host_snapshots.append(host_memory_snapshot('before_topoup', kind, count, repeat))
         start = time.perf_counter()
         client.call('topoup')
         topoup_ms = (time.perf_counter() - start) * 1000
@@ -320,12 +351,17 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
                     save_runtime(failures)
         finally:
             if defined:
+                if host_snapshots:
+                    # Read after observation/runtime collection, immediately before stop.
+                    # Persist after cleanup so disk writes do not separate the read and stop.
+                    host_snapshots.append(host_memory_snapshot('before_topodown', kind, count, repeat))
                 # Always attempt destroy even if stop fails. Never continue after uncertain cleanup.
                 for command in ('topodown', 'topodestroy'):
                     try:
                         client.call(command)
                     except Exception as exc:
                         cleanup_errors.append(f'{command}: {exc}')
+                save_host_memory(host_snapshots)
     if cleanup_errors:
         for row in rows:
             row.update(status='cleanup_failed', error=(row['error'] + '; ' if row['error'] else '') +
@@ -386,7 +422,7 @@ def main():
     parser.add_argument('--socket', default=os.environ.get('NIEP_SOCKET', '/run/niep.sock'))
     parser.add_argument('--image', default='niep-bench-http:alpine3.20')
     parser.add_argument('--output', type=Path, default=Path('benchmarks/startup/output'),
-                        help='Shared directory for startup.csv, usage.csv and runtime_startup.csv (append on each run)')
+                        help='Shared directory for startup, usage, runtime_startup and host_memory CSVs (append on each run)')
     parser.add_argument('--skip-runtime-timing', action='store_true',
                         help='Disable per-instance runtime startup probes (enabled by default)')
     parser.add_argument('--generate-only', action='store_true')
@@ -461,25 +497,35 @@ def execute(args, plans, files):
             metadata['scenario_id'] = uuid4().hex
             started_at = datetime.now(timezone.utc).isoformat()
             runtime_records = []
+            host_records = []
 
             def save_runtime(records):
                 runtime_records.extend(records)
                 save('runtime_startup', records)
+
+            def save_host_memory(records):
+                host_records.extend(records)
+                save('host_memory', records)
 
             rows, cleanup_failed = trial(client, path, instances, kind, count, repeat,
                                           args.timeout, args.interval,
                                           observe_seconds=args.observe_seconds, stats_interval=args.stats_interval,
                                           settle_seconds=args.settle_seconds,
                                           save_samples=lambda rows: save('usage', rows),
-                                          capture_runtime=not args.skip_runtime_timing, save_runtime=save_runtime)
+                                          capture_runtime=not args.skip_runtime_timing, save_runtime=save_runtime,
+                                          save_host_memory=save_host_memory)
             for row in rows:
                 row['started_at'] = started_at
             save('startup', rows)
             success = all(row['status'] == 'ready' for row in rows)
             timing_failed = any(row['status'] != 'ready' for row in runtime_records)
+            host_failed = any(row['status'] != 'sampled' for row in host_records)
+            if host_failed:
+                print('Host memory collection incomplete; see host_memory.csv', file=sys.stderr)
             if timing_failed:
                 print('Runtime startup timing incomplete; see runtime_startup.csv', file=sys.stderr)
             failed |= timing_failed
+            failed |= host_failed
             failed |= not success
             print(f'{kind} n={count} repeat={repeat}: '
                   f'{rows[0]["all_ready_ms"]} ms' if success else
@@ -491,7 +537,7 @@ def execute(args, plans, files):
             if any(row['status'] == 'interrupted' for row in rows):
                 print('Interrupted; partial results saved and cleanup attempted.', file=sys.stderr)
                 return 130
-            if cleanup_failed or ((not success or timing_failed) and not args.keep_going):
+            if cleanup_failed or ((not success or timing_failed or host_failed) and not args.keep_going):
                 return 1
     return int(failed)
 

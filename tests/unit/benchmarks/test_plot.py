@@ -83,12 +83,13 @@ def test_render_outputs_only_png_in_both_languages_without_sample_annotations(tm
 
     monkeypatch.setattr(Figure, 'savefig', savefig)
     scenarios = [dict(kind=kind, count=2, startup_seconds=seconds, topoup_seconds=seconds / 2, cpu_percent=cpu, memory_mib=memory,
+                      host_memory_delta_mib=memory - 75,
                       runtime_start_call_ms=cpu * 10, runtime_http_ready_ms=seconds * 1000)
                  for kind in ('vm', 'container')
                  for seconds, cpu, memory in [(1, 10, 50), (2, 20, 100)]]
     for language in ('pt', 'en'):
         PLOT['render'](scenarios, tmp_path / language, 'test', language)
-    assert len(captured) == 16
+    assert len(captured) == 18
     assert all(path.suffix == '.png' for path, _, _ in captured)
     assert {path.parent.name for path, _, _ in captured} == {'pt', 'en'}
     assert any(title == 'Tempo de inicialização da topologia' for _, title, _ in captured)
@@ -96,6 +97,8 @@ def test_render_outputs_only_png_in_both_languages_without_sample_annotations(tm
     assert all('n=' not in label for _, _, labels in captured for label in labels)
     assert {path.stem for path, _, _ in captured} >= {'runtime_start_call', 'runtime_http_ready'}
     assert any(title == 'Duração média da chamada de start por instância' for _, title, _ in captured)
+    assert {path.stem for path, _, _ in captured} >= {'host_memory_delta'}
+    assert any(title == 'Variação estimada de memória usada do host' for _, title, _ in captured)
 
 
 def runtime(scenario, calls=(100, 300), readiness=(1000, 3000)):
@@ -139,3 +142,52 @@ def test_topoup_rejects_inconsistent_copies_within_a_scenario():
     with pytest.raises(ValueError, match='Inconsistent topoup_ms'):
         PLOT['aggregate'](rows, [], {'r1'})
     assert PLOT['aggregate'](startup('s1'), [], {'r1'})[0][0]['topoup_seconds'] is None
+
+
+def host_memory(scenario, before=800, after=700, total=1024, run='r1'):
+    return [dict(run_id=run, scenario_id=scenario, kind='vm', count='2', repeat='1',
+                 phase=phase, mem_total_bytes=str(total * 1048576),
+                 mem_available_bytes=str(available * 1048576), status='sampled')
+            for phase, available in [('before_topoup', before), ('before_topodown', after)]]
+
+
+def test_host_delta_joins_by_run_and_scenario_and_counts_each_trial_once():
+    starts = startup('s1') + startup('s2')
+    snapshots = host_memory('s1') + host_memory('s2', before=800, after=900)
+    snapshots += host_memory('s1', run='other', before=1000, after=0)
+    results, _ = PLOT['aggregate'](starts, [], {'r1'}, host_memory=snapshots)
+    assert [r['host_memory_delta_mib'] for r in results] == [100, -100]
+    assert PLOT['curve_points'](results, 'vm', 'host_memory_delta_mib') == [
+        (2, 0, statistics.stdev([100, -100]), 2)]
+    assert all(r['memory_mib'] is None for r in results)  # Independent of per-instance samples.
+
+
+def test_absent_incomplete_invalid_or_unmatched_host_pairs_are_not_zero():
+    complete = host_memory('s1')
+    cases = [[], complete[:1], complete + complete, host_memory('other'),
+             [complete[0], dict(complete[1], status='metrics_error')],
+             [complete[0], dict(complete[1], mem_available_bytes='')],
+             [complete[0], dict(complete[1], kind='container')],
+             [complete[0], dict(complete[1], count='64')],
+             [complete[0], dict(complete[1], repeat='2')],
+             [complete[0], dict(complete[1], mem_total_bytes=str(2048 * 1048576))]]
+    for snapshots in cases:
+        results, _ = PLOT['aggregate'](startup('s1'), [], {'r1'}, host_memory=snapshots)
+        assert results[0]['host_memory_delta_mib'] is None
+        assert results[0]['startup_seconds'] == 2
+
+
+def test_host_memory_zero_delta_is_a_valid_observation():
+    results, _ = PLOT['aggregate'](startup('s1'), [], {'r1'},
+                                   host_memory=host_memory('s1', before=800, after=800))
+    assert PLOT['curve_points'](results, 'vm', 'host_memory_delta_mib') == [(2, 0, 0, 1)]
+
+
+@pytest.mark.parametrize('field,value', [('mem_total_bytes', 'nan'),
+                                       ('mem_available_bytes', '-1'),
+                                       ('mem_available_bytes', str(2048 * 1048576))])
+def test_host_delta_rejects_invalid_raw_counters(field, value):
+    snapshots = host_memory('s1')
+    snapshots[0][field] = value
+    with pytest.raises(ValueError, match='Invalid'):
+        PLOT['aggregate'](startup('s1'), [], {'r1'}, host_memory=snapshots)

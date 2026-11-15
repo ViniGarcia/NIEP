@@ -40,7 +40,29 @@ def number(row, field):
     return value
 
 
-def aggregate(startup, usage, run_ids, runtime=()):
+def host_memory_delta(records, scenario):
+    """One host-wide delta per trial, with a complete pair of raw snapshots."""
+    phases = {row['phase']: row for row in records}
+    if (len(records) != 2 or set(phases) != {'before_topoup', 'before_topodown'}
+            or any(row['status'] != 'sampled' or any(row[field] != scenario[field]
+                                                   for field in ('kind', 'count', 'repeat'))
+                   for row in records)):
+        return None
+    before, after = phases['before_topoup'], phases['before_topodown']
+    fields = ('mem_total_bytes', 'mem_available_bytes')
+    if any(row.get(field) in ('', None) for row in records for field in fields):
+        return None
+    totals = [number(row, 'mem_total_bytes') for row in (before, after)]
+    available = [number(row, 'mem_available_bytes') for row in (before, after)]
+    if any(total <= 0 or free > total for total, free in zip(totals, available)):
+        raise ValueError('Invalid host memory counters')
+    if totals[0] != totals[1]:
+        return None  # RAM capacity changed; this pair is not comparable.
+    # Used estimate = MemTotal - MemAvailable. Preserve negative deltas.
+    return (available[0] - available[1]) / 1048576
+
+
+def aggregate(startup, usage, run_ids, runtime=(), host_memory=()):
     """One observation per complete scenario/repetition, never per polling row."""
     scenarios = defaultdict(list)
     for row in startup:
@@ -54,6 +76,9 @@ def aggregate(startup, usage, run_ids, runtime=()):
     runtime_groups = defaultdict(list)
     for row in runtime:
         runtime_groups[(row['run_id'], row['scenario_id'])].append(row)
+    host_groups = defaultdict(list)
+    for row in host_memory:
+        host_groups[(row['run_id'], row['scenario_id'])].append(row)
     results, skipped = [], 0
     for key, rows in scenarios.items():
         first = rows[0]
@@ -68,6 +93,7 @@ def aggregate(startup, usage, run_ids, runtime=()):
         result = dict(run_id=key[0], scenario_id=key[1], kind=kind, count=count,
                       startup_seconds=max(number(row, 'ready_ms') for row in rows) / 1000,
                       memory_mib=None, cpu_percent=None, topoup_seconds=None,
+                      host_memory_delta_mib=host_memory_delta(host_groups[key], first),
                       runtime_start_call_ms=None, runtime_http_ready_ms=None)
         topoup_values = {number(row, 'topoup_ms') for row in rows if row.get('topoup_ms') not in ('', None)}
         if len(topoup_values) > 1:
@@ -142,6 +168,7 @@ def render(scenarios, output, selection, language='en'):
         'startup_seconds': ('Tempo de inicialização da topologia', 'Tempo até todas as instâncias responderem HTTP (s)'),
         'cpu_percent': ('Uso médio de CPU do cenário', 'Uso agregado de CPU (%) — 100% por núcleo'),
         'memory_mib': ('Uso médio de memória do cenário', 'Uso agregado de memória (MiB)'),
+        'host_memory_delta_mib': ('Variação estimada de memória usada do host', 'Delta de memória usada do host (MiB)'),
         'runtime_start_call_ms': ('Duração média da chamada de start por instância', 'Duração da chamada ao runtime (ms)'),
         'runtime_http_ready_ms': ('Tempo médio de start até HTTP por instância', 'Tempo do start do runtime até HTTP pronto (ms)'),
     }
@@ -161,6 +188,7 @@ def render(scenarios, output, selection, language='en'):
         ('startup_seconds', 'startup_time', 'Topology startup time', 'Time until all instances respond to HTTP (s)'),
         ('cpu_percent', 'cpu_mean', 'Mean scenario CPU usage', 'Aggregate CPU usage (%) — 100% per core'),
         ('memory_mib', 'memory_mean', 'Mean scenario memory usage', 'Aggregate memory usage (MiB)'),
+        ('host_memory_delta_mib', 'host_memory_delta', 'Estimated host used-memory change', 'Host used-memory delta (MiB)'),
         ('runtime_start_call_ms', 'runtime_start_call', 'Mean start API duration per instance', 'Runtime start API duration (ms)'),
         ('runtime_http_ready_ms', 'runtime_http_ready', 'Mean runtime start-to-HTTP time per instance', 'Runtime start to HTTP readiness (ms)'),
     ):
@@ -187,6 +215,8 @@ def render(scenarios, output, selection, language='en'):
         else:
             ax.text(.5, .5, no_data, transform=ax.transAxes, ha='center')
         ax.set(title=title, xlabel=xlabel, ylabel=ylabel)
+        if metric == 'host_memory_delta_mib':
+            ax.axhline(0, color='gray', linewidth=.8, linestyle='--')
         ax.grid(alpha=.25)
         save(fig, name)
 
@@ -237,12 +267,17 @@ def main():
             raise ValueError(f'Unknown run IDs: {sorted(missing)}')
     runtime_path = args.input / 'runtime_startup.csv'
     runtime = read_csv(runtime_path, common | {'start_call_ms', 'runtime_ready_ms'}) if runtime_path.exists() else []
-    scenarios, skipped = aggregate(startup, usage, set(selected), runtime)
+    host_path = args.input / 'host_memory.csv'
+    host_required = (common - {'instance'}) | {'phase', 'mem_total_bytes', 'mem_available_bytes'}
+    host_memory = read_csv(host_path, host_required) if host_path.exists() else []
+    scenarios, skipped = aggregate(startup, usage, set(selected), runtime, host_memory)
     if not scenarios:
         raise ValueError('No successful, complete scenarios in the selected runs')
     print(f'Selected runs: {", ".join(selected)}; complete scenarios: {len(scenarios)}; skipped: {skipped}')
     captured = sum(row['runtime_http_ready_ms'] is not None for row in scenarios)
     print(f'In-topology runtime timing scenarios: {captured}/{len(scenarios)}')
+    captured_host = sum(row['host_memory_delta_mib'] is not None for row in scenarios)
+    print(f'Host memory delta scenarios: {captured_host}/{len(scenarios)}')
     for kind in KINDS:
         for count, mean, sd, n in curve_points(scenarios, kind, 'startup_seconds'):
             deviation = f'{sd:.3f}s' if n > 1 else 'n/a (one trial)'

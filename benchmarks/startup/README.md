@@ -113,7 +113,7 @@ the idle check is not an exclusive lock.
 
 ## Results and interpretation
 
-Each execution appends raw measurements to three CSVs in
+Each execution appends raw measurements to four CSVs in
 `benchmarks/startup/output/` (`--output DIR` selects another shared directory):
 
 | File | Rows | Measurements |
@@ -121,9 +121,11 @@ Each execution appends raw measurements to three CSVs in
 | `startup.csv` | One per instance per scenario/repetition | `probe_method`, `started_at`, `define_ms`, `topoup_ms`, `ready_ms`, `status`, `error` |
 | `runtime_startup.csv` | One per instance per scenario/repetition | `start_call_ms`, `runtime_ready_ms`, `probe_path`, `status`, `error` |
 | `usage.csv` | One per instance per poll | `sample_index`, `sample_timestamp`, `elapsed_seconds`, `memory_bytes`, `cpu_percent`, `status`, `error` |
+| `host_memory.csv` | Two per scenario/repetition | `phase`, `sample_timestamp`, `mem_total_bytes`, `mem_available_bytes`, `mem_free_bytes`, `buffers_bytes`, `cached_bytes`, `status`, `error` |
 
-All three files include `run_id`, `scenario_id`, `kind` (`vm` or `container`), `count`
-(number of instances in the scenario), `repeat`, and `instance`. `run_id` identifies
+All four files include `run_id`, `scenario_id`, `kind` (`vm` or `container`), `count`
+(number of instances in the scenario), and `repeat`. The instance-level files also
+include `instance`; the host snapshots apply to the entire scenario. `run_id` identifies
 an invocation; a fresh `scenario_id` identifies each scenario/repetition, including
 repeated sizes in the same invocation. Join on **`run_id`, `scenario_id`, `instance`**
 for instance-level analysis. Group by `run_id, scenario_id` for a whole scenario.
@@ -190,6 +192,45 @@ rather than issuing a burst, and actual collection times are recorded. The
 while the last request completes. Other `stats` clients share the daemon's CPU
 sampling history, so CPU intervals may be shorter than the benchmark interval.
 These are observations of the running HTTP service without additional load.
+
+### Raw host memory snapshots
+
+The runner reads Linux `/proc/meminfo` on the same host as the local NIEP daemon,
+without spawning a process or requesting daemon resource statistics. Each
+scenario/repetition that attempts `topoup` records two snapshots:
+
+- `before_topoup`: after `define` and runtime timing setup, immediately before
+  starting the `topoup` timer and invoking the command.
+- `before_topodown`: after resource observation and runtime timing collection,
+  immediately before invoking `topodown`, while the scenario is still running.
+
+`host_memory.csv` stores raw `MemTotal`, `MemAvailable`, `MemFree`, `Buffers`, and
+`Cached` counters as integer bytes (`kB` from procfs multiplied by 1024), plus a UTC
+`sample_timestamp`. It stores neither used-memory estimates nor deltas. Join these
+rows to the scenario using **`run_id`, `scenario_id`**; do not sum or duplicate the
+host readings per instance. Both snapshots are flushed after cleanup so CSV writes
+do not intervene between the final snapshot and `topodown`. Existing instance-level
+CSV headers are unchanged; the new file is created alongside them, including with
+`--skip-runtime-timing`.
+
+The plot estimates used host memory as `MemTotal - MemAvailable` and computes
+`after - before` once per trial. With unchanged `MemTotal`, this equals
+`MemAvailable_before - MemAvailable_after`. Positive values mean estimated used
+memory increased; negative values are retained. The kernel defines `MemAvailable`
+as an estimate of memory available for new applications without swapping, including
+reclaimability considerations ([Linux procfs documentation](https://docs.kernel.org/filesystems/proc.html)).
+This is a host-wide before/after estimate, including orchestration and host services;
+background processes, memory reclamation and cache changes can affect it. It is not
+a peak measurement, a time average, or memory attributed exclusively to the scenario.
+
+Startup failure, HTTP timeout or interruption still attempts the final snapshot
+before cleanup; failed `topoup` may already have rolled back resources. A failure
+before the first snapshot (for example, `define` failure) produces no host pair.
+Missing/invalid counters produce `metrics_error` and empty values, preserving startup
+timings and cleanup. The run reports a collection failure and exits nonzero (or
+continues with `--keep-going`). The plot uses only successful, complete startup
+scenarios with exactly one valid host snapshot per phase and unchanged `MemTotal`;
+missing or invalid pairs are never replaced with zero.
 
 By default the first failed trial stops the series and prints its diagnostic;
 `--keep-going` continues after ordinary failures. Nonzero exit means a trial failed.
@@ -259,7 +300,7 @@ Previously recorded timeout rows are retained; rerun affected scenarios, e.g.:
   --output /tmp/niep-figures
 ```
 
-Eight figures are generated in each language (sixteen PNGs total). Portuguese titles,
+Nine figures are generated in each language (eighteen PNGs total). Portuguese titles,
 axes and legends are under `plots/pt/`; English versions are under `plots/en/`.
 Only PNG is generated:
 
@@ -269,6 +310,8 @@ Only PNG is generated:
 - `runtime_http_ready`: mean per-instance runtime start-to-HTTP duration (ms) versus count.
 - `cpu_mean`: mean aggregate CPU versus instance count.
 - `memory_mean`: mean aggregate memory versus instance count.
+- `host_memory_delta`: estimated host used-memory change between the two snapshots
+  versus instance count, comparing VMs and containers (MiB).
 - `cpu_per_instance`: VM/container bars normalized to usage per instance,
   pooling the selected scenario sizes.
 - `memory_per_instance`: the analogous normalized memory bars.
@@ -280,6 +323,12 @@ the individual durations are averaged once across its instances; plotted means
 and standard deviations then use those trial-level means. These are per-instance
 durations, not the total startup time or a sum over N. Historical runs without
 runtime instrumentation show no observation for those curves, rather than zero.
+
+The host memory curve reads `host_memory.csv` when present, joins on `run_id` and
+`scenario_id`, and contributes one delta per trial, regardless of instance count or
+poll count. It shows the mean and ±1 sample standard deviation across repetitions
+at each size. A zero reference line makes negative deltas visible. Historical runs
+without host snapshots retain all other plots and show no host delta observations.
 
 `topoup_time` takes exactly one `topoup_ms` value per scenario/repetition,
 converted to seconds. The repeated copies in instance rows do not count as
@@ -323,7 +372,7 @@ GUI or display server is not required. No derived columns are written to CSV.
 ## Per-instance runtime startup in the main trial
 
 The normal command now measures the **same VM/container instances** used by the
-scenario and writes a third CSV automatically:
+scenario and writes `runtime_startup.csv` automatically:
 
 ```sh
 .venv/bin/python benchmarks/startup/run.py --counts 1 2 --repeats 1
@@ -331,7 +380,7 @@ scenario and writes a third CSV automatically:
 
 Update/restart `niepd` before using this feature. The benchmark checks support
 before launching a topology. No second boot or separate script is required.
-Use `--skip-runtime-timing` to disable it and retain the two-CSV workflow.
+Use `--skip-runtime-timing` to disable it and retain startup, usage and host memory CSVs.
 The existing 2-second settling period and 10-second CPU/memory observation window
 remain after the whole topology answers HTTP.
 
@@ -371,7 +420,7 @@ The probe runs while other instances and the NIEP topology are starting: resourc
 contention remains. The subsequent settling wait does not enter startup timers.
 
 The original `startup.csv` `ready_ms` still measures from just before `topoup`
-to HTTP observed through the shared Mininet data network. The third CSV starts
+to HTTP observed through the shared Mininet data network. The runtime CSV starts
 later and probes another network path. Comparing these is useful, but subtracting
 them is not an exact decomposition of NIEP orchestration overhead.
 
