@@ -137,3 +137,6 @@ dmypy.json
 /benchmarks/images/alpine-http/output/
 /benchmarks/images/alpine-http/cache/
 *.qcow2
+
+# Generated startup benchmark topologies and measurements
+/benchmarks/startup/output/

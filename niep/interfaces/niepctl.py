@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import os
 import shlex
 import socket
@@ -38,13 +39,16 @@ app.add_typer(mininet_app, name="mininet")
 
 
 def send_request(socket_path, command, args):
+    timeout = float(os.environ.get('NIEP_CLIENT_TIMEOUT', CLIENT_TIMEOUT))
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError('NIEP_CLIENT_TIMEOUT must be a positive finite number')
     payload = json.dumps(CommandRequest(command, tuple(args)).to_dict()) + "\n"
     encoded = payload.encode("utf-8")
     if len(encoded) > MAX_REQUEST_BYTES:
         raise ValueError("request exceeds the 64 KiB socket limit")
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        client.settimeout(CLIENT_TIMEOUT)
+        client.settimeout(timeout)
         client.connect(socket_path)
         client.sendall(encoded)
         shutdown = getattr(client, "shutdown", None)
@@ -53,7 +57,7 @@ def send_request(socket_path, command, args):
         frame = None
         buffer = bytearray()
         size = 0
-        deadline = time.monotonic() + CLIENT_TIMEOUT
+        deadline = time.monotonic() + timeout
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:

@@ -86,3 +86,32 @@ def test_client_requires_one_complete_response_frame(monkeypatch, response_chunk
     monkeypatch.setattr("niep.interfaces.niepctl.socket.socket", lambda *_: Client())
     with pytest.raises(RuntimeError):
         send_request("/run/niep.sock", "status", [])
+
+
+@pytest.mark.parametrize('value', ['0', '-1', 'nan', 'inf', 'invalid'])
+def test_client_rejects_invalid_timeout_before_connect(monkeypatch, value):
+    monkeypatch.setenv('NIEP_CLIENT_TIMEOUT', value)
+    with pytest.raises(ValueError):
+        send_request('/nonexistent/niep.sock', 'status', [])
+
+
+def test_client_uses_configured_timeout(monkeypatch):
+    from niep.interfaces import niepctl
+
+    seen = []
+
+    class FakeSocket:
+        def settimeout(self, value):
+            seen.append(value)
+
+        def connect(self, _path):
+            raise ConnectionError('stop after observing timeout')
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv('NIEP_CLIENT_TIMEOUT', '600')
+    monkeypatch.setattr(niepctl.socket, 'socket', lambda *_args: FakeSocket())
+    with pytest.raises(ConnectionError):
+        send_request('/run/niep.sock', 'topoup', [])
+    assert seen == [600.0]
