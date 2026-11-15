@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import runpy
+import shlex
 
 import pytest
 
@@ -33,6 +34,13 @@ class Client:
         self.calls.append(args[0])
         if args[0] == self.fail:
             raise RuntimeError('injected failure')
+        if args[0] == 'mininet':
+            command = shlex.split(args[3])
+            return {'output': json.dumps([
+                dict(index=i, ready_ms=(i + 1) * .1 if self.output == 'ok200' else '',
+                     status='ready' if self.output == 'ok200' else 'timeout',
+                     error='' if self.output == 'ok200' else self.output)
+                for i in range(int(command[2]))])}
         return {'output': self.output}
 
 
@@ -63,9 +71,14 @@ def test_cleanup_attempts_destroy_after_failure(tmp_path, operation):
 
 
 def test_interrupt_saves_partial_observations_and_cleans(tmp_path):
+    markers = []
+
     class InterruptedClient(Client):
         def call(self, *args):
             if args[0] == 'mininet':
+                marker = Path(shlex.split(args[3])[-1])
+                assert marker.exists()
+                markers.append(marker)
                 raise KeyboardInterrupt
             return super().call(*args)
 
@@ -73,6 +86,25 @@ def test_interrupt_saves_partial_observations_and_cleans(tmp_path):
     rows, stop = BENCH['trial'](client, tmp_path, ['vm1'], 'vm', 1, 1, 1, 0)
     assert stop
     assert rows[0]['status'] == 'interrupted'
+    assert client.calls[-2:] == ['topodown', 'topodestroy']
+    assert markers and not markers[0].exists()
+
+
+@pytest.mark.parametrize('output', ['not JSON', '[]',
+                                  '[{"index":0,"status":"ready","ready_ms":NaN,"error":""}]'])
+def test_invalid_collector_results_fail_and_cleanup(tmp_path, output):
+    class InvalidClient(Client):
+        def call(self, *args):
+            if args[0] == 'mininet':
+                self.calls.append('mininet')
+                return {'output': output}
+            return super().call(*args)
+
+    client = InvalidClient()
+    rows, _ = BENCH['trial'](client, tmp_path, ['vm1'], 'vm', 1, 1, 1, 0)
+    assert rows[0]['status'] == 'failed'
+    assert rows[0]['ready_ms'] == ''
+    assert rows[0]['error']
     assert client.calls[-2:] == ['topodown', 'topodestroy']
 
 
@@ -315,8 +347,12 @@ def test_shared_switch_probes_every_instance_from_the_same_host(tmp_path):
     rows, failed = BENCH['trial'](ProbeClient(), tmp_path, ['vm1', 'vm2'], 'vm', 2, 1, 1, 0)
     assert not failed
     assert all(row['status'] == 'ready' for row in rows)
-    assert all(probe[2] == 'h1' for probe in probes)
-    assert [probe[-1] for probe in probes] == [f'http://{addresses(i)[1]}:8080/health' for i in range(2)]
+    assert len(probes) == 1
+    assert probes[0][:3] == ('mininet', 'cmd', 'h1')
+    command = shlex.split(probes[0][3])
+    assert Path(command[1]).name == 'http-probe.py'
+    assert command[2:4] == ['2', addresses(0)[1]]
+    assert all(row['probe_method'] == 'mininet_parallel_http_v1' for row in rows)
 
 
 def test_integrated_timing_creates_third_csv_for_same_instances(tmp_path, monkeypatch):

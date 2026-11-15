@@ -52,7 +52,7 @@ h1: 10.0.0.1/8 -- s1 +-- VM/container 2: 10.0.0.3/8
                     +-- VM/container N: 10.0.0.(N+1)/8 (with octet carries)
 ```
 
-`h1` probes every endpoint sequentially using its own unique destination IP.
+`h1` probes all endpoints concurrently, each using its own unique destination IP.
 VM and container scenarios use the same topology and addresses in separate
 trials. VM management remains on the separate libvirt DHCP network.
 
@@ -118,7 +118,7 @@ Each execution appends raw measurements to three CSVs in
 
 | File | Rows | Measurements |
 | --- | --- | --- |
-| `startup.csv` | One per instance per scenario/repetition | `started_at`, `define_ms`, `topoup_ms`, `ready_ms`, `status`, `error` |
+| `startup.csv` | One per instance per scenario/repetition | `probe_method`, `started_at`, `define_ms`, `topoup_ms`, `ready_ms`, `status`, `error` |
 | `runtime_startup.csv` | One per instance per scenario/repetition | `start_call_ms`, `runtime_ready_ms`, `probe_path`, `status`, `error` |
 | `usage.csv` | One per instance per poll | `sample_index`, `sample_timestamp`, `elapsed_seconds`, `memory_bytes`, `cpu_percent`, `status`, `error` |
 
@@ -145,6 +145,14 @@ The previous combined `results.csv` is preserved as historical data and is no
 longer updated or automatically imported. Incompatible headers in the new CSVs
 are rejected before either file is changed. Writes to the output directory are
 locked to prevent concurrent benchmark writers.
+
+Post-`topoup` HTTP probing now uses `probe_method=mininet_parallel_http_v1` in
+`startup.csv`. Historical sequential-probe files lack this column and their
+headers are rejected rather than rewritten. Use a fresh `--output` directory
+(for example, `--output benchmarks/startup/output/parallel-http-v1`) for new
+measurements, and pass that directory as `--input` when plotting. Keep sequential
+and concurrent-probe runs separate: the plotter does not enforce methodology
+compatibility when explicitly pooling run IDs.
 
 Topology descriptors are temporary and removed after execution, including after
 handled interruption. `--generate-only` explicitly saves descriptors under
@@ -200,8 +208,18 @@ By default the first failed trial stops the series and prints its diagnostic;
 The clock is monotonic. Probing begins after `topoup` returns because NIEP exposes
 Mininet commands only after topology startup. NIEP starts resources sequentially;
 these are end-to-end topology observations, not individual hypervisor/process
-boot durations. Probes run round robin, with at most 300 ms per HTTP attempt;
-CLI/socket overhead and polling delay are included. The benchmark sets
+boot durations. A single command launches `http-probe.py` inside `h1`, using the
+runner's Python interpreter and one asynchronous task per endpoint. Each task
+retries independently, with at most 300 ms per HTTP attempt and `--interval`
+between attempts. Every task uses the original start time and shared deadline
+from before `topoup`; on Linux the monotonic performance clock is shared across
+these processes on the same host. The collector bypasses HTTP proxies and requires
+HTTP 200 with exact body `ok`. It records each response's observation time locally,
+so waiting for other endpoints and returning the final JSON do not inflate
+`ready_ms`. Initial CLI/socket/interpreter startup, polling delay and event-loop
+scheduling are still included. A runner-owned temporary marker cancels outstanding
+tasks when the runner unwinds after interruption or command failure, allowing
+topology cleanup to proceed. The benchmark sets
 `NIEP_CLIENT_TIMEOUT` to `--rpc-timeout` (600 seconds by default), so larger
 topologies do not hit the regular CLI response timeout of 10 seconds. Fast containers may already
 be ready by the first observation. `--timeout` is the HTTP deadline counted from
@@ -388,11 +406,12 @@ created/started and connected before the next. Once started, its guest/process
 continues initialization concurrently with later orchestration. The scheduler
 does not wait for one instance to answer HTTP before launching the next.
 
-`ready_ms` also includes the main script's sequential observation path. After
-`topoup`, it invokes a new `niepctl mininet cmd h1 curl ...` for each target in
-turn. At large N, process/CLI/socket and probe costs delay when the last ready
-endpoint is observed. `runtime_ready_ms` uses concurrent probes starting at each
-actual runtime start and avoids waiting for this global scan. These raw durations
+After `topoup`, `ready_ms` uses concurrent HTTP observations through `h1`. A slow
+or unreachable endpoint no longer holds up probes of the other endpoints. The
+collector still cannot observe a service before `topoup` returns, and large N
+can add event-loop and network contention. `runtime_ready_ms` uses concurrent
+probes starting at each actual runtime start and avoids waiting for `topoup`.
+These raw durations
 cannot be multiplied by N to predict the full scenario time: object creation,
 network setup, switch/controller startup, resource contention and observation
 latency are different components, and boot progress overlaps.

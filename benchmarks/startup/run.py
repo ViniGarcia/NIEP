@@ -10,6 +10,7 @@ import statistics
 import os
 from pathlib import Path
 import shutil
+import shlex
 import socket
 import subprocess
 import sys
@@ -23,7 +24,9 @@ from niep.domain.startup_addressing import PREFIX_LENGTH, addresses, mac, positi
 
 COUNTS = (1, 2, 4, 8, 16, 32, 64)
 COMMON_FIELDS = ('run_id', 'scenario_id', 'kind', 'count', 'repeat', 'instance')
-STARTUP_FIELDS = COMMON_FIELDS + ('started_at', 'define_ms', 'topoup_ms', 'ready_ms', 'status', 'error')
+PROBE_METHOD = 'mininet_parallel_http_v1'
+STARTUP_FIELDS = COMMON_FIELDS + ('probe_method', 'started_at', 'define_ms', 'topoup_ms',
+                                  'ready_ms', 'status', 'error')
 USAGE_FIELDS = COMMON_FIELDS + ('sample_index', 'sample_timestamp', 'elapsed_seconds',
                                 'memory_bytes', 'cpu_percent', 'status', 'error')
 RUNTIME_FIELDS = COMMON_FIELDS + ('runtime_id', 'started_at', 'start_call_ms',
@@ -222,12 +225,43 @@ def runtime_rows(client, capture_id, instances, kind, count, repeat, *, wait, ti
     return rows
 
 
+def probe_http(client, count, start, timeout, interval):
+    if time.perf_counter() >= start + timeout:
+        return [dict(index=i, ready_ms='', status='timeout',
+                     error='Deadline reached before HTTP observation') for i in range(count)]
+    # One invocation of h1.cmd(): concurrent calls would share its interactive shell.
+    # Pass a short, quoted command rather than embedding code/endpoint lists in the PTY.
+    with tempfile.TemporaryDirectory(prefix='niep-http-probe-') as work:
+        alive_file = Path(work) / 'active'
+        alive_file.touch()
+        command = shlex.join([sys.executable, str(Path(__file__).with_name('http-probe.py').resolve()),
+                              str(count), addresses(0)[1], repr(start), repr(timeout), repr(interval),
+                              str(alive_file)])
+        response = client.call('mininet', 'cmd', 'h1', command)
+    records = json.loads(response.get('output', ''))
+    if not isinstance(records, list) or len(records) != count:
+        raise ValueError('Incomplete parallel HTTP probe results')
+    for i, record in enumerate(records):
+        if (record.get('index') != i or record.get('status') not in ('ready', 'timeout')
+                or not isinstance(record.get('error'), str)):
+            raise ValueError('Invalid parallel HTTP probe result')
+        ready = record.get('ready_ms')
+        if record['status'] == 'ready':
+            if (not isinstance(ready, (int, float)) or not math.isfinite(ready)
+                    or not 0 <= ready <= timeout * 1000 + .001):
+                raise ValueError('Invalid parallel HTTP readiness time')
+        elif ready != '':
+            raise ValueError('Timeout result contains an HTTP readiness time')
+    return records
+
+
 def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
           observe_seconds=0, stats_interval=1, settle_seconds=2, save_samples=lambda rows: None,
           capture_runtime=False, save_runtime=lambda rows: None):
     rows = [dict.fromkeys(STARTUP_FIELDS, '') for _ in instances]
     for row, ident in zip(rows, instances):
-        row.update(kind=kind, count=count, repeat=repeat, instance=ident, status='failed')
+        row.update(kind=kind, count=count, repeat=repeat, instance=ident,
+                   probe_method=PROBE_METHOD, status='failed')
     defined = False
     cleanup_errors = []
     interrupted = False
@@ -244,27 +278,10 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
         topoup_ms = (time.perf_counter() - start) * 1000
         for row in rows:
             row.update(define_ms=round(define_ms, 3), topoup_ms=round(topoup_ms, 3))
-        pending = set(range(count))
-        # A common deadline from before topoup; one bounded probe per pending host per round.
-        deadline = start + timeout
-        while pending and time.perf_counter() < deadline:
-            for i in sorted(pending):
-                remaining = deadline - time.perf_counter()
-                if remaining <= 0:
-                    break
-                endpoint_ip = addresses(i)[1]
-                response = client.call('mininet', 'cmd', 'h1', 'curl',
-                                       '--noproxy', endpoint_ip, '--silent', '--show-error',
-                                       '--max-time', str(min(0.3, remaining)), '--write-out',
-                                       '%{http_code}', f'http://{endpoint_ip}:8080/health')
-                output = response.get('output', '')
-                rows[i]['error'] = output.strip()
-                if output.strip() == 'ok200':
-                    rows[i].update(ready_ms=round((time.perf_counter() - start) * 1000, 3),
-                                   status='ready', error='')
-                    pending.remove(i)
-            if pending:
-                time.sleep(min(interval, max(0, deadline - time.perf_counter())))
+        records = probe_http(client, count, start, timeout, interval)
+        for row, record in zip(rows, records):
+            row.update({key: record[key] for key in ('ready_ms', 'status', 'error')})
+        pending = any(row['status'] != 'ready' for row in rows)
         all_ready = max(row['ready_ms'] for row in rows) if not pending else ''
         for row in rows:
             row['all_ready_ms'] = all_ready
@@ -379,7 +396,8 @@ def main():
         os.environ.get('NIEP_ROOT', Path(__file__).resolve().parents[2])) /
         'VEM/IMAGES/alpine-http.qcow2', help='Base image used by the daemon, for offline preflight')
     args = parser.parse_args()
-    if args.repeats < 1 or args.timeout <= 0 or args.interval < 0 or args.rpc_timeout <= 0:
+    if (not all(math.isfinite(v) for v in (args.timeout, args.interval, args.rpc_timeout))
+            or args.repeats < 1 or args.timeout <= 0 or args.interval < 0 or args.rpc_timeout <= 0):
         parser.error('repeats and timeout must be positive; interval must be nonnegative')
     if (not all(math.isfinite(v) for v in (args.observe_seconds, args.stats_interval, args.settle_seconds))
             or args.stats_interval <= 0 or args.observe_seconds < args.stats_interval
