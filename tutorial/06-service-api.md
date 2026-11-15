@@ -63,6 +63,14 @@ cd /home/vagrant/NIEP
 .venv/bin/niepctl --json topodown
 ```
 
+For large topologies, increase the client response timeout (the default is 10
+seconds). This controls how long the CLI waits; it does not cancel an operation
+already executing in the daemon:
+
+```sh
+NIEP_CLIENT_TIMEOUT=600 .venv/bin/niepctl topoup
+```
+
 ## Shell Completion
 
 The installer exposes `niepctl` in `/usr/local/bin`. Install completion for the
