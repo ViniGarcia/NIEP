@@ -6,6 +6,22 @@ depend() {
     after mdev hwdrivers
     before networking
 }
+# NIEP_STARTUP_ADDRESSING_V1
+# 02:01:00:xx:xx:xx encodes a zero-based /30 link index in 10.0.0.0/8.
+startup_address() {
+    case "$1" in
+        02:01:00:??:??:??) ;;
+        *) return 1;;
+    esac
+    old_ifs=$IFS
+    IFS=:
+    set -- $1
+    IFS=$old_ifs
+    index=$((0x$4 * 65536 + 0x$5 * 256 + 0x$6))
+    [ "$index" -lt 4194304 ] || return 1
+    value=$((index * 4 + 2))
+    printf '10.%d.%d.%d/30' "$(((value >> 16) & 255))" "$(((value >> 8) & 255))" "$((value & 255))"
+}
 start() {
     ebegin "Configuring NIEP interfaces"
     printf 'auto lo\niface lo inet loopback\n' > /etc/network/interfaces
@@ -14,6 +30,9 @@ start() {
         [ "$iface" != lo ] || continue
         mac=$(cat "$device/address")
         address=$(awk -v mac="$mac" 'tolower($1) == mac {print $2; exit}' /etc/niep-network.conf)
+        if [ -z "$address" ]; then
+            address=$(startup_address "$mac") || address=''
+        fi
         if [ -z "$address" ]; then
             case $(readlink -f "$device/device") in
                 */0000:00:03.0|*/0000:00:03.0/*) address=dhcp;;

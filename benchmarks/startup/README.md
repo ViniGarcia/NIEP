@@ -1,54 +1,70 @@
 # VM and container startup benchmark
 
-Run from the repository root with an idle NIEP daemon. The default sequence is
-1, 2, 4, 8, 16 VMs, followed by 1, 2, 4, 8, 16 containers, with three fresh trials
-per size. Each instance has an independent link to its own Mininet probe host.
-No controller or switch startup is included. Only one benchmark may run at once;
-do not send other lifecycle commands to the daemon during a run.
+Run from the repository root with an idle NIEP daemon. The default sizes are
+1, 2, 4, 8, 16, 32 and 64, first VMs and then containers, with three trials per
+size. `--counts` accepts positive integers, for example `--counts 3 7 64 257`.
+Each instance has an independent link to its own Mininet probe host. No
+controller or switch startup is included. Run one benchmark at a time and avoid
+sending other lifecycle commands to the daemon during a run.
 
 ## Prepare outside the measured interval
 
-The VM base must configure all 16 data MACs at boot. The runner now verifies the
-actual disk contents before any trial and stops immediately if mappings are
-missing. To adapt an existing base without rebuilding or changing its SSH keys,
-create a corrected offline copy (requires `qemu-img`, `sfdisk`, `debugfs` and
+The VM base needs the current procedural guest network service. The runner
+checks the actual disk before any trial. Update an existing base without
+rebuilding or changing its SSH keys (requires `qemu-img`, `sfdisk`, `debugfs`,
 `e2fsck`, and approximately 5 GiB of temporary disk space):
 
 ```sh
 .venv/bin/python benchmarks/startup/prepare-image.py \
   VEM/IMAGES/alpine-http.qcow2 \
-  --output benchmarks/startup/output/prepared/alpine-http.qcow2
+  --output benchmarks/startup/output/procedural/alpine-http.qcow2
 # Keep a backup, then install only while the daemon has no topology defined:
 cp VEM/IMAGES/alpine-http.qcow2 /tmp/alpine-http-original.qcow2
-sudo install -m 0444 benchmarks/startup/output/prepared/alpine-http.qcow2 \
-  VEM/IMAGES/alpine-http.qcow2
-```
-
-The helper never edits its source and refuses to overwrite its output. It changes
-only `/etc/niep-network.conf` in the new disk, verifies filesystem integrity and
-checks QCOW2 consistency. Running without `--output` checks the map only. The
-runner uses `NIEP_ROOT/VEM/IMAGES/alpine-http.qcow2`, or the repository base by
-default; `--vm-image` must match the daemon's registered base when using a custom
-asset directory.
-
-Alternatively, rebuild from pinned packages with the supplied map:
-
-```sh
-sudo benchmarks/images/alpine-http/build.sh \
-  --authorized-keys "$HOME/.ssh/niep-bench.pub" \
-  --network-map benchmarks/startup/network-map \
-  --output "$PWD/benchmarks/images/alpine-http/output/startup16"
-sudo install -m 0444 \
-  benchmarks/images/alpine-http/output/startup16/alpine-http-base.qcow2 \
+sudo install -m 0444 benchmarks/startup/output/procedural/alpine-http.qcow2 \
   VEM/IMAGES/alpine-http.qcow2
 
 docker build -t niep-bench-http:alpine3.20 benchmarks/startup/container
 ```
 
-Use your own SSH public key. Never replace a base used by an active topology.
-The 16 mappings intentionally use the same IP on separate, isolated data links;
-MACs, interface IDs, management MACs and VM IDs are unique. Do not connect these
-links into a common broadcast domain without changing the address plan.
+Choose a fresh output path when preparing another image: the helper refuses to
+overwrite its output. It installs `/etc/init.d/niep-network` with executable
+permissions and verifies the resulting filesystem and QCOW2. It preserves the
+source disk, guest SSH keys, credentials, and any existing explicit network map.
+Without `--output` it checks the installed service; `--count` validates capacity
+and accepts positive integers rather than a fixed list. An update supports all
+subsequent sizes without needing another map or another image modification.
+The runner checks `NIEP_ROOT/VEM/IMAGES/alpine-http.qcow2`, or the repository base
+by default; use `--vm-image` to match a daemon using a custom asset directory.
+New images built by `benchmarks/images/alpine-http/build.sh` already contain the
+service and do not need `--network-map` for this benchmark.
+
+## Procedural addressing
+
+The benchmark's static `network-map` has been removed. Zero-based instance index
+`i` determines all MACs and a unique `/30` subnet in `10.0.0.0/8`. The host uses
+subnet address + 1; the VM/container uses + 2. For example:
+
+| Instance | Host | VM/container | Subnet |
+| --- | --- | --- | --- |
+| 1 | 10.0.0.1 | 10.0.0.2 | 10.0.0.0/30 |
+| 2 | 10.0.0.5 | 10.0.0.6 | 10.0.0.4/30 |
+| 3 | 10.0.0.9 | 10.0.0.10 | 10.0.0.8/30 |
+
+MACs encode the index in four bytes: data `02:01:xx:xx:xx:xx`, management
+`02:02:xx:xx:xx:xx`, probe host `02:03:xx:xx:xx:xx`, bridge
+`02:04:xx:xx:xx:xx`. These are locally administered unicast addresses. The guest
+recognizes the data prefix and computes its IP at boot. Management continues to
+use DHCP. An explicit `/etc/niep-network.conf` entry takes precedence, preserving
+custom-image and tutorial behavior; avoid overriding benchmark data MACs there.
+The optional map mechanism remains available for unrelated custom topologies.
+
+The old repeated data IPs were safe because links were isolated. The new plan
+also gives every host and endpoint a distinct IP within a scenario. It supports
+4,194,304 `/30` links; counts beyond this IPv4 pool are rejected explicitly.
+Host memory, disk, interface and runtime capacity impose practical limits much
+sooner. Reusing these deterministic IDs/MACs across simultaneous benchmark runs
+is unsupported. MAC generation handles octet carries and does not overflow at
+240 or 256 instances.
 
 The container uses Alpine 3.20.10 and BusyBox extras 1.36.1-r31, matching the VM
 workload. Both serve the exact two bytes `ok` at port 8080, path `/health`.
@@ -56,8 +72,8 @@ The image is built and checked locally before timing; no package installation
 runs at container startup. VMs use 256 MiB and one vCPU. NIEP's container schema
 does not expose CPU/memory limits, so containers use host defaults: this compares
 orchestration with an equivalent HTTP workload, not equal resource reservations.
-16 VMs require at least 4 GiB of guest RAM plus host overhead and room for 16
-private disk copies. Both VM disks and container writable layers are recreated
+Guest RAM demand is `count * 256 MiB` (64 VMs need 16 GiB), plus host overhead
+and room for `count` private disk copies. Both VM disks and container writable layers are recreated
 for each trial; host filesystem caches are not flushed.
 
 ## Run
@@ -69,7 +85,7 @@ for each trial; host filesystem caches are not flushed.
 Useful options:
 
 ```sh
-# Quick functional check with the current one-MAC VM base:
+# Quick functional check with a prepared VM base:
 .venv/bin/python benchmarks/startup/run.py --counts 1 --repeats 1
 # Containers only, one trial at each size:
 .venv/bin/python benchmarks/startup/run.py --kinds container --repeats 1

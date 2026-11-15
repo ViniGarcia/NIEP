@@ -18,6 +18,8 @@ import tempfile
 from uuid import uuid4
 from datetime import datetime, timezone
 
+from niep.domain.startup_addressing import addresses, mac, positive_count, validate_count
+
 
 COUNTS = (1, 2, 4, 8, 16, 32, 64)
 COMMON_FIELDS = ('run_id', 'scenario_id', 'kind', 'count', 'repeat', 'instance')
@@ -101,23 +103,25 @@ def print_summary(kind, count, repeat, summary):
 
 
 def data_mac(index):
-    return f'52:54:02:20:{16 + index:02x}:01'
+    return mac(index, 1)
 
 
 def generate(directory, kind, count, image):
+    validate_count(count)
     directory.mkdir(parents=True, exist_ok=True)
     hosts, connections, resources = [], [], []
     for i in range(count):
         ident = f'st-{kind}{i + 1:02d}'
         host = f'h{i + 1}'
-        mac = data_mac(i)
-        host_mac = f'02:00:00:20:{16 + i:02x}:11'
-        iface = {'ID': f'stb{i:02d}', 'MAC': mac, 'IP': '10.20.0.2/24',
-                 'LINK_MAC': f'02:00:00:20:{16 + i:02x}:fe'}
+        data_address = data_mac(i)
+        host_mac = mac(i, 3)
+        host_ip, endpoint_ip = addresses(i)
+        iface = {'ID': f'stb{i:02d}', 'MAC': data_address, 'IP': endpoint_ip + '/30',
+                 'LINK_MAC': mac(i, 4)}
         if kind == 'vm':
-            iface.pop('IP')  # Address configured at guest boot by network-map.
+            iface.pop('IP')  # Guest derives its /30 address from the data MAC at boot.
             spec = {'ID': ident, 'MEMORY': 256, 'VCPU': 1, 'DISK': 'alpine-http',
-                    'MANAGEMENT_MAC': f'52:54:02:20:{16 + i:02x}:00',
+                    'MANAGEMENT_MAC': mac(i, 2),
                     'INTERFACES': [iface]}
         else:
             spec = {'ID': ident, 'IMAGE': image, 'COMMAND': [
@@ -126,9 +130,9 @@ def generate(directory, kind, count, image):
         filename = f'{ident}.json'
         (directory / filename).write_text(json.dumps(spec, indent=2) + '\n')
         resources.append(filename)
-        hosts.append({'ID': host, 'INTERFACES': [{'MAC': host_mac, 'IP': '10.20.0.1/24'}]})
+        hosts.append({'ID': host, 'INTERFACES': [{'MAC': host_mac, 'IP': host_ip + '/30'}]})
         connections.append({'IN/OUT': host, 'IN/OUTIFACE': host_mac,
-                            'OUT/IN': ident, 'OUT/INIFACE': mac})
+                            'OUT/IN': ident, 'OUT/INIFACE': data_address})
     topology = {'ID': f'Startup{kind}{count}', 'VMS': resources if kind == 'vm' else [],
                 'CONTAINERS': resources if kind == 'container' else [], 'VNFS': [], 'SFCS': [],
                 'MININET': {'HOSTS': hosts, 'SWITCHES': [], 'CONTROLLERS': [], 'OVSWITCHES': []},
@@ -214,10 +218,11 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
                 remaining = deadline - time.perf_counter()
                 if remaining <= 0:
                     break
+                endpoint_ip = addresses(i)[1]
                 response = client.call('mininet', 'cmd', f'h{i + 1}', 'curl',
-                                       '--noproxy', '10.20.0.2', '--silent', '--show-error',
+                                       '--noproxy', endpoint_ip, '--silent', '--show-error',
                                        '--max-time', str(min(0.3, remaining)), '--write-out',
-                                       '%{http_code}', 'http://10.20.0.2:8080/health')
+                                       '%{http_code}', f'http://{endpoint_ip}:8080/health')
                 output = response.get('output', '')
                 rows[i]['error'] = output.strip()
                 if output.strip() == 'ok200':
@@ -297,7 +302,7 @@ def results_files(directory):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--counts', nargs='+', type=int, choices=COUNTS, default=list(COUNTS))
+    parser.add_argument('--counts', nargs='+', type=positive_count, default=list(COUNTS))
     parser.add_argument('--kinds', nargs='+', choices=('vm', 'container'), default=['vm', 'container'])
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--timeout', type=float, default=180,
@@ -328,6 +333,11 @@ def main():
             or args.stats_interval <= 0 or args.observe_seconds < args.stats_interval
             or args.settle_seconds < 0):
         parser.error('observation duration must cover one positive stats interval; settle must be nonnegative')
+    try:
+        for count in args.counts:
+            validate_count(count)
+    except ValueError as exc:
+        parser.error(str(exc))
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     # Temporary descriptors remain available to the daemon until all trials finish.
