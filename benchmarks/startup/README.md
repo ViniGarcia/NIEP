@@ -89,30 +89,88 @@ the idle check is not an exclusive lock.
 
 ## Results and interpretation
 
-All executions append to **`benchmarks/startup/output/results.csv`** by default.
-`--output DIR` chooses a different shared directory. Existing rows are retained,
-and the header is written only once. Each row has `run_id` and UTC `started_at`
-to distinguish executions, `config_json` with the invocation settings, and
-`image_id` with the inspected Docker image ID when containers are included.
+Each execution appends raw measurements to two CSVs in
+`benchmarks/startup/output/` (`--output DIR` selects another shared directory):
+
+| File | Rows | Measurements |
+| --- | --- | --- |
+| `startup.csv` | One per instance per scenario/repetition | `started_at`, `define_ms`, `topoup_ms`, `ready_ms`, `status`, `error` |
+| `usage.csv` | One per instance per poll | `sample_index`, `sample_timestamp`, `elapsed_seconds`, `memory_bytes`, `cpu_percent`, `status`, `error` |
+
+Both files include `run_id`, `scenario_id`, `kind` (`vm` or `container`), `count`
+(number of instances in the scenario), `repeat`, and `instance`. `run_id` identifies
+an invocation; a fresh `scenario_id` identifies each scenario/repetition, including
+repeated sizes in the same invocation. Join on **`run_id`, `scenario_id`, `instance`**
+for instance-level analysis. Group by `run_id, scenario_id` for a whole scenario.
+For example, after loading both CSVs into SQL tables:
+
+```sql
+SELECT s.kind, s.count, s.repeat, s.instance, s.ready_ms,
+       u.sample_index, u.memory_bytes, u.cpu_percent
+FROM startup AS s
+JOIN usage AS u
+  ON s.run_id = u.run_id
+ AND s.scenario_id = u.scenario_id
+ AND s.instance = u.instance;
+```
+
+The files contain no configuration JSON, image metadata, summary columns, or
+record-type column. Existing rows are retained and headers are written once.
+The previous combined `results.csv` is preserved as historical data and is no
+longer updated or automatically imported. Incompatible headers in the new CSVs
+are rejected before either file is changed. Writes to the output directory are
+locked to prevent concurrent benchmark writers.
+
 Topology descriptors are temporary and removed after execution, including after
 handled interruption. `--generate-only` explicitly saves descriptors under
 `DIR/topologies/` for inspection, without recording benchmark results.
 
-A CSV row is saved for every instance after each trial, including failures and
-timeouts. By default the first failed trial stops the series and prints its
-diagnostic; `--keep-going` continues after ordinary failures. Nonzero exit means
-a trial failed. Concurrent writes to the same CSV are rejected. An incompatible
-existing CSV header is rejected without modifying its contents. Historical
-CSV files in timestamped directories from older versions remain available.
+After all instances answer HTTP, each trial waits **2 seconds**, seeds the CPU
+counter baseline, then keeps all instances alive for a **10-second** observation
+window with polling every **1 second**. The baseline is excluded from results,
+so CPU deltas do not include the settling period. Defaults can be changed with
+`--settle-seconds`, `--observe-seconds` and `--stats-interval`. The daemon must
+support the `stats` command; this is checked before launching a topology.
 
+Samples are flushed immediately, including before an interruption or cleanup
+failure. Startup rows are saved after cleanup and retain readiness timings plus
+any failure information. With default settings a complete trial produces
+`count` startup rows and `10 * count` usage rows. Failed startup/timeouts skip
+resource observation and still attempt cleanup.
+
+The script prints these derived statistics in English without writing them to CSV:
+
+- Mean scenario memory: mean of the total VM/container memory at each poll.
+- Mean memory/platform: mean of all per-instance memory observations.
+- P95 memory/platform: nearest-rank p95 over those same observations.
+- Mean scenario CPU: mean of summed VM/container CPU at each poll.
+- Mean CPU/platform: mean of all per-instance CPU observations.
+
+Printed memory uses MiB; CSV memory uses bytes. CPU uses 100% per occupied core.
+Only the scenario's VMs/containers enter these statistics; the daemon is excluded.
+Memory uses QEMU RSS for VMs and cgroup usage including cache for containers, as
+reported by `niepd stats`. Total averages use only complete polls; absent values
+are never silently counted as zero. Incomplete samples mark the trial as failed.
+Polling deadlines are relative to the baseline; slow requests skip missed ticks
+rather than issuing a burst, and actual collection times are recorded. The
+10-second setting excludes the initial 2-second wait and can overrun slightly
+while the last request completes. Other `stats` clients share the daemon's CPU
+sampling history, so CPU intervals may be shorter than the benchmark interval.
+These are observations of the running HTTP service without additional load.
+
+By default the first failed trial stops the series and prints its diagnostic;
+`--keep-going` continues after ordinary failures. Nonzero exit means a trial failed.
+
+- `started_at`: UTC time just before starting the scenario/repetition.
 - `define_ms`: topology definition, excluded from startup timing.
 - `topoup_ms`: wall time for the blocking NIEP startup command.
 - `ready_ms`: milliseconds from just before `topoup` to observing HTTP 200 with
-  exact body `ok` for that instance through Mininet.
-- `all_ready_ms`: last observed readiness in the trial; blank if any instance
-  failed. This value is repeated in all rows of the same trial; aggregate once
-  per `(run_id, kind, count, repeat)` when comparing topology startup times.
-- `status` and `error`: readiness, timeout, startup or cleanup failure details.
+  exact body `ok` for that instance through Mininet. Compute the maximum per
+  scenario to obtain the time when all instances were ready.
+- `sample_index`: scheduled poll number (may skip numbers for slow requests).
+- `sample_timestamp`: UTC timestamp supplied by the daemon.
+- `elapsed_seconds`: actual elapsed observation time since the CPU baseline.
+- `status` and `error`: readiness, timeout, metrics or cleanup failure details.
 
 The clock is monotonic. Probing begins after `topoup` returns because NIEP exposes
 Mininet commands only after topology startup. NIEP starts resources sequentially;

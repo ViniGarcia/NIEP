@@ -2,12 +2,15 @@
 """Measure NIEP topology startup through HTTP on independent Mininet links."""
 import argparse
 import csv
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import fcntl
 import json
+import math
+import statistics
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -16,9 +19,85 @@ from uuid import uuid4
 from datetime import datetime, timezone
 
 
-COUNTS = (1, 2, 4, 8, 16)
-FIELDS = ('run_id', 'started_at', 'config_json', 'image_id', 'kind', 'count', 'repeat', 'instance', 'ready_ms', 'all_ready_ms',
-          'define_ms', 'topoup_ms', 'status', 'error')
+COUNTS = (1, 2, 4, 8, 16, 32, 64)
+COMMON_FIELDS = ('run_id', 'scenario_id', 'kind', 'count', 'repeat', 'instance')
+STARTUP_FIELDS = COMMON_FIELDS + ('started_at', 'define_ms', 'topoup_ms', 'ready_ms', 'status', 'error')
+USAGE_FIELDS = COMMON_FIELDS + ('sample_index', 'sample_timestamp', 'elapsed_seconds',
+                                'memory_bytes', 'cpu_percent', 'status', 'error')
+SCHEMAS = {'startup': STARTUP_FIELDS, 'usage': USAGE_FIELDS}
+
+
+def mean(values):
+    return statistics.fmean(values) if values else None
+
+
+def p95(values):
+    # Nearest-rank percentile, including for small sample sets.
+    return sorted(values)[math.ceil(0.95 * len(values)) - 1] if values else None
+
+
+def summarize(samples, count):
+    rounds = {}
+    for row in samples:
+        rounds.setdefault(row['sample_index'], []).append(row)
+    memory_totals, cpu_totals = [], []
+    for rows in rounds.values():
+        if len(rows) == count and all(r['memory_bytes'] is not None for r in rows):
+            memory_totals.append(sum(r['memory_bytes'] for r in rows))
+        if len(rows) == count and all(r['cpu_percent'] is not None for r in rows):
+            cpu_totals.append(sum(r['cpu_percent'] for r in rows))
+    memory = [r['memory_bytes'] for r in samples if r['memory_bytes'] is not None]
+    cpu = [r['cpu_percent'] for r in samples if r['cpu_percent'] is not None]
+    return dict(scenario_memory_mean_bytes=mean(memory_totals),
+                platform_memory_mean_bytes=mean(memory), platform_memory_p95_bytes=p95(memory),
+                scenario_cpu_mean_percent=mean(cpu_totals), platform_cpu_mean_percent=mean(cpu))
+
+
+def observe(client, instances, kind, count, repeat, *, duration, interval, settle, save):
+    time.sleep(settle)
+    # Seed after settling so the first CPU delta excludes boot and the settling period.
+    client.call('stats')
+    start = time.monotonic()
+    samples = []
+    tick = 1
+    while tick * interval <= duration + 1e-9:
+        time.sleep(max(0, start + tick * interval - time.monotonic()))
+        snapshot = client.call('stats')
+        elapsed = time.monotonic() - start
+        resources = {(r['kind'], r['id']): r for r in snapshot['resources']}
+        batch = []
+        for ident in instances:
+            resource = resources.get((kind, ident), {})
+            memory, cpu = resource.get('memory_bytes'), resource.get('cpu_percent')
+            error = resource.get('error') or ''
+            if resource.get('state') != 'running' or memory is None or cpu is None:
+                error = error or 'Resource stopped, missing or metrics unavailable'
+            row = dict.fromkeys(USAGE_FIELDS, '')
+            row.update(kind=kind, count=count, repeat=repeat,
+                       instance=ident, sample_index=tick, sample_timestamp=snapshot['timestamp'],
+                       elapsed_seconds=round(elapsed, 6), memory_bytes=memory, cpu_percent=cpu,
+                       status='metrics_error' if error else 'sampled', error=error)
+            if resource.get('state') != 'running':
+                row.update(memory_bytes=None, cpu_percent=None)
+            batch.append(row)
+        save(batch)
+        samples.extend(batch)
+        # Skip missed deadlines instead of issuing a burst of delayed requests.
+        tick = max(tick + 1, math.floor((time.monotonic() - start) / interval) + 1)
+    return samples
+
+
+def print_summary(kind, count, repeat, summary):
+    def value(key, memory=False):
+        number = summary.get(key)
+        return 'n/a' if number is None else f'{number / 1048576 if memory else number:.2f}'
+
+    print(f'{kind} n={count} repeat={repeat}: '
+          f'mean scenario memory={value("scenario_memory_mean_bytes", True)} MiB; '
+          f'mean memory/platform={value("platform_memory_mean_bytes", True)} MiB; '
+          f'p95 memory/platform={value("platform_memory_p95_bytes", True)} MiB; '
+          f'mean scenario CPU={value("scenario_cpu_mean_percent")}%; '
+          f'mean CPU/platform={value("platform_cpu_mean_percent")}%', flush=True)
 
 
 def data_mac(index):
@@ -63,8 +142,41 @@ class Client:
     def __init__(self, executable, socket, rpc_timeout=600):
         self.command = [executable, '--socket', socket, '--json']
         self.env = dict(os.environ, NIEP_CLIENT_TIMEOUT=str(rpc_timeout))
+        self.socket_path = socket
+        self.stats_timeout = min(rpc_timeout, 10)
+
+    def stats(self):
+        # The protocol frame ends at newline. Do not wait for server EOF/audit
+        # completion after the metrics reply has already arrived.
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(self.stats_timeout)
+            connection.connect(self.socket_path)
+            connection.sendall((json.dumps({'command': 'stats', 'args': []}) + '\n').encode())
+            connection.shutdown(socket.SHUT_WR)
+            buffer = bytearray()
+            deadline = time.monotonic() + self.stats_timeout
+            while b'\n' not in buffer:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('Resource stats timed out')
+                connection.settimeout(remaining)
+                chunk = connection.recv(4096)
+                if not chunk:
+                    raise RuntimeError('Incomplete resource stats response')
+                buffer.extend(chunk)
+                if len(buffer) > 65536:
+                    raise RuntimeError('Resource stats response exceeds protocol limit')
+            frame, _, trailing = buffer.partition(b'\n')
+            if trailing:
+                raise RuntimeError('Unexpected data after stats response')
+            response = json.loads(frame)
+            if not response.get('ok'):
+                raise RuntimeError(json.dumps(response))
+            return response['data']
 
     def call(self, *args):
+        if args == ('stats',):
+            return self.stats()
         result = subprocess.run(self.command + list(args), capture_output=True, text=True,
                                 env=self.env)
         try:
@@ -76,8 +188,9 @@ class Client:
         return response.get('data')
 
 
-def trial(client, path, instances, kind, count, repeat, timeout, interval):
-    rows = [dict.fromkeys(FIELDS, '') for _ in instances]
+def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
+          observe_seconds=0, stats_interval=1, settle_seconds=2, save_samples=lambda rows: None):
+    rows = [dict.fromkeys(STARTUP_FIELDS, '') for _ in instances]
     for row, ident in zip(rows, instances):
         row.update(kind=kind, count=count, repeat=repeat, instance=ident, status='failed')
     defined = False
@@ -118,15 +231,24 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval):
             row['all_ready_ms'] = all_ready
             if row['status'] != 'ready':
                 row.update(status='timeout', error=f'HTTP timeout after {timeout}s: {row["error"]}')
+        if not pending and observe_seconds > 0:
+            samples = observe(client, instances, kind, count, repeat, duration=observe_seconds,
+                              interval=stats_interval, settle=settle_seconds, save=save_samples)
+            summary = summarize(samples, count)
+            for row in rows:
+                if any(sample['status'] != 'sampled' for sample in samples):
+                    row.update(status='metrics_failed', error='Incomplete resource samples; see usage rows')
+            print_summary(kind, count, repeat, summary)
     except KeyboardInterrupt:
         interrupted = True
         for row in rows:
-            if row['status'] != 'ready':
+            if observe_seconds > 0 or row['status'] != 'ready':
                 row.update(status='interrupted', error='Interrupted by user')
     except Exception as exc:
         for row in rows:
-            if row['status'] != 'ready':
-                row['error'] = str(exc)
+            if row['status'] == 'ready':
+                row['status'] = 'metrics_failed'
+            row['error'] = str(exc)
     finally:
         if defined:
             # Always attempt destroy even if stop fails. Never continue after uncertain cleanup.
@@ -143,23 +265,34 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval):
 
 
 @contextmanager
-def results_file(path):
-    """Append to a compatible CSV while preventing concurrent writers."""
-    with path.open('a+', newline='') as handle:
+def results_files(directory):
+    """Append to both raw-data CSVs under one output-directory lock."""
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(directory_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise RuntimeError(f'Another benchmark is writing {path}') from exc
-        handle.seek(0)
-        header = next(csv.reader(handle), None)
-        if header is not None and header != list(FIELDS):
-            raise RuntimeError(f'Incompatible CSV header in {path}; choose another --output')
-        handle.seek(0, os.SEEK_END)
-        writer = csv.DictWriter(handle, fieldnames=FIELDS)
-        if header is None:
-            writer.writeheader()
-            handle.flush()
-        yield writer, handle
+            raise RuntimeError(f'Another benchmark is writing {directory}') from exc
+        # Validate both files before changing either of them.
+        for name, fields in SCHEMAS.items():
+            path = directory / f'{name}.csv'
+            if path.exists() and path.stat().st_size:
+                with path.open(newline='') as source:
+                    if next(csv.reader(source), None) != list(fields):
+                        raise RuntimeError(f'Incompatible CSV header in {path}; choose another --output')
+        with ExitStack() as stack:
+            files = {}
+            for name, fields in SCHEMAS.items():
+                handle = stack.enter_context((directory / f'{name}.csv').open('a+', newline=''))
+                handle.seek(0, os.SEEK_END)
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                if not handle.tell():
+                    writer.writeheader()
+                    handle.flush()
+                files[name] = (writer, handle)
+            yield files
+    finally:
+        os.close(directory_fd)
 
 
 def main():
@@ -171,11 +304,17 @@ def main():
                         help='HTTP deadline in seconds from before topoup (default: 180)')
     parser.add_argument('--rpc-timeout', type=float, default=600,
                         help='Daemon command timeout, including startup/cleanup (default: 600s)')
-    parser.add_argument('--interval', type=float, default=0.1)
+    parser.add_argument('--observe-seconds', type=float, default=10,
+                        help='Resource observation window after settling (default: 10 seconds)')
+    parser.add_argument('--stats-interval', type=float, default=1,
+                        help='Resource polling interval (default: 1 second)')
+    parser.add_argument('--settle-seconds', type=float, default=2,
+                        help='Wait after all instances answer HTTP (default: 2 seconds)')
+    parser.add_argument('--interval', type=float, default=0.1, help='HTTP readiness poll delay')
     parser.add_argument('--socket', default=os.environ.get('NIEP_SOCKET', '/run/niep.sock'))
     parser.add_argument('--image', default='niep-bench-http:alpine3.20')
     parser.add_argument('--output', type=Path, default=Path('benchmarks/startup/output'),
-                        help='Shared results directory (results.csv is appended on each run)')
+                        help='Shared directory for startup.csv and usage.csv (append on each run)')
     parser.add_argument('--generate-only', action='store_true')
     parser.add_argument('--keep-going', action='store_true',
                         help='Continue after a failed trial (cleanup failures always stop)')
@@ -185,6 +324,10 @@ def main():
     args = parser.parse_args()
     if args.repeats < 1 or args.timeout <= 0 or args.interval < 0 or args.rpc_timeout <= 0:
         parser.error('repeats and timeout must be positive; interval must be nonnegative')
+    if (not all(math.isfinite(v) for v in (args.observe_seconds, args.stats_interval, args.settle_seconds))
+            or args.stats_interval <= 0 or args.observe_seconds < args.stats_interval
+            or args.settle_seconds < 0):
+        parser.error('observation duration must cover one positive stats interval; settle must be nonnegative')
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     # Temporary descriptors remain available to the daemon until all trials finish.
@@ -195,43 +338,56 @@ def main():
         if args.generate_only:
             print(f'Topologies: {directory}', flush=True)
             return 0
-        with results_file(args.output / 'results.csv') as (writer, handle):
-            print(f'Results: {args.output / "results.csv"}', flush=True)
-            return execute(args, plans, writer, handle)
+        with results_files(args.output) as files:
+            print(f'Results: {args.output / "startup.csv"}, {args.output / "usage.csv"}', flush=True)
+            return execute(args, plans, files)
 
 
-def execute(args, plans, writer, handle):
+def execute(args, plans, files):
     run_id = uuid4().hex
-    started_at = datetime.now(timezone.utc).isoformat()
-    metadata = dict(run_id=run_id, started_at=started_at,
-                    config_json=json.dumps(vars(args), default=str, sort_keys=True), image_id='')
+    metadata = dict(run_id=run_id)
     executable = Path(sys.executable).with_name('niepctl')
     client = Client(str(executable) if executable.is_file() else shutil.which('niepctl') or 'niepctl',
                     args.socket, args.rpc_timeout)
     if client.call('status')['defined']:
         raise RuntimeError('Daemon already has a topology; stop this run without changing it')
+    try:
+        if 'resources' not in client.call('stats'):
+            raise RuntimeError('Invalid stats response')
+    except RuntimeError as exc:
+        raise RuntimeError('Resource stats unavailable; restart the updated niepd. ' + str(exc)) from exc
     if 'vm' in args.kinds:
         subprocess.run([sys.executable, str(Path(__file__).with_name('prepare-image.py')),
                         str(args.vm_image), '--count', str(max(args.counts))], check=True)
     if 'container' in args.kinds:
         # Resolve locally before timing: daemon must never pull during a trial.
-        inspection = subprocess.run(['docker', 'image', 'inspect', args.image],
-                                    capture_output=True, text=True, check=True)
-        metadata['image_id'] = json.loads(inspection.stdout)[0]['Id']
+        subprocess.run(['docker', 'image', 'inspect', args.image],
+                       capture_output=True, text=True, check=True)
+    def save(name, rows):
+        writer, handle = files[name]
+        for row in rows:
+            combined = dict(row, **metadata)
+            writer.writerow({key: combined.get(key, '') for key in SCHEMAS[name]})
+        handle.flush()
+
     failed = False
     for kind, count, path, instances in plans:
         for repeat in range(1, args.repeats + 1):
+            metadata['scenario_id'] = uuid4().hex
+            started_at = datetime.now(timezone.utc).isoformat()
             rows, cleanup_failed = trial(client, path, instances, kind, count, repeat,
-                                          args.timeout, args.interval)
+                                          args.timeout, args.interval,
+                                          observe_seconds=args.observe_seconds, stats_interval=args.stats_interval,
+                                          settle_seconds=args.settle_seconds,
+                                          save_samples=lambda rows: save('usage', rows))
             for row in rows:
-                row.update(metadata)
-            writer.writerows(rows)
-            handle.flush()
+                row['started_at'] = started_at
+            save('startup', rows)
             success = all(row['status'] == 'ready' for row in rows)
             failed |= not success
             print(f'{kind} n={count} repeat={repeat}: '
                   f'{rows[0]["all_ready_ms"]} ms' if success else
-                  f'{kind} n={count} repeat={repeat}: FAILED (see results.csv)', flush=True)
+                  f'{kind} n={count} repeat={repeat}: FAILED (see startup.csv and usage.csv)', flush=True)
             if not success:
                 for row in rows:
                     if row['error']:
