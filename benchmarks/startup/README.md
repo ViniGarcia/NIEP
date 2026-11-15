@@ -222,3 +222,63 @@ Previously recorded timeout rows are retained; rerun affected scenarios, e.g.:
 ```sh
 .venv/bin/python benchmarks/startup/run.py --counts 64 --repeats 1
 ```
+
+## Plot results with Matplotlib
+
+```sh
+# Optional dependency (if Matplotlib is not already installed):
+.venv/bin/pip install -e '.[benchmark]'
+
+# Latest run, Portuguese and English PNGs under output/plots/pt/ and output/plots/en/:
+.venv/bin/python benchmarks/startup/plot.py
+
+# Select comparable runs explicitly to combine repetitions:
+.venv/bin/python benchmarks/startup/plot.py --run-id RUN_ID_1 RUN_ID_2
+
+# Use another output directory:
+.venv/bin/python benchmarks/startup/plot.py --input benchmarks/startup/output \
+  --output /tmp/niep-figures
+```
+
+Five figures are generated in each language (ten PNGs total). Portuguese titles,
+axes and legends are under `plots/pt/`; English versions are under `plots/en/`.
+Only PNG is generated:
+
+- `startup_time`: time until all instances answer HTTP versus instance count.
+- `cpu_mean`: mean aggregate CPU versus instance count.
+- `memory_mean`: mean aggregate memory versus instance count.
+- `cpu_per_instance`: VM/container bars normalized to usage per instance,
+  pooling the selected scenario sizes.
+- `memory_per_instance`: the analogous normalized memory bars.
+
+Startup time is the maximum `ready_ms` across all instances in a successful
+scenario/repetition, converted to seconds. For resources, complete polling rounds
+are summed across instances, then averaged over time within that trial. Curves
+show the mean of trial-level observations at each size, with error bars of
+**±1 sample standard deviation** across repetitions (`ddof=1`). They do not treat
+polling rows or multiple VMs in the same trial as independent repetitions.
+With only one trial at a size, its standard deviation is unavailable and the
+figure draws no error bar. Sample-count annotations are omitted from all
+figures; trial counts are printed only in the console. Run with
+`--repeats 3` or more to measure between-trial variation.
+
+For each bar, each trial's mean aggregate usage is divided by its instance count.
+The bar and error bar are the mean and sample standard deviation across these
+normalized trial observations, including all selected sizes. Every trial has
+equal weight; larger topologies and trials with more polls do not dominate.
+This SD describes variation between normalized trials/sizes, not the dispersion
+of individual platform measurements within one polling round.
+
+The script defaults to the most recently written run ID and prints the selected
+IDs and included scenario counts. `--run-id all` pools all historical runs: use
+only if topology, workload and configuration are comparable. In particular, do
+not pool earlier isolated-link and current shared-switch experiments blindly.
+
+You may run plotting while a benchmark is appending data. Files are read as
+snapshots without locking or modifying the CSVs. Failed/incomplete scenarios,
+incomplete polls and orphan usage rows from an unfinished trial are excluded.
+Successful startup scenarios without complete resource polls still contribute
+to the startup graph, while missing resource metrics are never replaced by zero.
+Re-run plotting after the benchmark completes to refresh all figures; existing
+figures in the chosen output directory are replaced. The backend is `Agg`, so a
+GUI or display server is not required. No derived columns are written to CSV.

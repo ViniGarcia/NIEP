@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+benchmark = ["matplotlib>=3.7,<4"]
 dev = [
   "setuptools>=68",
   "pytest>=8,<9",
