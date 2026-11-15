@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - import-only host fallback
     libvirt = _UnavailableLibvirt()
 
 
+from niep.runtime.start_events import timed_start
 from niep.runtime.errors import RuntimeFailure
 
 
@@ -129,7 +130,8 @@ class LibvirtRuntime:
 
     def start(self, domain):
         try:
-            return domain.create()
+            with timed_start('vm', domain):
+                return domain.create()
         except RuntimeFailure:
             raise
         except Exception as exc:

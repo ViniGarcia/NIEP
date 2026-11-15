@@ -95,3 +95,21 @@ container writable layers. Totals contain `disk_bytes`, `resources`,
 `measured_resources`, and `partial`. The known-value sum is an estimate because
 the storage backends use different accounting. Shared images, volumes, bind
 mounts and logs are excluded. See the service tutorial for details.
+
+### Runtime startup capture
+
+`startup-timing arm TIMEOUT INTERVAL` arms one `topoup` with concurrent HTTP
+probes from the actual libvirt/Docker start calls. `startup-timing snapshot`
+returns `capture_id`, per-resource timing records and the count of pending HTTP
+observations. `startup-timing disable` cancels pending probes and preserves the
+records for inspection. Arm while the topology is not up; timeout is (0,3600]
+seconds, interval (0,10] seconds. Arming during startup is rejected. Stop/clean/
+destroy and startup failure cancel pending probes. Normal, unarmed lifecycle
+calls do not enable readiness probes.
+
+`start_call_ms` ends when the runtime start API returns; `runtime_ready_ms` ends
+when an independent HTTP probe receives status 200 and exact body `ok`. VM probes
+use libvirt management DHCP; Docker probes use loopback inside the container's
+network namespace. These metrics are independent of Mininet setup but still
+include runtime/network initialization and probe latency. See the benchmark
+README for CSV identity, scope and measurement semantics.

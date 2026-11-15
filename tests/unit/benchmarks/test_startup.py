@@ -129,7 +129,7 @@ def test_repeated_runs_append_two_joinable_raw_csvs(tmp_path, monkeypatch):
     monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs:
                         SimpleNamespace(stdout='[{"Id":"sha256:test"}]'))
     monkeypatch.setattr(sys, 'argv', ['run.py', '--kinds', 'container', '--counts', '1',
-                                    '--repeats', '1', '--output', str(tmp_path)])
+                                    '--repeats', '1', '--skip-runtime-timing', '--output', str(tmp_path)])
     assert BENCH['main']() == 0
     originals = {name: (tmp_path / f'{name}.csv').read_bytes() for name in ('startup', 'usage')}
     assert BENCH['main']() == 0
@@ -317,3 +317,53 @@ def test_shared_switch_probes_every_instance_from_the_same_host(tmp_path):
     assert all(row['status'] == 'ready' for row in rows)
     assert all(probe[2] == 'h1' for probe in probes)
     assert [probe[-1] for probe in probes] == [f'http://{addresses(i)[1]}:8080/health' for i in range(2)]
+
+
+def test_integrated_timing_creates_third_csv_for_same_instances(tmp_path, monkeypatch):
+    import csv
+    import sys
+    from types import SimpleNamespace
+
+    events = []
+    resource = dict(kind='container', id='st-container01', runtime_id='docker-id',
+                    started_at='now', start_call_ms=1, runtime_ready_ms=2,
+                    probe_path='container_loopback', status='ready', error='')
+
+    class IntegratedClient(Client):
+        def call(self, *args):
+            events.append(args)
+            if args[0] == 'status':
+                return {'defined': False}
+            if args[0] == 'stats':
+                return {'resources': []}
+            if args[0] == 'startup-timing':
+                return {'capture_id': 'capture', 'resources': [resource], 'pending': 0}
+            return super().call(*args)
+
+    def observe(_client, instances, kind, count, repeat, **kwargs):
+        rows = [dict(kind=kind, count=count, repeat=repeat, instance=instances[0],
+                     sample_index=1, sample_timestamp='now', elapsed_seconds=1,
+                     memory_bytes=100, cpu_percent=20, status='sampled', error='')]
+        kwargs['save'](rows)
+        return rows
+
+    module = BENCH['main'].__globals__
+    monkeypatch.setitem(module, 'Client', lambda *_args: IntegratedClient())
+    monkeypatch.setitem(module, 'observe', observe)
+    monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs: SimpleNamespace(stdout='[]'))
+    monkeypatch.setattr(sys, 'argv', ['run.py', '--kinds', 'container', '--counts', '1',
+                                    '--repeats', '1', '--output', str(tmp_path)])
+    assert BENCH['main']() == 0
+    tables = {}
+    for name in ('startup', 'usage', 'runtime_startup'):
+        with (tmp_path / f'{name}.csv').open() as handle:
+            tables[name] = list(csv.DictReader(handle))
+    runtime = tables['runtime_startup'][0]
+    assert runtime['runtime_id'] == 'docker-id'
+    assert runtime['runtime_ready_ms'] == '2'
+    for name in ('startup', 'usage'):
+        assert all(tables[name][0][key] == runtime[key] for key in BENCH['COMMON_FIELDS'])
+    assert sum(event[0] == 'topoup' for event in events) == 1
+    assert sum(event[0] == 'topodestroy' for event in events) == 1
+    assert next(i for i, e in enumerate(events) if e[:2] == ('startup-timing', 'arm')) < next(
+        i for i, e in enumerate(events) if e[0] == 'topoup')

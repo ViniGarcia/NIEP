@@ -82,14 +82,60 @@ def test_render_outputs_only_png_in_both_languages_without_sample_annotations(tm
                          [text.get_text() for ax in figure.axes for text in ax.texts]))
 
     monkeypatch.setattr(Figure, 'savefig', savefig)
-    scenarios = [dict(kind=kind, count=2, startup_seconds=seconds, cpu_percent=cpu, memory_mib=memory)
+    scenarios = [dict(kind=kind, count=2, startup_seconds=seconds, topoup_seconds=seconds / 2, cpu_percent=cpu, memory_mib=memory,
+                      runtime_start_call_ms=cpu * 10, runtime_http_ready_ms=seconds * 1000)
                  for kind in ('vm', 'container')
                  for seconds, cpu, memory in [(1, 10, 50), (2, 20, 100)]]
     for language in ('pt', 'en'):
         PLOT['render'](scenarios, tmp_path / language, 'test', language)
-    assert len(captured) == 10
+    assert len(captured) == 16
     assert all(path.suffix == '.png' for path, _, _ in captured)
     assert {path.parent.name for path, _, _ in captured} == {'pt', 'en'}
     assert any(title == 'Tempo de inicialização da topologia' for _, title, _ in captured)
     assert any(title == 'Topology startup time' for _, title, _ in captured)
     assert all('n=' not in label for _, _, labels in captured for label in labels)
+    assert {path.stem for path, _, _ in captured} >= {'runtime_start_call', 'runtime_http_ready'}
+    assert any(title == 'Duração média da chamada de start por instância' for _, title, _ in captured)
+
+
+def runtime(scenario, calls=(100, 300), readiness=(1000, 3000)):
+    return [dict(run_id='r1', scenario_id=scenario, kind='vm', count='2', repeat='1',
+                 instance=f'vm{i}', start_call_ms=str(call), runtime_ready_ms=str(ready),
+                 status='ready')
+            for i, (call, ready) in enumerate(zip(calls, readiness))]
+
+
+def test_runtime_metrics_join_instances_and_average_per_trial_before_sd():
+    starts = startup('s1') + startup('s2')
+    timings = runtime('s1') + runtime('s2', calls=(500, 700), readiness=(5000, 7000))
+    results, _ = PLOT['aggregate'](starts, [], {'r1'}, timings)
+    assert [r['runtime_start_call_ms'] for r in results] == [200, 600]
+    assert [r['runtime_http_ready_ms'] for r in results] == [2000, 6000]
+    points = PLOT['curve_points'](results, 'vm', 'runtime_start_call_ms')
+    assert points == [(2, 400, statistics.stdev([200, 600]), 2)]
+
+
+def test_incomplete_or_unmatched_runtime_records_are_not_filled_with_zero():
+    starts = startup('s1')
+    for timings in (runtime('s1')[:1], runtime('other'), runtime('s1') + runtime('s1')):
+        results, _ = PLOT['aggregate'](starts, [], {'r1'}, timings)
+        assert results[0]['startup_seconds'] == 2
+        assert results[0]['runtime_start_call_ms'] is None
+        assert results[0]['runtime_http_ready_ms'] is None
+
+
+def test_topoup_counts_one_observation_per_scenario_repetition():
+    rows = [dict(row, topoup_ms='1000') for row in startup('s1')]
+    rows += [dict(row, topoup_ms='3000') for row in startup('s2')]
+    scenarios, _ = PLOT['aggregate'](rows, [], {'r1'})
+    assert [r['topoup_seconds'] for r in scenarios] == [1, 3]
+    assert PLOT['curve_points'](scenarios, 'vm', 'topoup_seconds') == [
+        (2, 2, statistics.stdev([1, 3]), 2)]
+
+
+def test_topoup_rejects_inconsistent_copies_within_a_scenario():
+    rows = startup('s1')
+    rows[0]['topoup_ms'], rows[1]['topoup_ms'] = '1000', '2000'
+    with pytest.raises(ValueError, match='Inconsistent topoup_ms'):
+        PLOT['aggregate'](rows, [], {'r1'})
+    assert PLOT['aggregate'](startup('s1'), [], {'r1'})[0][0]['topoup_seconds'] is None

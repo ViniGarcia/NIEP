@@ -277,6 +277,22 @@ def status(ctx: typer.Context):
     handle(ctx, request(ctx, "status"))
 
 
+@app.command("startup-timing")
+def startup_timing(
+    ctx: typer.Context,
+    action: str = typer.Argument('snapshot'),
+    timeout: Optional[float] = typer.Argument(None),
+    interval: Optional[float] = typer.Argument(None),
+):
+    """Arm/snapshot runtime-start-to-HTTP measurement for the next topoup."""
+    args = [action]
+    if timeout is not None:
+        args.append(str(timeout))
+    if interval is not None:
+        args.append(str(interval))
+    handle(ctx, request(ctx, 'startup-timing', args))
+
+
 @app.command("disk-usage")
 def disk_usage(ctx: typer.Context):
     """Show VM disk allocation and container writable-layer storage."""

@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - exercised on host-only installations
         pass
 
 
+from niep.runtime.start_events import timed_start
 from niep.runtime.errors import RuntimeFailure
 
 
@@ -177,7 +178,8 @@ class DockerRuntime:
     def start(self, container):
         container_id = getattr(container, "name", None) or getattr(container, "id", None)
         try:
-            container.start()
+            with timed_start('container', container):
+                container.start()
             container.reload()
             if container.status != "running":
                 exit_code = container.attrs.get("State", {}).get("ExitCode")
