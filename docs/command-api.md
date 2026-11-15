@@ -84,3 +84,14 @@ coverage. See the service tutorial for scope and accounting semantics.
 `niepctl stats` polls every five seconds by default (`--interval SECONDS`).
 `niepctl stats-snapshot` prints one JSON data snapshot; global `--json` retains
 the command envelope. `niepctl --json stats` emits JSON Lines while polling.
+
+### Disk usage
+
+`disk-usage` accepts no arguments and returns a `disk_usage` result with
+`timestamp`, `resources`, `totals`, and `scope`. Each instance contains `kind`,
+`id`, `disk_bytes`, `source`, and `error`; VM rows also include `file_bytes`.
+Sources are host allocated blocks for private VM disks and Docker `SizeRw` for
+container writable layers. Totals contain `disk_bytes`, `resources`,
+`measured_resources`, and `partial`. The known-value sum is an estimate because
+the storage backends use different accounting. Shared images, volumes, bind
+mounts and logs are excluded. See the service tutorial for details.

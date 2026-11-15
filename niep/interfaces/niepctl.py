@@ -277,6 +277,27 @@ def status(ctx: typer.Context):
     handle(ctx, request(ctx, "status"))
 
 
+@app.command("disk-usage")
+def disk_usage(ctx: typer.Context):
+    """Show VM disk allocation and container writable-layer storage."""
+    response = request(ctx, 'disk-usage')
+    if not response.get('ok') or json_enabled(ctx):
+        handle(ctx, response)
+        return
+    data = response['data']
+    typer.echo(f"{'TYPE':<12} {'NAME':<24} {'DISK MiB':>12}  SOURCE")
+    for row in data['resources']:
+        size = '-' if row['disk_bytes'] is None else f"{row['disk_bytes'] / 1048576:.2f}"
+        typer.echo(f"{row['kind']:<12} {row['id']:<24} {size:>12}  {row.get('source', '-')}")
+        if row.get('error'):
+            typer.echo(f"  {row['error']}")
+    for name, total in data['totals'].items():
+        typer.echo(f"TOTAL {name}: {total['disk_bytes'] / 1048576:.2f} MiB "
+                   f"({total['measured_resources']}/{total['resources']} measured)")
+    typer.echo('Excludes shared images, volumes, bind mounts and container logs. '
+               'VM allocated blocks and Docker writable-layer sizes use different accounting.')
+
+
 @app.command("stats-snapshot")
 def stats_snapshot(ctx: typer.Context):
     """Print one CPU/memory snapshot as JSON."""

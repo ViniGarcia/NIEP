@@ -16,6 +16,7 @@ from niep.application.handlers import (
     VMCommandHandler,
     VNFCommandHandler,
 )
+from niep.application.disk_usage import DiskUsageService
 from niep.application.metrics import MetricsService
 from niep.application.session import TopologySession
 from niep.application.service import (
@@ -99,6 +100,7 @@ class CommandRouter:
         self._sfc = SFCCommandHandler(session)
         self._mininet = MininetCommandHandler(session)
         self._metrics = MetricsService(session)
+        self._disk_usage = DiskUsageService(session)
         self._routes: dict[str, Callable[[tuple[str, ...]], ServiceResult]] = {
             "define": topology.define,
             "topoup": topology.up,
@@ -107,6 +109,7 @@ class CommandRouter:
             "topodestroy": topology.destroy,
             "status": topology.status,
             "stats": self._metrics.snapshot,
+            "disk-usage": self._disk_usage.snapshot,
             "vm": self._vm.handle,
             "container": self._container.handle,
             "vnf": self._vnf.handle,

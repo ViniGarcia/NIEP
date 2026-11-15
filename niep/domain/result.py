@@ -13,6 +13,7 @@ class ResultCode(str, Enum):
     CONTAINER_RUNTIME_ERROR = "container_runtime_error"
     CONTAINER_NOT_FOUND = "container_not_found"
     DEFINED = "defined"
+    DISK_USAGE = "disk_usage"
     EXECUTER_ERROR = "executer_error"
     INVALID_COMMAND_ARGS = "invalid_command_args"
     INVALID_REQUEST = "invalid_request"

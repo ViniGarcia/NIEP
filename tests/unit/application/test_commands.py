@@ -21,6 +21,7 @@ def test_router_has_aggregate_registry_without_runtime_data():
         "sfc",
         "status",
         "stats",
+        "disk-usage",
         "topoclean",
         "topodestroy",
         "topodown",

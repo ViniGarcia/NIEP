@@ -239,3 +239,34 @@ and include `cpu_samples`, `memory_samples`, and `partial` so missing samples ar
 visible; a partial aggregate is not a complete usage total. A failure collecting
 one instance does not discard the other instances' measurements. Collection is
 sequential, so the snapshot is not an atomic view of all runtimes.
+
+## Topology disk usage
+
+After restarting the updated daemon, inspect storage occupied by the topology:
+
+```sh
+niepctl disk-usage
+niepctl --json disk-usage
+```
+
+The command reports each VM/container and totals for VMs, containers and all
+workloads. JSON values are bytes; the table uses MiB. It measures storage, not
+read/write I/O rates or free space inside the guest. Its scope matches `stats`:
+explicit topology VMs and containers, excluding VNF/SFC-owned VMs.
+
+VM `disk_bytes` counts allocated host blocks (`st_blocks * 512`) in the instance's
+QCOW2 file, respecting sparse allocation; `file_bytes` is the host file length,
+not the guest disk capacity. Docker `disk_bytes` is the Engine's `SizeRw` for
+that container's writable layer. Docker reports driver-accounted content size,
+which is not the same as filesystem allocated blocks. The combined total is an
+estimate across those two accounting methods. Compression, reflinks, filesystem
+metadata and shared extents can affect physical storage consumption.
+
+Shared base images and Docker image layers are excluded to avoid counting shared
+assets once per instance. Container logs, volumes, bind mounts, VM XML, host
+networking and daemon logs are also excluded. Stopped instances remain measurable
+while their files/layers exist. An uncreated instance reports zero; unavailable
+storage reports null and an error. JSON totals include `partial` and
+`measured_resources`; the table reports measured/total instance counts. Collection
+is read-only, sequential, and may take longer for large writable layers. No guest
+agent or SSH is required. Use `NIEP_CLIENT_TIMEOUT=600 niepctl disk-usage` if needed.
