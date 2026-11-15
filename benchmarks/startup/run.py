@@ -286,7 +286,8 @@ def probe_http(client, count, start, timeout, interval):
 
 def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
           observe_seconds=0, stats_interval=1, settle_seconds=2, save_samples=lambda rows: None,
-          capture_runtime=False, save_runtime=lambda rows: None, save_host_memory=lambda rows: None):
+          capture_runtime=False, save_runtime=lambda rows: None, save_host_memory=lambda rows: None,
+          report_summary=True):
     rows = [dict.fromkeys(STARTUP_FIELDS, '') for _ in instances]
     for row, ident in zip(rows, instances):
         row.update(kind=kind, count=count, repeat=repeat, instance=ident,
@@ -321,11 +322,11 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
         if not pending and observe_seconds > 0:
             samples = observe(client, instances, kind, count, repeat, duration=observe_seconds,
                               interval=stats_interval, settle=settle_seconds, save=save_samples)
-            summary = summarize(samples, count)
             for row in rows:
                 if any(sample['status'] != 'sampled' for sample in samples):
-                    row.update(status='metrics_failed', error='Incomplete resource samples; see usage rows')
-            print_summary(kind, count, repeat, summary)
+                    row.update(status='metrics_failed', error='Incomplete resource samples')
+            if report_summary:
+                print_summary(kind, count, repeat, summarize(samples, count))
     except KeyboardInterrupt:
         interrupted = True
         for row in rows:
@@ -407,7 +408,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--counts', nargs='+', type=positive_count, default=list(COUNTS))
     parser.add_argument('--kinds', nargs='+', choices=('vm', 'container'), default=['vm', 'container'])
-    parser.add_argument('--repeats', type=int, default=3)
+    parser.add_argument('--repeats', type=int, default=3,
+                        help='Measured repetitions per configuration, after one discarded warmup (default: 3)')
     parser.add_argument('--timeout', type=float, default=180,
                         help='HTTP deadline in seconds from before topoup (default: 180)')
     parser.add_argument('--rpc-timeout', type=float, default=600,
@@ -492,8 +494,16 @@ def execute(args, plans, files):
         handle.flush()
 
     failed = False
+    warmed = set()
     for kind, count, path, instances in plans:
-        for repeat in range(1, args.repeats + 1):
+        # Repeat zero is an unrecorded warmup, once per distinct platform/size.
+        first_repeat = 1 if (kind, count) in warmed else 0
+        warmed.add((kind, count))
+        for repeat in range(first_repeat, args.repeats + 1):
+            warmup = repeat == 0
+            label = f'{kind} n={count} warmup' if warmup else f'{kind} n={count} repeat={repeat}'
+            if warmup:
+                print(f'{label}: starting (results will be discarded)', flush=True)
             metadata['scenario_id'] = uuid4().hex
             started_at = datetime.now(timezone.utc).isoformat()
             runtime_records = []
@@ -501,41 +511,54 @@ def execute(args, plans, files):
 
             def save_runtime(records):
                 runtime_records.extend(records)
-                save('runtime_startup', records)
+                if not warmup:
+                    save('runtime_startup', records)
 
             def save_host_memory(records):
                 host_records.extend(records)
-                save('host_memory', records)
+                if not warmup:
+                    save('host_memory', records)
 
             rows, cleanup_failed = trial(client, path, instances, kind, count, repeat,
                                           args.timeout, args.interval,
                                           observe_seconds=args.observe_seconds, stats_interval=args.stats_interval,
                                           settle_seconds=args.settle_seconds,
-                                          save_samples=lambda rows: save('usage', rows),
+                                          save_samples=lambda rows: None if warmup else save('usage', rows),
                                           capture_runtime=not args.skip_runtime_timing, save_runtime=save_runtime,
-                                          save_host_memory=save_host_memory)
-            for row in rows:
-                row['started_at'] = started_at
-            save('startup', rows)
+                                          save_host_memory=save_host_memory, report_summary=not warmup)
+            if not warmup:
+                for row in rows:
+                    row['started_at'] = started_at
+                save('startup', rows)
             success = all(row['status'] == 'ready' for row in rows)
             timing_failed = any(row['status'] != 'ready' for row in runtime_records)
             host_failed = any(row['status'] != 'sampled' for row in host_records)
             if host_failed:
-                print('Host memory collection incomplete; see host_memory.csv', file=sys.stderr)
+                print(f'{label}: host memory collection incomplete' +
+                      (' (warmup results discarded)' if warmup else '; see host_memory.csv'), file=sys.stderr)
             if timing_failed:
-                print('Runtime startup timing incomplete; see runtime_startup.csv', file=sys.stderr)
+                print(f'{label}: runtime startup timing incomplete' +
+                      (' (warmup results discarded)' if warmup else '; see runtime_startup.csv'), file=sys.stderr)
+            if warmup:
+                for record in runtime_records + host_records:
+                    if record.get('error'):
+                        print(f'{label}: {record["error"]}', file=sys.stderr)
             failed |= timing_failed
             failed |= host_failed
             failed |= not success
-            print(f'{kind} n={count} repeat={repeat}: '
-                  f'{rows[0]["all_ready_ms"]} ms' if success else
-                  f'{kind} n={count} repeat={repeat}: FAILED (see startup.csv and usage.csv)', flush=True)
+            if warmup:
+                print(f'{label}: ' + ('completed' if success and not timing_failed and not host_failed else 'FAILED') +
+                      ' (results discarded)', flush=True)
+            else:
+                print(f'{label}: {rows[0]["all_ready_ms"]} ms' if success else
+                      f'{label}: FAILED (see startup.csv and usage.csv)', flush=True)
             if not success:
                 for row in rows:
                     if row['error']:
                         print(f"{row['instance']}: {row['error']}", file=sys.stderr)
             if any(row['status'] == 'interrupted' for row in rows):
-                print('Interrupted; partial results saved and cleanup attempted.', file=sys.stderr)
+                print('Interrupted during warmup; results discarded and cleanup attempted.' if warmup else
+                      'Interrupted; partial results saved and cleanup attempted.', file=sys.stderr)
                 return 130
             if cleanup_failed or ((not success or timing_failed or host_failed) and not args.keep_going):
                 return 1

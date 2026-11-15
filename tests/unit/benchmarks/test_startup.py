@@ -409,8 +409,8 @@ def test_integrated_timing_creates_third_csv_for_same_instances(tmp_path, monkey
     assert runtime['runtime_ready_ms'] == '2'
     for name in ('startup', 'usage'):
         assert all(tables[name][0][key] == runtime[key] for key in BENCH['COMMON_FIELDS'])
-    assert sum(event[0] == 'topoup' for event in events) == 1
-    assert sum(event[0] == 'topodestroy' for event in events) == 1
+    assert sum(event[0] == 'topoup' for event in events) == 2  # Warmup + measured trial.
+    assert sum(event[0] == 'topodestroy' for event in events) == 2
     assert next(i for i, e in enumerate(events) if e[:2] == ('startup-timing', 'arm')) < next(
         i for i, e in enumerate(events) if e[0] == 'topoup')
 
@@ -523,7 +523,7 @@ def test_execute_reports_host_memory_failure_without_discarding_ready_startup(tm
     args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=True,
                            kinds=['container'], image='local:test', repeats=1, timeout=1,
                            interval=0, observe_seconds=0, stats_interval=1, settle_seconds=0,
-                           keep_going=False)
+                           keep_going=True)
     with BENCH['results_files'](tmp_path) as files:
         assert BENCH['execute'](args, [('container', 1, tmp_path, ['c1'])], files) == 1
     with (tmp_path / 'startup.csv').open() as source:
@@ -532,3 +532,118 @@ def test_execute_reports_host_memory_failure_without_discarding_ready_startup(tm
         snapshots = list(csv.DictReader(source))
         assert len(snapshots) == 2 and all(r['status'] == 'metrics_error' for r in snapshots)
     assert client.calls[-2:] == ['topodown', 'topodestroy']
+
+
+def test_warmup_once_per_distinct_platform_size_is_excluded_from_all_csvs(tmp_path, monkeypatch, capsys):
+    import csv
+    from collections import Counter
+    from types import SimpleNamespace
+
+    events = []
+
+    class IdleClient(Client):
+        def call(self, *args):
+            if args[0] == 'status':
+                return {'defined': False}
+            if args[0] in ('stats', 'startup-timing'):
+                return {'resources': []}
+            return super().call(*args)
+
+    def trial(client, path, instances, kind, count, repeat, timeout, interval, **kwargs):
+        events.append((kind, count, repeat))
+        assert kwargs['report_summary'] == (repeat != 0)
+        assert kwargs['capture_runtime']
+        assert (kwargs['observe_seconds'], kwargs['stats_interval'], kwargs['settle_seconds']) == (10, 1, 2)
+        common = dict(kind=kind, count=count, repeat=repeat)
+        rows = [dict(common, instance=ident, status='ready', error='',
+                     ready_ms=999999 if repeat == 0 else 100, all_ready_ms=100)
+                for ident in instances]
+        kwargs['save_samples']([dict(row, status='sampled', sample_index=1,
+                                      memory_bytes=999999 if repeat == 0 else 100,
+                                      cpu_percent=1) for row in rows])
+        kwargs['save_runtime']([dict(row, start_call_ms=100, runtime_ready_ms=100) for row in rows])
+        kwargs['save_host_memory']([dict(common, phase=phase, status='sampled',
+                                         mem_total_bytes=1000, mem_available_bytes=900)
+                                   for phase in ('before_topoup', 'before_topodown')])
+        return rows, False
+
+    module = BENCH['execute'].__globals__
+    monkeypatch.setitem(module, 'Client', lambda *_args: IdleClient())
+    monkeypatch.setitem(module, 'trial', trial)
+    monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs: None)
+    args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=False,
+                           kinds=['vm', 'container'], counts=[1, 2], vm_image=tmp_path,
+                           image='local:test', repeats=2, timeout=180, interval=.1,
+                           observe_seconds=10, stats_interval=1, settle_seconds=2, keep_going=False)
+    configurations = [('vm', 1), ('vm', 2), ('container', 1), ('container', 2), ('vm', 1)]
+    plans = [(kind, count, tmp_path, [f'{kind}{i}' for i in range(count)])
+             for kind, count in configurations]
+    with BENCH['results_files'](tmp_path, runtime_timing=True) as files:
+        assert BENCH['execute'](args, plans, files) == 0
+    warmups = Counter((kind, count) for kind, count, repeat in events if repeat == 0)
+    assert warmups == Counter({pair: 1 for pair in set(configurations)})
+    for pair in set(configurations):
+        sequence = [repeat for kind, count, repeat in events if (kind, count) == pair]
+        assert sequence == [0, 1, 2] + ([1, 2] if pair == ('vm', 1) else [])
+    for name in BENCH['SCHEMAS']:
+        with (tmp_path / f'{name}.csv').open() as source:
+            rows = list(csv.DictReader(source))
+        assert len(rows) == (20 if name == 'host_memory' else 14)
+        assert {row['repeat'] for row in rows} == {'1', '2'}
+        assert all('999999' not in row.values() for row in rows)
+    assert capsys.readouterr().out.count('warmup: completed (results discarded)') == 4
+
+
+@pytest.mark.parametrize('operation,keep_going,exit_code',
+                         [('topoup', False, 1), ('topodown', True, 1), ('interrupt', True, 130)])
+def test_failed_or_interrupted_warmup_cleans_and_leaves_csvs_empty(
+        tmp_path, monkeypatch, operation, keep_going, exit_code):
+    import csv
+    from types import SimpleNamespace
+
+    class WarmupClient(Client):
+        def call(self, *args):
+            if args[0] == 'status':
+                return {'defined': False}
+            if args[0] == 'stats':
+                return {'resources': []}
+            if args[0] == 'mininet' and operation == 'interrupt':
+                raise KeyboardInterrupt
+            return super().call(*args)
+
+    client = WarmupClient(fail=operation)
+    module = BENCH['execute'].__globals__
+    monkeypatch.setitem(module, 'Client', lambda *_args: client)
+    monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs: None)
+    args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=True,
+                           kinds=['container'], image='local:test', repeats=2, timeout=1,
+                           interval=0, observe_seconds=0, stats_interval=1, settle_seconds=0,
+                           keep_going=keep_going)
+    with BENCH['results_files'](tmp_path) as files:
+        assert BENCH['execute'](args, [('container', 1, tmp_path, ['c1'])], files) == exit_code
+    assert client.calls.count('topoup') == client.calls.count('topodestroy') == 1
+    assert client.calls[-2:] == ['topodown', 'topodestroy']
+    for path in tmp_path.glob('*.csv'):
+        with path.open() as source:
+            assert list(csv.DictReader(source)) == []
+
+
+def test_warmup_observes_resources_without_computing_or_printing_summary(tmp_path, monkeypatch):
+    observed = []
+
+    def observe(*args, **kwargs):
+        observed.append(kwargs)
+        return [dict(status='sampled')]
+
+    def unexpected_summary(*args):
+        pytest.fail('warmup must not contribute statistics')
+
+    module = BENCH['trial'].__globals__
+    monkeypatch.setitem(module, 'observe', observe)
+    monkeypatch.setitem(module, 'summarize', unexpected_summary)
+    monkeypatch.setitem(module, 'print_summary', unexpected_summary)
+    rows, stop = BENCH['trial'](Client(), tmp_path, ['vm1'], 'vm', 1, 0, 1, 0,
+                                observe_seconds=10, report_summary=False)
+    assert not stop and rows[0]['status'] == 'ready'
+    assert len(observed) == 1
+    assert observed[0]['duration'] == 10

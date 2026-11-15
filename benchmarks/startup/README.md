@@ -1,8 +1,9 @@
 # VM and container startup benchmark
 
 Run from the repository root with an idle NIEP daemon. The default sizes are
-1, 2, 4, 8, 16, 32 and 64, first VMs and then containers, with three trials per
-size. `--counts` accepts positive integers, for example `--counts 3 7 64 257`.
+1, 2, 4, 8, 16, 32 and 64, first VMs and then containers, with one discarded
+warmup followed by three measured trials per platform/size. `--counts` accepts
+positive integers, for example `--counts 3 7 64 257`.
 Each scenario has one Mininet probe host `h1`, one common switch `s1`, and all
 VMs or containers attached to that switch. All data NICs share `10.0.0.0/8`.
 NIEP starts its regular switch with its implicit local POX controller; switch
@@ -95,7 +96,7 @@ Useful options:
 ```sh
 # Quick functional check with a prepared VM base:
 .venv/bin/python benchmarks/startup/run.py --counts 1 --repeats 1
-# Containers only, one trial at each size:
+# Containers only, one measured trial (plus one warmup) at each size:
 .venv/bin/python benchmarks/startup/run.py --kinds container --repeats 1
 # Inspect all generated JSON without contacting the daemon:
 .venv/bin/python benchmarks/startup/run.py --generate-only
@@ -104,16 +105,37 @@ Useful options:
   --socket /run/niep.sock --timeout 180 --repeats 5
 ```
 
+Every invocation performs exactly one warmup for each distinct `(kind, count)`
+combination, immediately before that combination's first measured repetition.
+Repeated sizes in the same invocation do not add more warmups for that combination.
+`--repeats` counts only measured repetitions: `--repeats 1` runs a warmup and then
+one measured trial per combination. Defaults therefore launch 14 warmups and 42
+measured trials (56 complete lifecycle cycles). `--generate-only` runs neither.
+
+Warmup uses the same topology, HTTP readiness checks, settling period, resource
+observation window, optional runtime instrumentation, host memory snapshots and
+`topodown`/`topodestroy` cleanup as measured trials. Its startup, usage, runtime and
+host memory records are discarded, and no statistical summary is computed or
+printed. Only warmup progress and diagnostics appear in the console; no warmup
+rows enter any CSV or plot. CSV schemas and measured repeat numbers (1 through
+`--repeats`) remain unchanged. Keep historical runs without warmup separate when
+comparing experimental results.
+
+Warmup failures stop the run by default. `--keep-going` continues into measured
+repetitions after ordinary warmup failures, while retaining a nonzero final exit
+status. Cleanup failure always stops the series. Interrupting a warmup attempts
+cleanup, discards its results and exits with code 130.
+
 `NIEP_SOCKET` also selects the socket. The script refuses to replace an existing
 topology. Each trial attempts `topodown` then `topodestroy`, including after startup
-or HTTP failure and Ctrl+C. Ctrl+C saves the interrupted trial to CSV and exits
+or HTTP failure and Ctrl+C. Ctrl+C saves an interrupted measured trial to CSV and exits
 with code 130 without a traceback. Cleanup failure stops the series. Keep the terminal
 open until cleanup finishes; SIGKILL cannot be handled. Use a dedicated daemon;
 the idle check is not an exclusive lock.
 
 ## Results and interpretation
 
-Each execution appends raw measurements to four CSVs in
+Each execution appends measured-trial raw measurements to four CSVs in
 `benchmarks/startup/output/` (`--output DIR` selects another shared directory):
 
 | File | Rows | Measurements |
@@ -197,7 +219,7 @@ These are observations of the running HTTP service without additional load.
 
 The runner reads Linux `/proc/meminfo` on the same host as the local NIEP daemon,
 without spawning a process or requesting daemon resource statistics. Each
-scenario/repetition that attempts `topoup` records two snapshots:
+measured scenario/repetition that attempts `topoup` records two snapshots:
 
 - `before_topoup`: after `define` and runtime timing setup, immediately before
   starting the `topoup` timer and invoking the command.
@@ -266,8 +288,9 @@ topologies do not hit the regular CLI response timeout of 10 seconds. Fast conta
 be ready by the first observation. `--timeout` is the HTTP deadline counted from
 before `topoup`; it does not cancel a blocking daemon lifecycle operation.
 Record the host configuration, base QCOW2 checksum and package manifest alongside
-the output when collecting experimental results. These functional scripts do not
-control cache warmth, background load, CPU frequency or experiment ordering.
+the output when collecting experimental results. Warmup exercises the startup path
+and caches, but does not enforce a particular cache state. These functional scripts
+do not control background load, CPU frequency or experiment ordering.
 
 ## Large switch startup
 
