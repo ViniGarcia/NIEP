@@ -208,3 +208,17 @@ before `topoup`; it does not cancel a blocking daemon lifecycle operation.
 Record the host configuration, base QCOW2 checksum and package manifest alongside
 the output when collecting experimental results. These functional scripts do not
 control cache warmth, background load, CPU frequency or experiment ordering.
+
+## Large switch startup
+
+NIEP starts OVS through Mininet's batch API and a checked subprocess, avoiding
+Mininet's interactive PTY. At 64 VM ports the generated OVS command exceeds the
+terminal's roughly 4 KiB canonical line limit; older NIEP versions could report
+a successful `topoup` even though the switch bridge was not created. The fixed
+executor executes the full command outside that terminal and propagates OVS
+command failures into startup rollback. Restart `niepd` after updating the code.
+Previously recorded timeout rows are retained; rerun affected scenarios, e.g.:
+
+```sh
+.venv/bin/python benchmarks/startup/run.py --counts 64 --repeats 1
+```

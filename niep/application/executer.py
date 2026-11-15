@@ -1,3 +1,4 @@
+from niep.runtime.mininet_switch import start_switch
 from niep.runtime.infrastructure import DEFAULT_INFRASTRUCTURE_RUNTIME
 from niep.runtime.errors import cleanup_failure_record
 from os import getenv
@@ -461,7 +462,7 @@ class Executer:
                 switch_id,
                 lambda switch=switch, switch_id=switch_id: self._stage_result(
                     "ovs.start", "ovs_switch", switch_id,
-                    lambda: switch.ELEM.start([self.CONTROLLERS[switch.CONTROLLER].ELEM]),
+                    lambda: start_switch(switch.ELEM, [self.CONTROLLERS[switch.CONTROLLER].ELEM]),
                 ),
                 compensate=lambda switch=switch, switch_id=switch_id: self._compensate_element(switch, "ovs_switch", switch_id),
                 depends_on=dependencies,
@@ -584,7 +585,7 @@ class Executer:
             "switch.start",
             "switch",
             switch.ID,
-            lambda: switch.ELEM.start([self.CONTROLLERS[self.SWITCH_CONTROLLER_ID].ELEM]),
+            lambda: start_switch(switch.ELEM, [self.CONTROLLERS[self.SWITCH_CONTROLLER_ID].ELEM]),
         )
 
     def _start_runtime_controller(self, controller_id):
