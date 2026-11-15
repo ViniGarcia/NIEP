@@ -142,9 +142,9 @@ one measured trial per combination. Defaults therefore launch 14 warmups and 42
 measured trials (56 complete lifecycle cycles). `--generate-only` runs neither.
 
 Warmup uses the same topology, HTTP readiness checks, settling period, resource
-observation window, optional runtime instrumentation, host memory snapshots and
+observation window, optional runtime instrumentation, host memory snapshots, disk collection and
 `topodown`/`topodestroy` cleanup as measured trials. Its startup, usage, runtime and
-host memory records are discarded, and no statistical summary is computed or
+host memory and disk records are discarded, and no statistical summary is computed or
 printed. Only warmup progress and diagnostics appear in the console; no warmup
 rows enter any CSV or plot. CSV schemas and measured repeat numbers (1 through
 `--repeats`) remain unchanged. Keep historical runs without warmup separate when
@@ -164,7 +164,7 @@ the idle check is not an exclusive lock.
 
 ## Results and interpretation
 
-Each execution appends measured-trial raw measurements to four CSVs in
+Each execution appends measured-trial raw measurements to five CSVs in
 `benchmarks/startup/output/` (`--output DIR` selects another shared directory):
 
 | File | Rows | Measurements |
@@ -173,8 +173,9 @@ Each execution appends measured-trial raw measurements to four CSVs in
 | `runtime_startup.csv` | One per instance per scenario/repetition | `start_call_ms`, `runtime_ready_ms`, `probe_path`, `status`, `error` |
 | `usage.csv` | One per instance per poll | `sample_index`, `sample_timestamp`, `elapsed_seconds`, `memory_bytes`, `cpu_percent`, `status`, `error` |
 | `host_memory.csv` | Two per scenario/repetition | `phase`, `sample_timestamp`, `mem_total_bytes`, `mem_available_bytes`, `mem_free_bytes`, `buffers_bytes`, `cached_bytes`, `status`, `error` |
+| `disk_usage.csv` | One per instance at scenario end | `sample_timestamp`, `disk_bytes`, `file_bytes`, `source`, `status`, `error` |
 
-All four files include `run_id`, `scenario_id`, `kind` (`vm` or `container`), `count`
+All five files include `run_id`, `scenario_id`, `kind` (`vm` or `container`), `count`
 (number of instances in the scenario), and `repeat`. The instance-level files also
 include `instance`; the host snapshots apply to the entire scenario. `run_id` identifies
 an invocation; a fresh `scenario_id` identifies each scenario/repetition, including
@@ -252,7 +253,7 @@ measured scenario/repetition that attempts `topoup` records two snapshots:
 
 - `before_topoup`: after `define` and runtime timing setup, immediately before
   starting the `topoup` timer and invoking the command.
-- `before_topodown`: after resource observation and runtime timing collection,
+- `before_topodown`: after resource observation, runtime timing and disk collection,
   immediately before invoking `topodown`, while the scenario is still running.
 
 `host_memory.csv` stores raw `MemTotal`, `MemAvailable`, `MemFree`, `Buffers`, and
@@ -282,6 +283,42 @@ timings and cleanup. The run reports a collection failure and exits nonzero (or
 continues with `--keep-going`). The plot uses only successful, complete startup
 scenarios with exactly one valid host snapshot per phase and unchanged `MemTotal`;
 missing or invalid pairs are never replaced with zero.
+
+### End-of-scenario private disk usage
+
+The runner checks `niepd disk-usage` support before launching any trial. At the end
+of each scenario that attempted `topoup`, it requests one disk snapshot after
+resource observation and runtime timing collection, while the instances still
+exist. This happens before the final host-memory snapshot and `topodown`; disk
+scanning can affect host caches and therefore the subsequent memory estimate.
+Warmup runs perform the same collection but discard the results.
+
+`disk_usage.csv` stores one row per expected instance, joined using **`run_id`,
+`scenario_id`, `instance`**, with the daemon's UTC `sample_timestamp` and raw bytes:
+
+- VMs: `disk_bytes` is allocated blocks of the private QCOW2 file (`st_blocks * 512`),
+  with `source=host_allocated_blocks`. `file_bytes` is the host file's logical length,
+  not guest virtual disk capacity.
+- Containers: `disk_bytes` is Docker's `SizeRw`, the writable-layer size, with
+  `source=docker_writable_layer`. `file_bytes` is empty.
+
+These are different storage-accounting methods, reported as private instance
+storage rather than total platform disk cost. Shared base images, volumes, bind
+mounts, runtime/container logs outside the instance disk, and runtime metadata are
+excluded. The measurements are read while running, without forcing a disk flush;
+the daemon collects resources sequentially, so the snapshot is not atomic.
+
+Values are flushed after cleanup. Missing instances, unavailable storage counters
+and collection failures are written with an error status and empty sizes rather
+than zero. A genuine empty writable layer remains a valid zero. Cleanup is still
+attempted and valid startup timings are preserved. Collection failures make the
+run exit nonzero; `--keep-going` continues after ordinary failures. Failed startup
+or interrupted trials attempt collection before cleanup but are excluded from the
+comparison plot. A failure before attempting `topoup` produces no disk rows.
+
+No existing CSV headers change. The new file is created automatically, including
+with `--skip-runtime-timing`. Historical runs without it still render their other
+plots; missing disk observations are never replaced with zero.
 
 By default the first failed trial stops the series and prints its diagnostic;
 `--keep-going` continues after ordinary failures. Nonzero exit means a trial failed.
@@ -352,7 +389,7 @@ Previously recorded timeout rows are retained; rerun affected scenarios, e.g.:
   --output /tmp/niep-figures
 ```
 
-Nine figures are generated in each language (eighteen PNGs total). Portuguese titles,
+Ten figures are generated in each language (twenty PNGs total). Portuguese titles,
 axes and legends are under `plots/pt/`; English versions are under `plots/en/`.
 Only PNG is generated:
 
@@ -364,6 +401,8 @@ Only PNG is generated:
 - `memory_mean`: mean aggregate memory versus instance count.
 - `host_memory_delta`: estimated host used-memory change between the two snapshots
   versus instance count, comparing VMs and containers (MiB).
+- `disk_usage`: aggregate private instance disk usage at scenario end versus
+  instance count (MiB), with the accounting scope noted in the figure.
 - `cpu_per_instance`: VM/container bars normalized to usage per instance,
   pooling the selected scenario sizes.
 - `memory_per_instance`: the analogous normalized memory bars.
@@ -381,6 +420,12 @@ The host memory curve reads `host_memory.csv` when present, joins on `run_id` an
 poll count. It shows the mean and ±1 sample standard deviation across repetitions
 at each size. A zero reference line makes negative deltas visible. Historical runs
 without host snapshots retain all other plots and show no host delta observations.
+
+The disk curve reads `disk_usage.csv` when present, requires exactly one successful
+measurement for each expected instance and validates its kind, count, repeat and
+accounting source. It sums raw `disk_bytes` once per scenario, then plots mean and
+±1 sample standard deviation across rounds at each size. It does not use logical
+`file_bytes`, sum shared image sizes, or count instances as independent repetitions.
 
 `topoup_time` takes exactly one `topoup_ms` value per scenario/repetition,
 converted to seconds. The repeated copies in instance rows do not count as
@@ -432,7 +477,7 @@ scenario and writes `runtime_startup.csv` automatically:
 
 Update/restart `niepd` before using this feature. The benchmark checks support
 before launching a topology. No second boot or separate script is required.
-Use `--skip-runtime-timing` to disable it and retain startup, usage and host memory CSVs.
+Use `--skip-runtime-timing` to disable it and retain startup, usage, host memory and disk CSVs.
 The existing 2-second settling period and 10-second CPU/memory observation window
 remain after the whole topology answers HTTP.
 

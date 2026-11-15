@@ -36,8 +36,9 @@ HOST_MEMORY_COUNTERS = {'MemTotal': 'mem_total_bytes', 'MemAvailable': 'mem_avai
                         'MemFree': 'mem_free_bytes', 'Buffers': 'buffers_bytes', 'Cached': 'cached_bytes'}
 HOST_MEMORY_FIELDS = ('run_id', 'scenario_id', 'kind', 'count', 'repeat', 'phase',
                       'sample_timestamp', *HOST_MEMORY_COUNTERS.values(), 'status', 'error')
+DISK_FIELDS = COMMON_FIELDS + ('sample_timestamp', 'disk_bytes', 'file_bytes', 'source', 'status', 'error')
 SCHEMAS = {'startup': STARTUP_FIELDS, 'usage': USAGE_FIELDS, 'runtime_startup': RUNTIME_FIELDS,
-           'host_memory': HOST_MEMORY_FIELDS}
+           'host_memory': HOST_MEMORY_FIELDS, 'disk_usage': DISK_FIELDS}
 
 
 def host_memory_snapshot(phase, kind, count, repeat, meminfo_path=Path('/proc/meminfo')):
@@ -285,10 +286,47 @@ def probe_http(client, count, start, timeout, interval):
     return records
 
 
+def disk_rows(client, instances, kind, count, repeat):
+    """Read private instance storage once, before teardown; retain unavailable values as errors."""
+    rows = [dict.fromkeys(DISK_FIELDS, '') for _ in instances]
+    for row, ident in zip(rows, instances):
+        row.update(kind=kind, count=count, repeat=repeat, instance=ident,
+                   status='collection_failed', error='Disk usage unavailable')
+    try:
+        snapshot = client.call('disk-usage')
+        timestamp = snapshot['timestamp']
+        if not isinstance(timestamp, str) or not timestamp:
+            raise ValueError('Missing disk snapshot timestamp')
+        resources = {}
+        for resource in snapshot['resources']:
+            resources.setdefault((resource['kind'], resource['id']), []).append(resource)
+        expected_source = {'vm': 'host_allocated_blocks', 'container': 'docker_writable_layer'}[kind]
+        for row in rows:
+            row['sample_timestamp'] = timestamp
+            matches = resources.get((kind, row['instance']), [])
+            if len(matches) != 1:
+                row.update(status='metrics_error', error='Missing or duplicate disk usage resource')
+                continue
+            source = matches[0]
+            size, file_size = source.get('disk_bytes'), source.get('file_bytes')
+            row['source'] = source.get('source') or ''
+            valid = (type(size) is int and size >= 0 and row['source'] == expected_source
+                     and (file_size is None or (type(file_size) is int and file_size >= 0)))
+            if source.get('error') or not valid:
+                row.update(status='metrics_error', error=source.get('error') or 'Invalid disk usage counters/source')
+            else:
+                row.update(disk_bytes=size, file_bytes=file_size if file_size is not None else '',
+                           status='sampled', error='')
+    except Exception as exc:
+        for row in rows:
+            row.update(status='collection_failed', error=str(exc))
+    return rows
+
+
 def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
           observe_seconds=0, stats_interval=1, settle_seconds=2, save_samples=lambda rows: None,
           capture_runtime=False, save_runtime=lambda rows: None, save_host_memory=lambda rows: None,
-          report_summary=True):
+          report_summary=True, save_disk=lambda rows: None):
     rows = [dict.fromkeys(STARTUP_FIELDS, '') for _ in instances]
     for row, ident in zip(rows, instances):
         row.update(kind=kind, count=count, repeat=repeat, instance=ident,
@@ -298,6 +336,7 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
     interrupted = False
     capture_id = None
     host_snapshots = []
+    disk_records = []
     try:
         before = time.perf_counter()
         client.call('define', str(path))
@@ -354,6 +393,17 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
         finally:
             if defined:
                 if host_snapshots:
+                    try:
+                        disk_records = disk_rows(client, instances, kind, count, repeat)
+                    except KeyboardInterrupt:
+                        interrupted = True
+                        error = 'Interrupted while collecting disk usage'
+                        for row in rows:
+                            row.update(status='interrupted', error=error)
+                        disk_records = [dict.fromkeys(DISK_FIELDS, '') for _ in instances]
+                        for row, ident in zip(disk_records, instances):
+                            row.update(kind=kind, count=count, repeat=repeat, instance=ident,
+                                       status='interrupted', error=error)
                     # Read after observation/runtime collection, immediately before stop.
                     # Persist after cleanup so disk writes do not separate the read and stop.
                     host_snapshots.append(host_memory_snapshot('before_topodown', kind, count, repeat))
@@ -364,6 +414,7 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
                     except Exception as exc:
                         cleanup_errors.append(f'{command}: {exc}')
                 save_host_memory(host_snapshots)
+                save_disk(disk_records)
     if cleanup_errors:
         for row in rows:
             row.update(status='cleanup_failed', error=(row['error'] + '; ' if row['error'] else '') +
@@ -427,7 +478,7 @@ def main():
     parser.add_argument('--socket', default=os.environ.get('NIEP_SOCKET', '/run/niep.sock'))
     parser.add_argument('--image', default='niep-bench-http:alpine3.20')
     parser.add_argument('--output', type=Path, default=Path('benchmarks/startup/output'),
-                        help='Shared directory for startup, usage, runtime_startup and host_memory CSVs (append on each run)')
+                        help='Shared directory for startup, usage, runtime_startup, host_memory and disk_usage CSVs')
     parser.add_argument('--skip-runtime-timing', action='store_true',
                         help='Disable per-instance runtime startup probes (enabled by default)')
     parser.add_argument('--generate-only', action='store_true')
@@ -500,6 +551,11 @@ def execute(args, plans, files):
             raise RuntimeError('Invalid stats response')
     except RuntimeError as exc:
         raise RuntimeError('Resource stats unavailable; restart the updated niepd. ' + str(exc)) from exc
+    try:
+        if 'resources' not in client.call('disk-usage'):
+            raise RuntimeError('Invalid disk usage response')
+    except RuntimeError as exc:
+        raise RuntimeError('Disk usage unavailable; restart the updated niepd. ' + str(exc)) from exc
     if not args.skip_runtime_timing:
         try:
             client.call('startup-timing', 'snapshot')
@@ -541,6 +597,7 @@ def execute(args, plans, files):
             started_at = datetime.now(timezone.utc).isoformat()
             runtime_records = []
             host_records = []
+            disk_records = []
 
             def save_runtime(records):
                 runtime_records.extend(records)
@@ -552,13 +609,19 @@ def execute(args, plans, files):
                 if not warmup:
                     save('host_memory', records)
 
+            def save_disk(records):
+                disk_records.extend(records)
+                if not warmup:
+                    save('disk_usage', records)
+
             rows, cleanup_failed = trial(client, path, instances, kind, count, repeat,
                                           args.timeout, args.interval,
                                           observe_seconds=args.observe_seconds, stats_interval=args.stats_interval,
                                           settle_seconds=args.settle_seconds,
                                           save_samples=lambda rows: None if warmup else save('usage', rows),
                                           capture_runtime=not args.skip_runtime_timing, save_runtime=save_runtime,
-                                          save_host_memory=save_host_memory, report_summary=not warmup)
+                                          save_host_memory=save_host_memory, report_summary=not warmup,
+                                          save_disk=save_disk)
             if not warmup:
                 for row in rows:
                     row['started_at'] = started_at
@@ -566,6 +629,10 @@ def execute(args, plans, files):
             success = all(row['status'] == 'ready' for row in rows)
             timing_failed = any(row['status'] != 'ready' for row in runtime_records)
             host_failed = any(row['status'] != 'sampled' for row in host_records)
+            disk_failed = any(row['status'] != 'sampled' for row in disk_records)
+            if disk_failed:
+                print(f'{label}: disk usage collection incomplete' +
+                      (' (warmup results discarded)' if warmup else '; see disk_usage.csv'), file=sys.stderr)
             if host_failed:
                 print(f'{label}: host memory collection incomplete' +
                       (' (warmup results discarded)' if warmup else '; see host_memory.csv'), file=sys.stderr)
@@ -573,14 +640,15 @@ def execute(args, plans, files):
                 print(f'{label}: runtime startup timing incomplete' +
                       (' (warmup results discarded)' if warmup else '; see runtime_startup.csv'), file=sys.stderr)
             if warmup:
-                for record in runtime_records + host_records:
+                for record in runtime_records + host_records + disk_records:
                     if record.get('error'):
                         print(f'{label}: {record["error"]}', file=sys.stderr)
             failed |= timing_failed
             failed |= host_failed
+            failed |= disk_failed
             failed |= not success
             if warmup:
-                print(f'{label}: ' + ('completed' if success and not timing_failed and not host_failed else 'FAILED') +
+                print(f'{label}: ' + ('completed' if success and not timing_failed and not host_failed and not disk_failed else 'FAILED') +
                       ' (results discarded)', flush=True)
             else:
                 print(f'{label}: {rows[0]["all_ready_ms"]} ms' if success else
@@ -593,7 +661,7 @@ def execute(args, plans, files):
                 print('Interrupted during warmup; results discarded and cleanup attempted.' if warmup else
                       'Interrupted; partial results saved and cleanup attempted.', file=sys.stderr)
                 return 130
-            if cleanup_failed or ((not success or timing_failed or host_failed) and not args.keep_going):
+            if cleanup_failed or ((not success or timing_failed or host_failed or disk_failed) and not args.keep_going):
                 return 1
     return int(failed)
 

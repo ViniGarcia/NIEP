@@ -34,6 +34,12 @@ class Client:
         self.calls.append(args[0])
         if args[0] == self.fail:
             raise RuntimeError('injected failure')
+        if args[0] == 'disk-usage':
+            return dict(timestamp='now', resources=[
+                dict(kind=kind, id=ident, disk_bytes=1024, error=None,
+                     source='host_allocated_blocks' if kind == 'vm' else 'docker_writable_layer')
+                for kind, ident in [('vm', 'vm1'), ('vm', 'vm2'),
+                                    ('container', 'st-container01'), ('container', 'c1')]])
         if args[0] == 'mininet':
             command = shlex.split(args[3])
             return {'output': json.dumps([
@@ -189,7 +195,13 @@ def test_repeated_runs_append_joinable_raw_csvs(tmp_path, monkeypatch):
                        ('run_id', 'scenario_id', 'kind', 'count', 'repeat')) for r in pair)
         assert all(r['status'] == 'sampled' and int(r['mem_total_bytes']) > 0 for r in pair)
         assert all('delta' not in key and 'used' not in key for key in pair[0])
-    assert {p.name for p in tmp_path.iterdir()} == {'startup.csv', 'usage.csv', 'host_memory.csv'}
+    with (tmp_path / 'disk_usage.csv').open(newline='') as handle:
+        disk = list(csv.DictReader(handle))
+    assert len(disk) == 2
+    for row, startup_row in zip(disk, tables['startup']):
+        assert all(row[key] == startup_row[key] for key in BENCH['COMMON_FIELDS'])
+        assert row['disk_bytes'] == '1024' and row['source'] == 'docker_writable_layer'
+    assert {p.name for p in tmp_path.iterdir()} == {'startup.csv', 'usage.csv', 'host_memory.csv', 'disk_usage.csv'}
 
 
 def test_csv_with_incompatible_header_is_preserved(tmp_path):
@@ -443,7 +455,7 @@ def test_host_memory_snapshot_reports_unavailable_counters_without_zero_fallback
 
 
 def test_host_snapshots_are_adjacent_to_start_stop_and_after_runtime_collection(tmp_path, monkeypatch):
-    events, saved = [], []
+    events, saved, saved_disk = [], [], []
 
     class OrderedClient(Client):
         def call(self, *args):
@@ -468,14 +480,18 @@ def test_host_snapshots_are_adjacent_to_start_stop_and_after_runtime_collection(
     monkeypatch.setitem(BENCH['trial'].__globals__, 'host_memory_snapshot', snapshot)
     monkeypatch.setitem(BENCH['trial'].__globals__, 'observe', observe)
     rows, failed = BENCH['trial'](OrderedClient(), tmp_path, ['vm1'], 'vm', 1, 1, 1, 0,
-                                  capture_runtime=True, save_host_memory=save_host, observe_seconds=1)
+                                  capture_runtime=True, save_host_memory=save_host, observe_seconds=1,
+                                  save_disk=saved_disk.extend)
     assert not failed and rows[0]['status'] == 'ready'
     assert events[events.index(('topoup',)) - 1] == ('before_topoup',)
     assert events[events.index(('topodown',)) - 1] == ('before_topodown',)
     assert events.index(('startup-timing', 'disable')) < events.index(('before_topodown',))
     assert events.index(('observe',)) < events.index(('before_topodown',))
+    assert events.index(('startup-timing', 'disable')) < events.index(('disk-usage',))
+    assert events.index(('disk-usage',)) < events.index(('before_topodown',))
     assert events.index(('topodestroy',)) < events.index(('save_host',))
     assert [row['phase'] for row in saved] == ['before_topoup', 'before_topodown']
+    assert len(saved_disk) == 1 and saved_disk[0]['status'] == 'sampled'
 
 
 @pytest.mark.parametrize('operation', ['define', 'topoup', 'topodown', 'mininet'])
@@ -565,6 +581,9 @@ def test_warmup_once_per_distinct_platform_size_is_excluded_from_all_csvs(tmp_pa
         kwargs['save_host_memory']([dict(common, phase=phase, status='sampled',
                                          mem_total_bytes=1000, mem_available_bytes=900)
                                    for phase in ('before_topoup', 'before_topodown')])
+        kwargs['save_disk']([dict(row, status='sampled', disk_bytes=999999 if repeat == 0 else 100,
+                                 source='host_allocated_blocks' if kind == 'vm' else 'docker_writable_layer')
+                            for row in rows])
         return rows, False
 
     module = BENCH['execute'].__globals__
@@ -706,3 +725,103 @@ def test_schedule_seed_is_reproducible_and_independent_of_global_random_state():
     random.random()
     assert list(BENCH['experiment_schedule'](plans, 3, random.Random(42))) == first
     assert list(BENCH['experiment_schedule'](plans, 3, random.Random(43))) != first
+
+
+def test_disk_rows_join_by_kind_and_instance_and_preserve_raw_sizes():
+    class DiskClient:
+        def call(self, command):
+            assert command == 'disk-usage'
+            return dict(timestamp='now', resources=[
+                dict(kind='container', id='vm1', disk_bytes=999, source='docker_writable_layer'),
+                dict(kind='vm', id='vm2', disk_bytes=4096, file_bytes=8192, source='host_allocated_blocks'),
+                dict(kind='vm', id='vm1', disk_bytes=0, file_bytes=8192, source='host_allocated_blocks')])
+
+    rows = BENCH['disk_rows'](DiskClient(), ['vm1', 'vm2'], 'vm', 2, 3)
+    assert [r['instance'] for r in rows] == ['vm1', 'vm2']
+    assert [r['disk_bytes'] for r in rows] == [0, 4096]
+    assert all(r['file_bytes'] == 8192 and r['source'] == 'host_allocated_blocks' for r in rows)
+    assert all(r['status'] == 'sampled' and r['sample_timestamp'] == 'now' and r['repeat'] == 3 for r in rows)
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'duplicate', 'error', 'negative', 'fractional', 'source'])
+def test_disk_rows_do_not_replace_invalid_measurements_with_zero(mutation):
+    resource = dict(kind='vm', id='vm1', disk_bytes=4096, source='host_allocated_blocks')
+    resources = [resource]
+    if mutation == 'missing':
+        resources = []
+    elif mutation == 'duplicate':
+        resources *= 2
+    else:
+        resource.update({'error': 'stat failed'} if mutation == 'error' else
+                        {'disk_bytes': -1} if mutation == 'negative' else
+                        {'disk_bytes': 1.5} if mutation == 'fractional' else
+                        {'source': 'docker_writable_layer'})
+
+    class DiskClient:
+        def call(self, command):
+            return dict(timestamp='now', resources=resources)
+
+    row = BENCH['disk_rows'](DiskClient(), ['vm1'], 'vm', 1, 1)[0]
+    assert row['status'] == 'metrics_error'
+    assert row['disk_bytes'] == '' and row['error']
+
+
+def test_disk_collection_failure_preserves_readiness_and_cleanup(tmp_path):
+    client, saved = Client(fail='disk-usage'), []
+    rows, stop = BENCH['trial'](client, tmp_path, ['vm1'], 'vm', 1, 1, 1, 0, save_disk=saved.extend)
+    assert not stop and rows[0]['status'] == 'ready'
+    assert len(saved) == 1 and saved[0]['status'] == 'collection_failed'
+    assert saved[0]['disk_bytes'] == ''
+    assert client.calls[-2:] == ['topodown', 'topodestroy']
+
+
+def test_interrupt_during_disk_collection_still_cleans_and_retains_startup_times(tmp_path):
+    class InterruptedDiskClient(Client):
+        def call(self, *args):
+            if args[0] == 'disk-usage':
+                raise KeyboardInterrupt
+            return super().call(*args)
+
+    client, saved = InterruptedDiskClient(), []
+    rows, stop = BENCH['trial'](client, tmp_path, ['vm1'], 'vm', 1, 1, 1, 0, save_disk=saved.extend)
+    assert stop and rows[0]['status'] == 'interrupted'
+    assert rows[0]['ready_ms'] != ''
+    assert len(saved) == 1 and saved[0]['status'] == 'interrupted' and saved[0]['disk_bytes'] == ''
+    assert client.calls[-2:] == ['topodown', 'topodestroy']
+
+
+def test_disk_failure_is_reported_without_polluting_other_csvs(tmp_path, monkeypatch):
+    import csv
+    from types import SimpleNamespace
+
+    class DiskFailureClient(Client):
+        disk_calls = 0
+
+        def call(self, *args):
+            if args[0] == 'status':
+                return {'defined': False}
+            if args[0] == 'stats':
+                return {'resources': []}
+            if args[0] == 'disk-usage':
+                self.disk_calls += 1
+                if self.disk_calls > 1:  # Preflight succeeds; warmup and measurement fail collection.
+                    raise RuntimeError('disk collection failed')
+            return super().call(*args)
+
+    client = DiskFailureClient()
+    module = BENCH['execute'].__globals__
+    monkeypatch.setitem(module, 'Client', lambda *_args: client)
+    monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs: None)
+    args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=True,
+                           kinds=['container'], image='local:test', repeats=1, timeout=1, seed=42,
+                           interval=0, observe_seconds=0, stats_interval=1, settle_seconds=0, keep_going=True)
+    with BENCH['results_files'](tmp_path) as files:
+        assert BENCH['execute'](args, [('container', 1, tmp_path, ['c1'])], files) == 1
+    with (tmp_path / 'startup.csv').open() as source:
+        rows = list(csv.DictReader(source))
+        assert len(rows) == 1 and rows[0]['status'] == 'ready'
+    with (tmp_path / 'disk_usage.csv').open() as source:
+        rows = list(csv.DictReader(source))
+        assert len(rows) == 1 and rows[0]['status'] == 'collection_failed' and rows[0]['disk_bytes'] == ''
+    assert client.disk_calls == 3
+    assert client.calls.count('topodestroy') == 2

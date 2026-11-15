@@ -84,12 +84,13 @@ def test_render_outputs_only_png_in_both_languages_without_sample_annotations(tm
     monkeypatch.setattr(Figure, 'savefig', savefig)
     scenarios = [dict(kind=kind, count=2, startup_seconds=seconds, topoup_seconds=seconds / 2, cpu_percent=cpu, memory_mib=memory,
                       host_memory_delta_mib=memory - 75,
+                      disk_mib=memory,
                       runtime_start_call_ms=cpu * 10, runtime_http_ready_ms=seconds * 1000)
                  for kind in ('vm', 'container')
                  for seconds, cpu, memory in [(1, 10, 50), (2, 20, 100)]]
     for language in ('pt', 'en'):
         PLOT['render'](scenarios, tmp_path / language, 'test', language)
-    assert len(captured) == 18
+    assert len(captured) == 20
     assert all(path.suffix == '.png' for path, _, _ in captured)
     assert {path.parent.name for path, _, _ in captured} == {'pt', 'en'}
     assert any(title == 'Tempo de inicialização da topologia' for _, title, _ in captured)
@@ -99,6 +100,8 @@ def test_render_outputs_only_png_in_both_languages_without_sample_annotations(tm
     assert any(title == 'Duração média da chamada de start por instância' for _, title, _ in captured)
     assert {path.stem for path, _, _ in captured} >= {'host_memory_delta'}
     assert any(title == 'Variação estimada de memória usada do host' for _, title, _ in captured)
+    assert {path.stem for path, _, _ in captured} >= {'disk_usage'}
+    assert any(title == 'Uso de disco privado ao final do cenário' for _, title, _ in captured)
 
 
 def runtime(scenario, calls=(100, 300), readiness=(1000, 3000)):
@@ -191,3 +194,48 @@ def test_host_delta_rejects_invalid_raw_counters(field, value):
     snapshots[0][field] = value
     with pytest.raises(ValueError, match='Invalid'):
         PLOT['aggregate'](startup('s1'), [], {'r1'}, host_memory=snapshots)
+
+
+def disk(scenario, sizes=(1048576, 3 * 1048576), run='r1', kind='vm'):
+    return [dict(run_id=run, scenario_id=scenario, kind=kind, count='2', repeat='1',
+                 instance=f'vm{i}', disk_bytes=str(size), status='sampled',
+                 source='host_allocated_blocks' if kind == 'vm' else 'docker_writable_layer')
+            for i, size in enumerate(sizes)]
+
+
+def test_disk_sums_instances_once_per_trial_and_joins_exact_scenario():
+    starts = startup('s1') + startup('s2')
+    records = disk('s1') + disk('s2', sizes=(4 * 1048576, 4 * 1048576))
+    records += disk('s1', sizes=(999999999, 999999999), run='unrelated')
+    results, _ = PLOT['aggregate'](starts, [], {'r1'}, disk_usage=records)
+    assert [r['disk_mib'] for r in results] == [4, 8]
+    assert PLOT['curve_points'](results, 'vm', 'disk_mib') == [(2, 6, statistics.stdev([4, 8]), 2)]
+
+
+def test_missing_or_invalid_disk_samples_do_not_become_zero_or_hide_startup():
+    complete = disk('s1')
+    for records in ([], complete[:1], complete + complete, disk('other'),
+                    [complete[0], dict(complete[1], status='metrics_error')],
+                    [complete[0], dict(complete[1], disk_bytes='')],
+                    [complete[0], dict(complete[1], source='docker_writable_layer')],
+                    [complete[0], dict(complete[1], instance='unmatched')],
+                    [complete[0], dict(complete[1], count='64')],
+                    [complete[0], dict(complete[1], repeat='2')]):
+        results, _ = PLOT['aggregate'](startup('s1'), [], {'r1'}, disk_usage=records)
+        assert results[0]['disk_mib'] is None
+        assert results[0]['startup_seconds'] == 2
+
+
+def test_zero_container_writable_layer_is_valid_disk_usage():
+    starts = [dict(row, kind='container') for row in startup('s1')]
+    results, _ = PLOT['aggregate'](starts, [], {'r1'},
+                                   disk_usage=disk('s1', sizes=(0, 0), kind='container'))
+    assert PLOT['curve_points'](results, 'container', 'disk_mib') == [(2, 0, 0, 1)]
+
+
+@pytest.mark.parametrize('size', ['-1', 'nan', 'inf'])
+def test_plot_rejects_invalid_disk_size(size):
+    records = disk('s1')
+    records[0]['disk_bytes'] = size
+    with pytest.raises(ValueError, match='Invalid disk_bytes'):
+        PLOT['aggregate'](startup('s1'), [], {'r1'}, disk_usage=records)

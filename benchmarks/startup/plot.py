@@ -62,7 +62,17 @@ def host_memory_delta(records, scenario):
     return (available[0] - available[1]) / 1048576
 
 
-def aggregate(startup, usage, run_ids, runtime=(), host_memory=()):
+def disk_total(records, scenario, instances):
+    expected_source = {'vm': 'host_allocated_blocks', 'container': 'docker_writable_layer'}[scenario['kind']]
+    if (len(records) != len(instances) or {r['instance'] for r in records} != instances
+            or any(r['status'] != 'sampled' or r.get('source') != expected_source
+                   or any(r[field] != scenario[field] for field in ('kind', 'count', 'repeat'))
+                   or r.get('disk_bytes') in ('', None) for r in records)):
+        return None
+    return sum(number(row, 'disk_bytes') for row in records) / 1048576
+
+
+def aggregate(startup, usage, run_ids, runtime=(), host_memory=(), disk_usage=()):
     """One observation per complete scenario/repetition, never per polling row."""
     scenarios = defaultdict(list)
     for row in startup:
@@ -79,6 +89,9 @@ def aggregate(startup, usage, run_ids, runtime=(), host_memory=()):
     host_groups = defaultdict(list)
     for row in host_memory:
         host_groups[(row['run_id'], row['scenario_id'])].append(row)
+    disk_groups = defaultdict(list)
+    for row in disk_usage:
+        disk_groups[(row['run_id'], row['scenario_id'])].append(row)
     results, skipped = [], 0
     for key, rows in scenarios.items():
         first = rows[0]
@@ -94,6 +107,7 @@ def aggregate(startup, usage, run_ids, runtime=(), host_memory=()):
                       startup_seconds=max(number(row, 'ready_ms') for row in rows) / 1000,
                       memory_mib=None, cpu_percent=None, topoup_seconds=None,
                       host_memory_delta_mib=host_memory_delta(host_groups[key], first),
+                      disk_mib=disk_total(disk_groups[key], first, instances),
                       runtime_start_call_ms=None, runtime_http_ready_ms=None)
         topoup_values = {number(row, 'topoup_ms') for row in rows if row.get('topoup_ms') not in ('', None)}
         if len(topoup_values) > 1:
@@ -169,6 +183,7 @@ def render(scenarios, output, selection, language='en'):
         'cpu_percent': ('Uso médio de CPU do cenário', 'Uso agregado de CPU (%) — 100% por núcleo'),
         'memory_mib': ('Uso médio de memória do cenário', 'Uso agregado de memória (MiB)'),
         'host_memory_delta_mib': ('Variação estimada de memória usada do host', 'Delta de memória usada do host (MiB)'),
+        'disk_mib': ('Uso de disco privado ao final do cenário', 'Disco privado agregado (MiB)'),
         'runtime_start_call_ms': ('Duração média da chamada de start por instância', 'Duração da chamada ao runtime (ms)'),
         'runtime_http_ready_ms': ('Tempo médio de start até HTTP por instância', 'Tempo do start do runtime até HTTP pronto (ms)'),
     }
@@ -178,8 +193,13 @@ def render(scenarios, output, selection, language='en'):
     }
 
     def save(fig, name):
-        fig.text(.5, .015, footer, ha='center', fontsize=8)
-        fig.tight_layout(rect=(0, .055, 1, 1))
+        caption = footer
+        if name == 'disk_usage':
+            caption = ('VM: blocos alocados; contêiner: camada gravável. Exclui imagens compartilhadas, volumes e logs do runtime.'
+                       if portuguese else
+                       'VM: allocated blocks; container: writable layer. Excludes shared images, volumes and runtime logs.') + '\n' + footer
+        fig.text(.5, .015, caption, ha='center', fontsize=8)
+        fig.tight_layout(rect=(0, .085 if name == 'disk_usage' else .055, 1, 1))
         fig.savefig(output / f'{name}.png', dpi=180, bbox_inches='tight')
         plt.close(fig)
 
@@ -189,6 +209,7 @@ def render(scenarios, output, selection, language='en'):
         ('cpu_percent', 'cpu_mean', 'Mean scenario CPU usage', 'Aggregate CPU usage (%) — 100% per core'),
         ('memory_mib', 'memory_mean', 'Mean scenario memory usage', 'Aggregate memory usage (MiB)'),
         ('host_memory_delta_mib', 'host_memory_delta', 'Estimated host used-memory change', 'Host used-memory delta (MiB)'),
+        ('disk_mib', 'disk_usage', 'Private disk usage at scenario end', 'Aggregate private disk usage (MiB)'),
         ('runtime_start_call_ms', 'runtime_start_call', 'Mean start API duration per instance', 'Runtime start API duration (ms)'),
         ('runtime_http_ready_ms', 'runtime_http_ready', 'Mean runtime start-to-HTTP time per instance', 'Runtime start to HTTP readiness (ms)'),
     ):
@@ -270,7 +291,9 @@ def main():
     host_path = args.input / 'host_memory.csv'
     host_required = (common - {'instance'}) | {'phase', 'mem_total_bytes', 'mem_available_bytes'}
     host_memory = read_csv(host_path, host_required) if host_path.exists() else []
-    scenarios, skipped = aggregate(startup, usage, set(selected), runtime, host_memory)
+    disk_path = args.input / 'disk_usage.csv'
+    disk_usage = read_csv(disk_path, common | {'disk_bytes', 'source'}) if disk_path.exists() else []
+    scenarios, skipped = aggregate(startup, usage, set(selected), runtime, host_memory, disk_usage)
     if not scenarios:
         raise ValueError('No successful, complete scenarios in the selected runs')
     print(f'Selected runs: {", ".join(selected)}; complete scenarios: {len(scenarios)}; skipped: {skipped}')
@@ -278,6 +301,8 @@ def main():
     print(f'In-topology runtime timing scenarios: {captured}/{len(scenarios)}')
     captured_host = sum(row['host_memory_delta_mib'] is not None for row in scenarios)
     print(f'Host memory delta scenarios: {captured_host}/{len(scenarios)}')
+    captured_disk = sum(row['disk_mib'] is not None for row in scenarios)
+    print(f'Disk usage scenarios: {captured_disk}/{len(scenarios)}')
     for kind in KINDS:
         for count, mean, sd, n in curve_points(scenarios, kind, 'startup_seconds'):
             deviation = f'{sd:.3f}s' if n > 1 else 'n/a (one trial)'
