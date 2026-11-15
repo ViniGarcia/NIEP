@@ -2,6 +2,7 @@
 import argparse
 import logging
 
+from niep.domain.result import ResultCode
 from niep.interfaces.socket_server import NIEPSocketServer
 
 
@@ -38,6 +39,13 @@ def main():
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        try:
+            result = server.dispatcher.dispatch("topodestroy")
+            if not result.ok and result.code != ResultCode.NO_TOPOLOGY:
+                logging.error("Topology cleanup failed during shutdown: %s", result.message)
+        except Exception:
+            logging.exception("Topology cleanup raised during shutdown")
+    finally:
         server.close()
 
 
