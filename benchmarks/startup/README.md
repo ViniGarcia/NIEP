@@ -1,8 +1,9 @@
 # VM and container startup benchmark
 
 Run from the repository root with an idle NIEP daemon. The default sizes are
-1, 2, 4, 8, 16, 32 and 64, first VMs and then containers, with one discarded
-warmup followed by three measured trials per platform/size. `--counts` accepts
+1, 2, 4, 8, 16, 32 and 64, tested in three randomized rounds, each measuring every
+platform/size once. One discarded warmup precedes each combination's first measured
+trial. `--counts` accepts
 positive integers, for example `--counts 3 7 64 257`.
 Each scenario has one Mininet probe host `h1`, one common switch `s1`, and all
 VMs or containers attached to that switch. All data NICs share `10.0.0.0/8`.
@@ -103,12 +104,40 @@ Useful options:
 # Choose another shared results directory (created if needed):
 .venv/bin/python benchmarks/startup/run.py --output /tmp/niep-startup-trial \
   --socket /run/niep.sock --timeout 180 --repeats 5
+# Reproduce a randomized schedule with the same configuration:
+.venv/bin/python benchmarks/startup/run.py --repeats 3 --seed 12345
 ```
 
+`--repeats X` runs X complete measured rounds. Each round independently shuffles
+the selected instance counts. In the measured schedule, the VM and container
+trials for each size stay adjacent; round 1 also inserts each combination's warmup
+immediately before its first measurement. In each block of two sizes, the runner shuffles `[container, vm]` to
+choose the first platform for each size: one starts with containers, the other
+with VMs. The second platform at each size runs immediately afterward. The next
+block draws again. With an odd number of sizes, the final size gets a randomly
+chosen first platform. With a single selected platform, only the size order is
+shuffled. Repeated counts or platform selections are deduplicated, so each distinct
+combination runs exactly once per round.
+
+For example, size order `2, 1, 4, 8` and first-platform choices `C, V, V, C`
+(blocks `CV` then `VC`) produce these measured trials:
+
+```text
+2C - 2V - 1V - 1C - 4V - 4C - 8C - 8V
+```
+
+Both draws are repeated in the next round; chance can produce the same order.
+The CSV `repeat` field is the round number (1 through X). `--seed INTEGER` uses a
+local random generator to reproduce the schedule with the same selections and
+script/Python version. Without it, a new seed is generated and printed as
+`Randomization seed: ...`; retain this console output with experimental results.
+The console also marks each round. Earlier grouped-order runs should be kept
+separate when comparing experimental results.
+
 Every invocation performs exactly one warmup for each distinct `(kind, count)`
-combination, immediately before that combination's first measured repetition.
-Repeated sizes in the same invocation do not add more warmups for that combination.
-`--repeats` counts only measured repetitions: `--repeats 1` runs a warmup and then
+combination, immediately before that combination's measured trial in round 1.
+Subsequent rounds do not add more warmups for that combination.
+`--repeats` counts only measured rounds: `--repeats 1` runs a warmup and then
 one measured trial per combination. Defaults therefore launch 14 warmups and 42
 measured trials (56 complete lifecycle cycles). `--generate-only` runs neither.
 
@@ -289,8 +318,8 @@ be ready by the first observation. `--timeout` is the HTTP deadline counted from
 before `topoup`; it does not cancel a blocking daemon lifecycle operation.
 Record the host configuration, base QCOW2 checksum and package manifest alongside
 the output when collecting experimental results. Warmup exercises the startup path
-and caches, but does not enforce a particular cache state. These functional scripts
-do not control background load, CPU frequency or experiment ordering.
+and caches, but does not enforce a particular cache state. Trial order is randomized
+as described above; background load and CPU frequency remain uncontrolled.
 
 ## Large switch startup
 

@@ -6,6 +6,7 @@ from contextlib import contextmanager, ExitStack
 import fcntl
 import json
 import math
+import random
 import statistics
 import os
 from pathlib import Path
@@ -409,7 +410,9 @@ def main():
     parser.add_argument('--counts', nargs='+', type=positive_count, default=list(COUNTS))
     parser.add_argument('--kinds', nargs='+', choices=('vm', 'container'), default=['vm', 'container'])
     parser.add_argument('--repeats', type=int, default=3,
-                        help='Measured repetitions per configuration, after one discarded warmup (default: 3)')
+                        help='Randomized rounds, each measuring every configuration once (default: 3)')
+    parser.add_argument('--seed', type=int,
+                        help='Randomization seed; generated and printed when omitted')
     parser.add_argument('--timeout', type=float, default=180,
                         help='HTTP deadline in seconds from before topoup (default: 180)')
     parser.add_argument('--rpc-timeout', type=float, default=600,
@@ -461,6 +464,29 @@ def main():
             return execute(args, plans, files)
 
 
+def experiment_schedule(plans, repeats, rng):
+    """Shuffle sizes each round; balance the first platform in each pair of sizes."""
+    by_count = {}
+    kinds = []
+    for plan in plans:
+        if plan[0] not in kinds:
+            kinds.append(plan[0])
+        by_count.setdefault(plan[1], {})[plan[0]] = plan
+    if not kinds:
+        return
+    for repeat in range(1, repeats + 1):
+        counts = list(by_count)
+        rng.shuffle(counts)
+        for offset in range(0, len(counts), len(kinds)):
+            first_kinds = kinds.copy()
+            rng.shuffle(first_kinds)
+            for count, first in zip(counts[offset:offset + len(kinds)], first_kinds):
+                order = [first] + [kind for kind in kinds if kind != first]
+                for kind in order:
+                    if kind in by_count[count]:
+                        yield repeat, by_count[count][kind]
+
+
 def execute(args, plans, files):
     run_id = uuid4().hex
     metadata = dict(run_id=run_id)
@@ -494,12 +520,19 @@ def execute(args, plans, files):
         handle.flush()
 
     failed = False
+    seed = args.seed if args.seed is not None else random.SystemRandom().getrandbits(64)
+    print(f'Randomization seed: {seed}', flush=True)
+    rng = random.Random(seed)
     warmed = set()
-    for kind, count, path, instances in plans:
+    current_round = None
+    for round_number, (kind, count, path, instances) in experiment_schedule(plans, args.repeats, rng):
+        if round_number != current_round:
+            current_round = round_number
+            print(f'Round {round_number}/{args.repeats}', flush=True)
         # Repeat zero is an unrecorded warmup, once per distinct platform/size.
-        first_repeat = 1 if (kind, count) in warmed else 0
+        repetitions = (round_number,) if (kind, count) in warmed else (0, round_number)
         warmed.add((kind, count))
-        for repeat in range(first_repeat, args.repeats + 1):
+        for repeat in repetitions:
             warmup = repeat == 0
             label = f'{kind} n={count} warmup' if warmup else f'{kind} n={count} repeat={repeat}'
             if warmup:

@@ -521,7 +521,7 @@ def test_execute_reports_host_memory_failure_without_discarding_ready_startup(tm
     monkeypatch.setitem(module, 'Client', lambda *_args: client)
     monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs: None)
     args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=True,
-                           kinds=['container'], image='local:test', repeats=1, timeout=1,
+                           kinds=['container'], image='local:test', repeats=1, timeout=1, seed=42,
                            interval=0, observe_seconds=0, stats_interval=1, settle_seconds=0,
                            keep_going=True)
     with BENCH['results_files'](tmp_path) as files:
@@ -573,7 +573,7 @@ def test_warmup_once_per_distinct_platform_size_is_excluded_from_all_csvs(tmp_pa
     monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs: None)
     args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=False,
                            kinds=['vm', 'container'], counts=[1, 2], vm_image=tmp_path,
-                           image='local:test', repeats=2, timeout=180, interval=.1,
+                           image='local:test', repeats=2, timeout=180, interval=.1, seed=42,
                            observe_seconds=10, stats_interval=1, settle_seconds=2, keep_going=False)
     configurations = [('vm', 1), ('vm', 2), ('container', 1), ('container', 2), ('vm', 1)]
     plans = [(kind, count, tmp_path, [f'{kind}{i}' for i in range(count)])
@@ -582,13 +582,14 @@ def test_warmup_once_per_distinct_platform_size_is_excluded_from_all_csvs(tmp_pa
         assert BENCH['execute'](args, plans, files) == 0
     warmups = Counter((kind, count) for kind, count, repeat in events if repeat == 0)
     assert warmups == Counter({pair: 1 for pair in set(configurations)})
+    assert [repeat for _, _, repeat in events if repeat] == [1] * 4 + [2] * 4
     for pair in set(configurations):
         sequence = [repeat for kind, count, repeat in events if (kind, count) == pair]
-        assert sequence == [0, 1, 2] + ([1, 2] if pair == ('vm', 1) else [])
+        assert sequence == [0, 1, 2]
     for name in BENCH['SCHEMAS']:
         with (tmp_path / f'{name}.csv').open() as source:
             rows = list(csv.DictReader(source))
-        assert len(rows) == (20 if name == 'host_memory' else 14)
+        assert len(rows) == (16 if name == 'host_memory' else 12)
         assert {row['repeat'] for row in rows} == {'1', '2'}
         assert all('999999' not in row.values() for row in rows)
     assert capsys.readouterr().out.count('warmup: completed (results discarded)') == 4
@@ -616,7 +617,7 @@ def test_failed_or_interrupted_warmup_cleans_and_leaves_csvs_empty(
     monkeypatch.setitem(module, 'Client', lambda *_args: client)
     monkeypatch.setattr(module['subprocess'], 'run', lambda *_args, **_kwargs: None)
     args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=True,
-                           kinds=['container'], image='local:test', repeats=2, timeout=1,
+                           kinds=['container'], image='local:test', repeats=2, timeout=1, seed=42,
                            interval=0, observe_seconds=0, stats_interval=1, settle_seconds=0,
                            keep_going=keep_going)
     with BENCH['results_files'](tmp_path) as files:
@@ -647,3 +648,61 @@ def test_warmup_observes_resources_without_computing_or_printing_summary(tmp_pat
     assert not stop and rows[0]['status'] == 'ready'
     assert len(observed) == 1
     assert observed[0]['duration'] == 10
+
+
+def test_randomized_rounds_match_requested_example_and_redraw_both_orders():
+    plans = [(kind, count, Path(str(count)), [f'{kind}{count}'])
+             for kind in ('vm', 'container') for count in (1, 2, 4, 8)]
+
+    class ScriptedRandom:
+        def __init__(self):
+            self.draws = iter([[2, 1, 4, 8], ['container', 'vm'], ['vm', 'container'],
+                               [8, 4, 1, 2], ['vm', 'container'], ['container', 'vm']])
+            self.calls = 0
+
+        def shuffle(self, values):
+            self.calls += 1
+            chosen = next(self.draws)
+            assert set(chosen) == set(values)
+            values[:] = chosen
+
+    rng = ScriptedRandom()
+    schedule = list(BENCH['experiment_schedule'](plans, 2, rng))
+    tokens = [f'{count}{kind[0].upper()}' for _, (kind, count, _, _) in schedule]
+    assert tokens[:8] == ['2C', '2V', '1V', '1C', '4V', '4C', '8C', '8V']
+    assert tokens[8:] == ['8V', '8C', '4C', '4V', '1C', '1V', '2V', '2C']
+    assert [repeat for repeat, _ in schedule] == [1] * 8 + [2] * 8
+    assert rng.calls == 6
+    assert all(plan in plans for _, plan in schedule)
+
+
+@pytest.mark.parametrize('counts', [(1,), (1, 2), (1, 2, 4), (1, 2, 4, 8, 16, 32, 64)])
+@pytest.mark.parametrize('kinds', [('vm',), ('container',), ('vm', 'container')])
+def test_each_round_covers_every_configuration_once_with_balanced_first_platforms(counts, kinds):
+    import random
+
+    plans = [(kind, count, Path(str(count)), [f'{kind}{count}']) for kind in kinds for count in counts]
+    schedule = list(BENCH['experiment_schedule'](plans + plans[:1], 4, random.Random(17)))
+    assert len(schedule) == len(kinds) * len(counts) * 4
+    for repeat in range(1, 5):
+        round_plans = [plan for index, plan in schedule if index == repeat]
+        assert {(plan[0], plan[1]) for plan in round_plans} == {(k, n) for k in kinds for n in counts}
+        starters = []
+        for offset in range(0, len(round_plans), len(kinds)):
+            group = round_plans[offset:offset + len(kinds)]
+            assert len({plan[1] for plan in group}) == 1  # Both platforms stay adjacent.
+            assert {plan[0] for plan in group} == set(kinds)
+            starters.append(group[0][0])
+        for offset in range(0, len(starters) - len(kinds) + 1, len(kinds)):
+            assert set(starters[offset:offset + len(kinds)]) == set(kinds)
+
+
+def test_schedule_seed_is_reproducible_and_independent_of_global_random_state():
+    import random
+
+    plans = [(kind, count, Path(str(count)), []) for kind in ('vm', 'container')
+             for count in (1, 2, 4, 8)]
+    first = list(BENCH['experiment_schedule'](plans, 3, random.Random(42)))
+    random.random()
+    assert list(BENCH['experiment_schedule'](plans, 3, random.Random(42))) == first
+    assert list(BENCH['experiment_schedule'](plans, 3, random.Random(43))) != first
