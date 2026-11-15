@@ -158,6 +158,19 @@ limitations.
 
 ## Validation and troubleshooting
 
+With the daemon running and no topology defined, run three fresh startup cycles:
+
+```sh
+.venv/bin/python benchmarks/images/alpine-http/smoke-test.py
+.venv/bin/python benchmarks/images/alpine-http/verify-cleanup.py
+```
+
+The smoke test polls HTTP through `h1` for up to 30 seconds and checks status
+200 and the exact body `ok`. It reads the command output from the CLI's JSON
+response. Each cycle stops and destroys its topology. Reported elapsed time
+includes `topoup`, CLI calls, and polling; it is a functional check rather than
+an isolated guest boot measurement. Set `NIEP_SOCKET` for a custom daemon socket.
+
 After building, run on the Linux host as a user with access to `/dev/kvm`:
 
 ```sh
