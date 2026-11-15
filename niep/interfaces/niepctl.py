@@ -277,6 +277,50 @@ def status(ctx: typer.Context):
     handle(ctx, request(ctx, "status"))
 
 
+@app.command("stats-snapshot")
+def stats_snapshot(ctx: typer.Context):
+    """Print one CPU/memory snapshot as JSON."""
+    response = request(ctx, "stats")
+    if not response.get('ok'):
+        handle(ctx, response)
+        return
+    typer.echo(json.dumps(response if json_enabled(ctx) else response['data'], indent=2))
+
+
+@app.command("stats")
+def stats_watch(ctx: typer.Context, interval: float = typer.Option(5.0, "--interval", min=0.1)):
+    """Poll resource usage until Ctrl+C (default: every five seconds)."""
+    if not math.isfinite(interval):
+        raise typer.BadParameter('interval must be finite')
+    try:
+        while True:
+            start = time.monotonic()
+            response = request(ctx, 'stats')
+            if not response.get('ok'):
+                handle(ctx, response)
+                return
+            if json_enabled(ctx):
+                typer.echo(json.dumps(response))
+            else:
+                data = response['data']
+                if sys.stdout.isatty():
+                    typer.clear()
+                typer.echo(data['timestamp'])
+                typer.echo(f"{'TYPE':<12} {'NAME':<24} {'CPU %':>10} {'MEM MiB':>12}  STATE")
+                for row in data['resources'] + [data['daemon']]:
+                    cpu = '-' if row['cpu_percent'] is None else f"{row['cpu_percent']:.2f}"
+                    memory = '-' if row['memory_bytes'] is None else f"{row['memory_bytes'] / 1048576:.2f}"
+                    typer.echo(f"{row['kind']:<12} {row['id']:<24} {cpu:>10} {memory:>12}  {row['state']}")
+                    if row.get('error'):
+                        typer.echo(f"  {row['error']}")
+                for name, total in data['totals'].items():
+                    typer.echo(f"TOTAL {name}: {total['cpu_percent']:.2f}% CPU, "
+                               f"{total['memory_bytes'] / 1048576:.2f} MiB")
+            time.sleep(max(0, interval - (time.monotonic() - start)))
+    except KeyboardInterrupt:
+        return
+
+
 @app.command("define")
 def define_topology(
     ctx: typer.Context,

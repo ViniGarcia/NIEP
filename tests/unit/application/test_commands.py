@@ -20,6 +20,7 @@ def test_router_has_aggregate_registry_without_runtime_data():
         "mininet",
         "sfc",
         "status",
+        "stats",
         "topoclean",
         "topodestroy",
         "topodown",

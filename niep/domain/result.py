@@ -35,6 +35,7 @@ class ResultCode(str, Enum):
     SFC_NOT_READY = "sfc_not_ready"
     SFC_NOT_UP = "sfc_not_up"
     SFC_UP = "sfc_up"
+    STATS = "stats"
     STATUS = "status"
     TOPOLOGY_CLEAN = "topology_clean"
     TOPOLOGY_DESTROYED = "topology_destroyed"

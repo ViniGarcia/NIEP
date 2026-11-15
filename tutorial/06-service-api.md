@@ -200,3 +200,42 @@ make vm-smoke-socket
 ```
 
 It starts the daemon, loads `tutorial/examples/mininet-ping.json`, runs `topoup`, executes `mininet pingall`, runs `topodown`, and terminates the daemon.
+
+## Resource usage
+
+Restart `niepd` after upgrading the checkout to load the metrics collector.
+Follow CPU and memory usage with client-side polling (Ctrl+C exits):
+
+```sh
+niepctl stats                         # default interval: 5 seconds
+niepctl stats --interval 2
+niepctl stats-snapshot                # one snapshot, always JSON
+niepctl --json stats                  # one JSON response per poll (JSON Lines)
+```
+
+The socket command is `stats` with no arguments. It returns UTC `timestamp`,
+`resources` (the topology's VMs and containers), `daemon`, and `totals` for
+`vms`, `containers`, `workloads`, and `with_daemon`. No other host workloads are
+included. Mininet processes, external controllers and VNF/SFC-owned VMs are not
+included in these totals.
+
+CPU uses cumulative runtime counters between successive daemon samples. 100%
+means one fully occupied CPU core, so values can exceed 100%. The first sample
+for each running instance has `cpu_percent: null`; after restart or a reset of
+its counter, that instance needs another sample. `sample_interval_seconds`
+reports the interval used. Snapshots return immediately without waiting to
+measure an interval; multiple clients share the daemon's sampling history.
+
+Memory is in bytes: VM `memory_bytes` is libvirt's host QEMU RSS, while container
+memory is Docker's cgroup usage including cache. These are different accounting
+sources; container values can differ from Docker CLI stats, which subtracts
+cache on Linux. `memory_limit_bytes` is configured VM maximum memory or the
+container's effective cgroup limit. Daemon memory is RSS and CPU includes its
+own threads. Shared pages may be counted in multiple RSS totals.
+
+Stopped resources report zero usage. An unavailable runtime reports an error on
+its resource row and unavailable metrics stay null. Aggregates sum known values
+and include `cpu_samples`, `memory_samples`, and `partial` so missing samples are
+visible; a partial aggregate is not a complete usage total. A failure collecting
+one instance does not discard the other instances' measurements. Collection is
+sequential, so the snapshot is not an atomic view of all runtimes.

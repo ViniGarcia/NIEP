@@ -70,3 +70,17 @@ The old `CLI/CLI.py`, `CLI/Launcher.py`, `CLI/HTTP.py`, `tools/*.py` and the
 cycle. They emit a deprecation warning (or the shell equivalent) and are
 scheduled for removal no earlier than `1.3.0`; see
 [`migration-1.2.md`](migration-1.2.md).
+
+### Resource metrics
+
+`stats` accepts no arguments and returns a `stats` result containing a UTC
+`timestamp`, per-instance `resources`, the `daemon` process, and `totals` for
+VMs, containers, workloads, and workloads with the daemon. CPU percentages use
+100% per core and need two counter samples; an initial or reset running sample
+has null CPU. Memory is bytes (VM QEMU RSS, container cgroup usage including
+cache, daemon RSS). Totals sum available values and explicitly mark partial
+coverage. See the service tutorial for scope and accounting semantics.
+
+`niepctl stats` polls every five seconds by default (`--interval SECONDS`).
+`niepctl stats-snapshot` prints one JSON data snapshot; global `--json` retains
+the command envelope. `niepctl --json stats` emits JSON Lines while polling.
