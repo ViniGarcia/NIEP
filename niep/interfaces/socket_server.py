@@ -29,12 +29,11 @@ from typing import Any, Callable, Mapping, Protocol
 from niep.application.command import CommandDispatcher, _public_result
 from niep.application.commands import CommandProtocolError, CommandRequest, CommandResponse
 from niep.application.stream import bridge_sockets
+from niep.interfaces.protocol_limits import MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES
 
 
 SOCKET_GROUP = "niep"
 SOCKET_MODE = 0o660
-MAX_REQUEST_BYTES = 64 * 1024
-MAX_RESPONSE_BYTES = 64 * 1024
 MIN_RESPONSE_BYTES = 192
 _PEER_CREDENTIALS = struct.Struct("3i")
 
@@ -187,7 +186,7 @@ class SocketLimits:
         if self.max_request_bytes > MAX_REQUEST_BYTES:
             raise ValueError("socket frame limit cannot exceed 64 KiB")
         if self.max_response_bytes > MAX_RESPONSE_BYTES:
-            raise ValueError("socket response limit cannot exceed 64 KiB")
+            raise ValueError("socket response limit cannot exceed 1 MiB")
         if self.max_response_bytes < MIN_RESPONSE_BYTES:
             raise ValueError("socket response limit is too small for a safe error envelope")
 

@@ -99,6 +99,12 @@ Useful options:
 .venv/bin/python benchmarks/startup/run.py --counts 1 --repeats 1
 # Containers only, one measured trial (plus one warmup) at each size:
 .venv/bin/python benchmarks/startup/run.py --kinds container --repeats 1
+# Finish standard VM/container rounds, then run larger container-only rounds:
+.venv/bin/python benchmarks/startup/run.py --container-counts 128 256 512
+# Use only containers to check the larger sizes on a provisioned host:
+.venv/bin/python benchmarks/startup/run.py --kinds container --counts 128 \
+  --container-counts 256 512 --repeats 1 --timeout 600 --rpc-timeout 1200 \
+  --output test_bench-container-scale
 # Inspect all generated JSON without contacting the daemon:
 .venv/bin/python benchmarks/startup/run.py --generate-only
 # Choose another shared results directory (created if needed):
@@ -118,6 +124,35 @@ block draws again. With an odd number of sizes, the final size gets a randomly
 chosen first platform. With a single selected platform, only the size order is
 shuffled. Repeated counts or platform selections are deduplicated, so each distinct
 combination runs exactly once per round.
+
+`--counts` applies to every selected platform (by default VMs and containers).
+`--container-counts` adds counts exclusively for containers; it requires
+`container` in `--kinds` and accepts the same positive integers and address-pool
+limit. Overlapping counts remain in the normal phase and are not run again as
+extras. For example, `--counts 32 64 --container-counts 128 256 512 --repeats 4`
+first completes all four normal rounds of VMs and containers at 32/64. Only then
+does it run four extra rounds of containers at 128/256/512. The console labels
+these `Extra round 1/4` through `Extra round 4/4` after announcing that the normal
+rounds are complete. Each extra size gets its own warmup immediately before its
+first measured trial in the extra phase, never during the normal phase.
+
+Extra sizes are shuffled independently within each extra round. Adding extras
+does not change the normal schedule for a fixed seed. Both phases use the same
+CSVs and plots; measured `repeat` stays 1 through `--repeats` within each phase,
+and kind/count identify which phase a scenario belongs to. All normal results
+are flushed before any extra trial starts. An extra failure can stop the remaining
+extras and return a nonzero exit code, but does not discard or prevent the already
+completed normal measurements. Cleanup failures still stop immediately. Ordinary
+failures retain the existing `--keep-going` behavior.
+VM image capacity preflight still uses only `--counts`.
+Larger sizes may need longer startup and RPC deadlines; address generation alone
+does not guarantee sufficient host resources or runtime capacity.
+Restart the updated daemon before running large scenarios: per-resource snapshots
+at 256/512 instances exceed the old 64 KiB response limit. The daemon, `niepctl`
+and benchmark now share a 1 MiB response bound; requests remain limited to 64 KiB.
+A daemon started with an explicit smaller `--max-response-bytes` still needs that
+override increased or removed. The benchmark cannot update an already running
+daemon's limit.
 
 For example, size order `2, 1, 4, 8` and first-platform choices `C, V, V, C`
 (blocks `CV` then `VC`) produce these measured trials:
@@ -169,7 +204,7 @@ Each execution appends measured-trial raw measurements to five CSVs in
 
 | File | Rows | Measurements |
 | --- | --- | --- |
-| `startup.csv` | One per instance per scenario/repetition | `probe_method`, `started_at`, `define_ms`, `topoup_ms`, `ready_ms`, `status`, `error` |
+| `startup.csv` | One per instance per scenario/repetition | `probe_method`, `started_at`, `define_ms`, `topoup_ms`, `ready_ms`, `status`, `error`, `topodown_ms` |
 | `runtime_startup.csv` | One per instance per scenario/repetition | `start_call_ms`, `runtime_ready_ms`, `probe_path`, `status`, `error` |
 | `usage.csv` | One per instance per poll | `sample_index`, `sample_timestamp`, `elapsed_seconds`, `memory_bytes`, `cpu_percent`, `status`, `error` |
 | `host_memory.csv` | Two per scenario/repetition | `phase`, `sample_timestamp`, `mem_total_bytes`, `mem_available_bytes`, `mem_free_bytes`, `buffers_bytes`, `cached_bytes`, `status`, `error` |
@@ -348,6 +383,16 @@ By default the first failed trial stops the series and prints its diagnostic;
 - `started_at`: UTC time just before starting the scenario/repetition.
 - `define_ms`: topology definition, excluded from startup timing.
 - `topoup_ms`: wall time for the blocking NIEP startup command.
+- `topodown_ms`: elapsed wall time around the blocking `topodown` command,
+  including client/RPC overhead, excluding disk/host-memory collection and
+  `topodestroy`. The same scenario-level value is repeated on each instance row;
+  take it once per `(run_id, scenario_id)`, never sum it over instances. It is
+  collected after failed startup as well, and remains empty if `topodown` was not
+  attempted. Failed cleanup retains the attempt duration with `status=cleanup_failed`;
+  on an RPC timeout this measures the client's wait, not confirmed daemon completion.
+  Warmup measurements are discarded as usual. Use a new `--output` directory
+  after this schema change: existing headers are preserved and incompatible
+  headers are rejected. Historical CSVs remain readable by the plotter.
 - `ready_ms`: milliseconds from just before `topoup` to observing HTTP 200 with
   exact body `ok` for that instance through Mininet. Compute the maximum per
   scenario to obtain the time when all instances were ready.

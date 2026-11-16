@@ -52,7 +52,7 @@ The default resource limits are deliberately conservative:
 | Limit | Default |
 | --- | ---: |
 | request frame | 64 KiB |
-| response frame | 64 KiB |
+| response frame | 1 MiB |
 | read / send timeout | 5 s |
 | interactive session timeout | 300 s |
 | JSON depth | 16 |

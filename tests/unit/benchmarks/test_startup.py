@@ -11,7 +11,7 @@ BENCH = runpy.run_path(str(Path(__file__).resolve().parents[3] / 'benchmarks/sta
 
 
 @pytest.mark.parametrize('kind', ['vm', 'container'])
-@pytest.mark.parametrize('count', [1, 2, 4, 8, 16, 64, 257])
+@pytest.mark.parametrize('count', [1, 2, 4, 8, 16, 64, 128, 256, 257, 512])
 def test_generated_topologies_have_unique_interfaces(tmp_path, kind, count):
     path, instances = BENCH['generate'](tmp_path, kind, count, 'local:test')
     topology = json.loads(path.read_text())
@@ -75,6 +75,29 @@ def test_cleanup_attempts_destroy_after_failure(tmp_path, operation):
     assert client.calls[-1] == 'topodestroy'
     assert failed == (operation == 'topodown')
     assert rows[0]['status'] != 'ready'
+
+
+@pytest.mark.parametrize('failure', [None, 'topodown', 'topoup', 'define'])
+def test_topodown_timing_excludes_destroy_and_is_kept_after_failures(tmp_path, monkeypatch, failure):
+    elapsed = [0.0]
+    module = BENCH['trial'].__globals__
+    monkeypatch.setattr(module['time'], 'perf_counter', lambda: elapsed[0])
+
+    class TimedClient(Client):
+        def call(self, *args):
+            elapsed[0] += {'topodown': 2.75, 'topodestroy': 30, 'disk-usage': 4}.get(args[0], .1)
+            return super().call(*args)
+
+    client = TimedClient(fail=failure)
+    rows, stop = BENCH['trial'](client, tmp_path, ['vm1', 'vm2'], 'vm', 2, 1, 100, 0)
+    if failure == 'define':
+        assert all(row['topodown_ms'] == '' for row in rows)
+        assert 'topodown' not in client.calls
+    else:
+        assert all(row['topodown_ms'] == 2750.0 for row in rows)
+        assert client.calls[-2:] == ['topodown', 'topodestroy']
+    if failure == 'topodown':
+        assert stop and all(row['status'] == 'cleanup_failed' for row in rows)
 
 
 def test_interrupt_saves_partial_observations_and_cleans(tmp_path):
@@ -185,6 +208,7 @@ def test_repeated_runs_append_joinable_raw_csvs(tmp_path, monkeypatch):
         assert all(row['kind'] == 'container' and row['count'] == '1' for row in tables[name])
     for startup, usage in zip(tables['startup'], tables['usage']):
         assert all(startup[key] == usage[key] for key in BENCH['COMMON_FIELDS'])
+        assert float(startup['topodown_ms']) >= 0
     assert tables['startup'][0]['scenario_id'] != tables['startup'][1]['scenario_id']
     with (tmp_path / 'host_memory.csv').open(newline='') as handle:
         host_rows = list(csv.DictReader(handle))
@@ -298,12 +322,17 @@ def test_resource_collection_finishes_before_topology_cleanup(tmp_path, monkeypa
     assert client.calls[-2:] == ['topodown', 'topodestroy']
 
 
-def test_stats_reads_a_complete_frame_without_waiting_for_server_close(tmp_path):
+@pytest.mark.parametrize('count', [0, 512])
+def test_stats_reads_a_complete_frame_without_waiting_for_server_close(tmp_path, count):
     import socket
     import threading
 
     path = str(tmp_path / 'stats.sock')
     release = threading.Event()
+    resources = [dict(kind='container', id=f'c{i}', state='running', memory_bytes=12345,
+                      cpu_percent=0.1, timestamp='2026-11-16T00:00:00Z', error=None)
+                 for i in range(count)]
+    frame = (json.dumps({'ok': True, 'data': {'resources': resources}}) + '\n').encode()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.bind(path)
         listener.listen()
@@ -311,14 +340,14 @@ def test_stats_reads_a_complete_frame_without_waiting_for_server_close(tmp_path)
         def serve():
             with listener.accept()[0] as connection:
                 connection.recv(4096)
-                connection.sendall(b'{"ok":true,"data":{"resources":[]}}\n')
+                connection.sendall(frame)
                 release.wait(2)
 
         thread = threading.Thread(target=serve)
         thread.start()
         try:
             client = BENCH['Client']('unused', path, rpc_timeout=1)
-            assert client.call('stats') == {'resources': []}
+            assert client.call('stats') == {'resources': resources}
         finally:
             release.set()
             thread.join(timeout=3)
@@ -728,6 +757,130 @@ def test_schedule_seed_is_reproducible_and_independent_of_global_random_state():
     random.random()
     assert list(BENCH['experiment_schedule'](plans, 3, random.Random(42))) == first
     assert list(BENCH['experiment_schedule'](plans, 3, random.Random(43))) != first
+
+
+def test_extra_container_counts_generate_only_the_additional_container_scenarios(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, 'argv', ['run.py', '--counts', '2', '2',
+                                    '--container-counts', '2', '128', '256', '512', '512',
+                                    '--generate-only', '--output', str(tmp_path)])
+    assert BENCH['main']() == 0
+    topologies = tmp_path / 'topologies'
+    assert {p.name for p in (topologies / 'vm').iterdir()} == {'2'}
+    assert {p.name for p in (topologies / 'container').iterdir()} == {'2', '128', '256', '512'}
+    for count in (128, 256, 512):
+        topology = json.loads((topologies / 'container' / str(count) / 'topology.json').read_text())
+        assert len(topology['CONTAINERS']) == count
+        assert topology['VMS'] == []
+
+
+@pytest.mark.parametrize('arguments', [
+    ['--kinds', 'vm', '--container-counts', '128'],
+    ['--container-counts', '0'], ['--container-counts', '16777214'],
+])
+def test_invalid_extra_container_counts_fail_before_generating_files(tmp_path, monkeypatch, arguments):
+    import sys
+
+    monkeypatch.setattr(sys, 'argv', ['run.py', *arguments, '--generate-only', '--output', str(tmp_path)])
+    with pytest.raises(SystemExit) as error:
+        BENCH['main']()
+    assert error.value.code == 2
+    assert not list(tmp_path.iterdir())
+
+
+def test_mixed_schedule_preserves_pair_balance_and_container_only_sizes():
+    import random
+
+    configurations = [(kind, count) for kind in ('vm', 'container') for count in (1, 2, 4, 8)]
+    configurations += [('container', count) for count in (128, 256, 512)]
+    plans = [(kind, count, Path(str(count)), []) for kind, count in configurations]
+    schedule = list(BENCH['experiment_schedule'](plans, 4, random.Random(17)))
+    for repeat in range(1, 5):
+        round_plans = [plan for index, plan in schedule if index == repeat]
+        assert len(round_plans) == len(configurations)
+        assert {(p[0], p[1]) for p in round_plans} == set(configurations)
+        firsts = []
+        for index, plan in enumerate(round_plans):
+            kind, count, *_ = plan
+            if count >= 128:
+                assert kind == 'container'
+            elif index == 0 or round_plans[index - 1][1] != count:
+                assert round_plans[index + 1][1] == count
+                firsts.append(kind)
+        for offset in range(0, len(firsts), 2):
+            assert set(firsts[offset:offset + 2]) == {'vm', 'container'}
+
+
+def test_extra_rounds_start_only_after_all_normal_rounds_and_preserve_their_seed():
+    import random
+
+    normal = [(kind, count, Path(str(count)), [])
+              for kind in ('vm', 'container') for count in (32, 64)]
+    extras = [('container', count, Path(str(count)), []) for count in (128, 256, 512)]
+    schedule = list(BENCH['phased_schedule'](normal + extras, 4, random.Random(42),
+                                           [128, 256, 512]))
+    boundary = len(normal) * 4
+    assert all(phase == 'normal' for phase, _, _ in schedule[:boundary])
+    assert all(phase == 'extra' for phase, _, _ in schedule[boundary:])
+    assert [(repeat, plan) for _, repeat, plan in schedule[:boundary]] == list(
+        BENCH['experiment_schedule'](normal, 4, random.Random(42)))
+    for repeat in range(1, 5):
+        assert {plan[1] for phase, index, plan in schedule if phase == 'extra' and index == repeat} == {
+            128, 256, 512}
+
+
+@pytest.mark.parametrize('failure', [None, 'extra_warmup', 'extra_measurement', 'normal'])
+def test_extra_execution_never_precedes_normal_csvs_and_keeps_completed_results(
+        tmp_path, monkeypatch, capsys, failure):
+    import csv
+    from types import SimpleNamespace
+
+    events = []
+    module = BENCH['execute'].__globals__
+
+    class IdleClient:
+        def call(self, command, *_):
+            assert command in ('status', 'stats', 'disk-usage')
+            return {'defined': False, 'resources': []}
+
+    def trial(_client, _path, instances, kind, count, repeat, *_args, **_kwargs):
+        events.append((kind, count, repeat))
+        if count == 128:
+            with (tmp_path / 'startup.csv').open() as source:
+                normal_rows = [r for r in csv.DictReader(source) if r['count'] == '1']
+            assert len(normal_rows) == 8
+            assert {r['repeat'] for r in normal_rows} == {'1', '2', '3', '4'}
+            assert all(r['status'] == 'ready' for r in normal_rows)
+        failed = ((failure == 'extra_warmup' and count == 128 and repeat == 0)
+                  or (failure == 'extra_measurement' and count == 128 and repeat == 1)
+                  or (failure == 'normal' and count == 1 and repeat == 1))
+        rows = [dict(kind=kind, count=count, repeat=repeat, instance=ident,
+                     status='failed' if failed else 'ready', error='injected failure' if failed else '',
+                     all_ready_ms='' if failed else 100, ready_ms='' if failed else 100)
+                for ident in instances]
+        return rows, False
+
+    monkeypatch.setitem(module, 'Client', lambda *_: IdleClient())
+    monkeypatch.setitem(module, 'trial', trial)
+    monkeypatch.setattr(module['subprocess'], 'run', lambda *_a, **_k: None)
+    args = SimpleNamespace(socket='unused', rpc_timeout=600, skip_runtime_timing=True,
+                           kinds=['vm', 'container'], counts=[1], container_counts=[1, 128],
+                           vm_image=tmp_path, image='local:test', repeats=4, timeout=180,
+                           interval=.1, seed=42, observe_seconds=10, stats_interval=1,
+                           settle_seconds=2, keep_going=False)
+    plans = [(kind, count, tmp_path, [f'{kind}{i}' for i in range(count)])
+             for kind, count in [('vm', 1), ('container', 1), ('container', 128)]]
+    with BENCH['results_files'](tmp_path) as files:
+        assert BENCH['execute'](args, plans, files) == int(failure is not None)
+    if failure == 'normal':
+        assert all(count == 1 for _, count, _ in events)
+    else:
+        assert len([event for event in events if event[1] == 1]) == 10
+        assert events[10] == ('container', 128, 0)
+        assert 'Extra round 1/4' in capsys.readouterr().out
+        if failure is None:
+            assert [repeat for _, count, repeat in events if count == 128] == [0, 1, 2, 3, 4]
 
 
 @pytest.mark.parametrize('kind', ['vm', 'container'])

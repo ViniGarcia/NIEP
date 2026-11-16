@@ -21,13 +21,14 @@ from uuid import uuid4
 from datetime import datetime, timezone
 
 from niep.domain.startup_addressing import PREFIX_LENGTH, addresses, mac, positive_count, validate_count
+from niep.interfaces.protocol_limits import MAX_RESPONSE_BYTES
 
 
 COUNTS = (1, 2, 4, 8, 16, 32, 64)
 COMMON_FIELDS = ('run_id', 'scenario_id', 'kind', 'count', 'repeat', 'instance')
 PROBE_METHOD = 'mininet_parallel_http_v1'
 STARTUP_FIELDS = COMMON_FIELDS + ('probe_method', 'started_at', 'define_ms', 'topoup_ms',
-                                  'ready_ms', 'status', 'error')
+                                  'ready_ms', 'status', 'error', 'topodown_ms')
 USAGE_FIELDS = COMMON_FIELDS + ('sample_index', 'sample_timestamp', 'elapsed_seconds',
                                 'memory_bytes', 'cpu_percent', 'status', 'error')
 RUNTIME_FIELDS = COMMON_FIELDS + ('runtime_id', 'started_at', 'start_call_ms',
@@ -206,7 +207,7 @@ class Client:
                 if not chunk:
                     raise RuntimeError('Incomplete resource stats response')
                 buffer.extend(chunk)
-                if len(buffer) > 65536:
+                if len(buffer) > MAX_RESPONSE_BYTES:
                     raise RuntimeError('Resource stats response exceeds protocol limit')
             frame, _, trailing = buffer.partition(b'\n')
             if trailing:
@@ -421,10 +422,16 @@ def trial(client, path, instances, kind, count, repeat, timeout, interval, *,
                     host_snapshots.append(host_memory_snapshot('before_topodown', kind, count, repeat))
                 # Always attempt destroy even if stop fails. Never continue after uncertain cleanup.
                 for command in ('topodown', 'topodestroy'):
+                    cleanup_start = time.perf_counter() if command == 'topodown' else None
                     try:
                         client.call(command)
                     except Exception as exc:
                         cleanup_errors.append(f'{command}: {exc}')
+                    finally:
+                        if cleanup_start is not None:
+                            elapsed_ms = round((time.perf_counter() - cleanup_start) * 1000, 3)
+                            for row in rows:
+                                row['topodown_ms'] = elapsed_ms
                 save_host_memory(host_snapshots)
                 save_disk(disk_records)
     if cleanup_errors:
@@ -471,6 +478,8 @@ def results_files(directory, runtime_timing=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--counts', nargs='+', type=positive_count, default=list(COUNTS))
+    parser.add_argument('--container-counts', nargs='+', type=positive_count, default=[],
+                        help='Container-only counts run after all normal rounds, e.g. 128 256 512')
     parser.add_argument('--kinds', nargs='+', choices=('vm', 'container'), default=['vm', 'container'])
     parser.add_argument('--repeats', type=int, default=3,
                         help='Randomized rounds, each measuring every configuration once (default: 3)')
@@ -500,6 +509,8 @@ def main():
         os.environ.get('NIEP_ROOT', Path(__file__).resolve().parents[2])) /
         'VEM/IMAGES/alpine-http.qcow2', help='Base image used by the daemon, for offline preflight')
     args = parser.parse_args()
+    if args.container_counts and 'container' not in args.kinds:
+        parser.error('--container-counts requires container in --kinds')
     if (not all(math.isfinite(v) for v in (args.timeout, args.interval, args.rpc_timeout))
             or args.repeats < 1 or args.timeout <= 0 or args.interval < 0 or args.rpc_timeout <= 0):
         parser.error('repeats and timeout must be positive; interval must be nonnegative')
@@ -508,7 +519,7 @@ def main():
             or args.settle_seconds < 0):
         parser.error('observation duration must cover one positive stats interval; settle must be nonnegative')
     try:
-        for count in args.counts:
+        for count in args.counts + args.container_counts:
             validate_count(count)
     except ValueError as exc:
         parser.error(str(exc))
@@ -517,8 +528,11 @@ def main():
     # Temporary descriptors remain available to the daemon until all trials finish.
     with tempfile.TemporaryDirectory(prefix='niep-startup-') as work:
         directory = args.output / 'topologies' if args.generate_only else Path(work)
+        configurations = dict.fromkeys(
+            [(kind, count) for kind in args.kinds for count in args.counts]
+            + [('container', count) for count in args.container_counts])
         plans = [(kind, count, *generate(directory / kind / str(count), kind, count, args.image))
-                 for kind in args.kinds for count in args.counts]
+                 for kind, count in configurations]
         if args.generate_only:
             print(f'Topologies: {directory}', flush=True)
             return 0
@@ -540,14 +554,32 @@ def experiment_schedule(plans, repeats, rng):
     for repeat in range(1, repeats + 1):
         counts = list(by_count)
         rng.shuffle(counts)
-        for offset in range(0, len(counts), len(kinds)):
+        # Only paired sizes consume balanced first-platform choices. Extra
+        # container-only sizes stay randomized without disrupting those pairs.
+        paired = [count for count in counts if len(by_count[count]) > 1]
+        first_by_count = {}
+        for offset in range(0, len(paired), len(kinds)):
             first_kinds = kinds.copy()
             rng.shuffle(first_kinds)
-            for count, first in zip(counts[offset:offset + len(kinds)], first_kinds):
-                order = [first] + [kind for kind in kinds if kind != first]
-                for kind in order:
-                    if kind in by_count[count]:
-                        yield repeat, by_count[count][kind]
+            first_by_count.update(zip(paired[offset:offset + len(kinds)], first_kinds))
+        for count in counts:
+            first = first_by_count.get(count, next(iter(by_count[count])))
+            order = [first] + [kind for kind in kinds if kind != first]
+            for kind in order:
+                if kind in by_count[count]:
+                    yield repeat, by_count[count][kind]
+
+
+def phased_schedule(plans, repeats, rng, extra_counts=()):
+    """Finish all normal rounds before warming or measuring extra containers."""
+    extra_counts = set(extra_counts)
+    normal, extra = [], []
+    for plan in plans:
+        target = extra if plan[0] == 'container' and plan[1] in extra_counts else normal
+        target.append(plan)
+    for phase, group in (('normal', normal), ('extra', extra)):
+        for repeat, plan in experiment_schedule(group, repeats, rng):
+            yield phase, repeat, plan
 
 
 def execute(args, plans, files):
@@ -593,10 +625,15 @@ def execute(args, plans, files):
     rng = random.Random(seed)
     warmed = set()
     current_round = None
-    for round_number, (kind, count, path, instances) in experiment_schedule(plans, args.repeats, rng):
-        if round_number != current_round:
-            current_round = round_number
-            print(f'Round {round_number}/{args.repeats}', flush=True)
+    extra_counts = set(getattr(args, 'container_counts', ())) - set(getattr(args, 'counts', ()))
+    for phase, round_number, (kind, count, path, instances) in phased_schedule(
+            plans, args.repeats, rng, extra_counts):
+        if (phase, round_number) != current_round:
+            if phase == 'extra' and (current_round is None or current_round[0] != 'extra'):
+                print('Normal rounds complete; starting extra container-only rounds', flush=True)
+            current_round = (phase, round_number)
+            prefix = 'Extra round' if phase == 'extra' else 'Round'
+            print(f'{prefix} {round_number}/{args.repeats}', flush=True)
         # Repeat zero is an unrecorded warmup, once per distinct platform/size.
         repetitions = (round_number,) if (kind, count) in warmed else (0, round_number)
         warmed.add((kind, count))

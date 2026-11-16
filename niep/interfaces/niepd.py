@@ -4,6 +4,7 @@ import logging
 
 from niep.domain.result import ResultCode
 from niep.interfaces.socket_server import NIEPSocketServer
+from niep.interfaces.protocol_limits import MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES
 
 
 def main():
@@ -22,8 +23,8 @@ def main():
     )
     parser.add_argument("--max-interactive-sessions", type=int, default=1)
     parser.add_argument("--max-connection-workers", type=int, default=32)
-    parser.add_argument("--max-request-bytes", type=int, default=64 * 1024)
-    parser.add_argument("--max-response-bytes", type=int, default=64 * 1024)
+    parser.add_argument("--max-request-bytes", type=int, default=MAX_REQUEST_BYTES)
+    parser.add_argument("--max-response-bytes", type=int, default=MAX_RESPONSE_BYTES)
     args = parser.parse_args()
 
     server = NIEPSocketServer(

@@ -13,10 +13,10 @@ import typer
 
 from niep.application.commands import CommandRequest
 from niep.application.stream import bridge_terminal
+from niep.interfaces.protocol_limits import MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES
 
 
 DEFAULT_SOCKET = "/run/niep.sock"
-MAX_REQUEST_BYTES = 64 * 1024
 CLIENT_TIMEOUT = 10.0
 CLIENT_SESSION_TIMEOUT = 300.0
 
@@ -69,7 +69,7 @@ def send_request(socket_path, command, args):
                     raise RuntimeError("NIEP daemon closed before a complete response frame")
                 break
             size += len(chunk)
-            if size > MAX_REQUEST_BYTES:
+            if size > MAX_RESPONSE_BYTES:
                 raise ValueError("response exceeds the socket limit")
             if frame is not None:
                 raise RuntimeError("NIEP daemon sent bytes after the response frame")
@@ -98,7 +98,7 @@ def receive_line(client):
         if not chunk:
             break
         data += chunk
-        if len(data) > MAX_REQUEST_BYTES:
+        if len(data) > MAX_RESPONSE_BYTES:
             raise RuntimeError("NIEP daemon response exceeds the socket limit")
     line, separator, remaining = data.partition(b"\n")
     if not separator:

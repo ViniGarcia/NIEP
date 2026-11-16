@@ -231,6 +231,20 @@ def test_oversized_response_is_replaced_by_a_bounded_error():
     assert response(connection)["code"] == "response_too_large"
 
 
+def test_default_response_limit_supports_a_512_container_disk_snapshot():
+    instance = server()
+    connection = Connection()
+    resources = [dict(kind='container', id=f'c{i}', disk_bytes=4096,
+                      source='host_allocated_blocks', image_id='sha256:' + 'a' * 64,
+                      image_bytes=12395808, image_source='docker_image_size',
+                      error=None, image_error=None) for i in range(512)]
+    assert instance._send_response(connection, {
+        'protocol': 'niep.command', 'version': 1, 'request_id': 'large-snapshot',
+        'ok': True, 'code': 'disk_usage', 'data': {'resources': resources}, 'exit_code': 0})
+    assert 64 * 1024 < len(connection.sent[-1]) <= SocketLimits().max_response_bytes
+    assert response(connection)['data']['resources'] == resources
+
+
 def test_total_read_deadline_rejects_drip_feed():
     class SlowConnection(Connection):
         def recv(self, size):
@@ -273,7 +287,7 @@ def test_default_audit_is_visible_as_json_without_secrets(caplog):
         {"read_timeout": float("nan")},
         {"send_timeout": float("inf")},
         {"session_timeout": True},
-        {"max_response_bytes": 64 * 1024 + 1},
+        {"max_response_bytes": 1024 * 1024 + 1},
         {"max_response_bytes": 191},
     ],
 )

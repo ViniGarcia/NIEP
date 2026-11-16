@@ -5,8 +5,9 @@ import json
 import pytest
 
 from niep.application.commands import CommandProtocolError, CommandRequest
-from niep.interfaces.niepctl import MAX_REQUEST_BYTES, send_request
+from niep.interfaces.niepctl import MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, send_request
 from niep.interfaces.socket_server import MAX_REQUEST_BYTES as SERVER_MAX_REQUEST_BYTES
+from niep.interfaces.socket_server import MAX_RESPONSE_BYTES as SERVER_MAX_RESPONSE_BYTES
 from niep.interfaces.socket_server import SocketLimits
 
 
@@ -16,6 +17,41 @@ pytestmark = pytest.mark.contract
 def test_protocol_and_client_share_the_64_kib_frame_contract():
     assert MAX_REQUEST_BYTES == SERVER_MAX_REQUEST_BYTES == 64 * 1024
     assert SocketLimits().max_request_bytes == MAX_REQUEST_BYTES
+    assert MAX_RESPONSE_BYTES == SERVER_MAX_RESPONSE_BYTES == 1024 * 1024
+    assert SocketLimits().max_response_bytes == MAX_RESPONSE_BYTES
+
+
+@pytest.mark.parametrize('size', [80 * 1024, MAX_RESPONSE_BYTES + 1])
+def test_client_accepts_large_snapshots_but_keeps_a_bounded_response(monkeypatch, size):
+    frame = (json.dumps({'ok': True, 'data': {'output': 'x' * size}}) + '\n').encode()
+
+    class Client:
+        def __init__(self):
+            self.offset = 0
+
+        def settimeout(self, _timeout):
+            pass
+
+        def connect(self, _path):
+            pass
+
+        def sendall(self, _payload):
+            pass
+
+        def recv(self, count):
+            chunk = frame[self.offset:self.offset + count]
+            self.offset += len(chunk)
+            return chunk
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr('niep.interfaces.niepctl.socket.socket', lambda *_: Client())
+    if len(frame) > MAX_RESPONSE_BYTES:
+        with pytest.raises(ValueError, match='response exceeds'):
+            send_request('/run/niep.sock', 'disk-usage', [])
+    else:
+        assert len(send_request('/run/niep.sock', 'disk-usage', [])['data']['output']) == size
 
 
 @pytest.mark.parametrize(
