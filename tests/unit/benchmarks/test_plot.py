@@ -85,12 +85,13 @@ def test_render_outputs_only_png_in_both_languages_without_sample_annotations(tm
     scenarios = [dict(kind=kind, count=2, startup_seconds=seconds, topoup_seconds=seconds / 2, cpu_percent=cpu, memory_mib=memory,
                       host_memory_delta_mib=memory - 75,
                       disk_mib=memory,
+                      disk_total_mib=memory + 10,
                       runtime_start_call_ms=cpu * 10, runtime_http_ready_ms=seconds * 1000)
                  for kind in ('vm', 'container')
                  for seconds, cpu, memory in [(1, 10, 50), (2, 20, 100)]]
     for language in ('pt', 'en'):
         PLOT['render'](scenarios, tmp_path / language, 'test', language)
-    assert len(captured) == 20
+    assert len(captured) == 22
     assert all(path.suffix == '.png' for path, _, _ in captured)
     assert {path.parent.name for path, _, _ in captured} == {'pt', 'en'}
     assert any(title == 'Tempo de inicialização da topologia' for _, title, _ in captured)
@@ -231,6 +232,78 @@ def test_zero_container_writable_layer_is_valid_disk_usage():
     results, _ = PLOT['aggregate'](starts, [], {'r1'},
                                    disk_usage=disk('s1', sizes=(0, 0), kind='container'))
     assert PLOT['curve_points'](results, 'container', 'disk_mib') == [(2, 0, 0, 1)]
+
+
+def test_container_allocated_blocks_are_accepted_by_disk_plot():
+    starts = [dict(row, kind='container') for row in startup('s1')]
+    records = [dict(row, source='host_allocated_blocks')
+               for row in disk('s1', kind='container')]
+    results, _ = PLOT['aggregate'](starts, [], {'r1'}, disk_usage=records)
+    assert PLOT['curve_points'](results, 'container', 'disk_mib') == [(2, 4, 0, 1)]
+
+
+@pytest.mark.parametrize('image_ids,expected', [(['same', 'same'], 14), (['one', 'two'], 24)])
+def test_disk_plot_adds_each_container_image_once(image_ids, expected):
+    starts = [dict(row, kind='container') for row in startup('s1')]
+    records = [dict(row, image_id=image_id, image_bytes=str(10 * 1048576),
+                    image_source='docker_image_size')
+               for row, image_id in zip(disk('s1', kind='container'), image_ids)]
+    results, _ = PLOT['aggregate'](starts, [], {'r1'}, disk_usage=records)
+    assert results[0]['disk_mib'] == 4
+    assert results[0]['disk_total_mib'] == expected
+
+
+def test_vm_disk_plot_never_adds_base_again():
+    records = [dict(row, image_id='vm-base', image_bytes=str(100 * 1048576))
+               for row in disk('s1')]
+    results, _ = PLOT['aggregate'](startup('s1'), [], {'r1'}, disk_usage=records)
+    assert results[0]['disk_total_mib'] == results[0]['disk_mib'] == 4
+
+
+@pytest.mark.parametrize('change', [
+    {'image_bytes': ''}, {'image_id': ''}, {'image_source': 'unknown'},
+    {'image_error': 'unavailable'}, {'image_bytes': str(11 * 1048576)},
+])
+def test_missing_or_inconsistent_images_preserve_private_plot_only(change):
+    starts = [dict(row, kind='container') for row in startup('s1')]
+    records = [dict(row, image_id='same', image_bytes=str(10 * 1048576),
+                    image_source='docker_image_size') for row in disk('s1', kind='container')]
+    records[1].update(change)
+    results, _ = PLOT['aggregate'](starts, [], {'r1'}, disk_usage=records)
+    assert results[0]['disk_total_mib'] is None
+    assert results[0]['disk_mib'] == 4
+
+
+def test_historical_container_disk_without_images_is_not_presented_as_total():
+    starts = [dict(row, kind='container') for row in startup('s1')]
+    results, _ = PLOT['aggregate'](starts, [], {'r1'}, disk_usage=disk('s1', kind='container'))
+    assert results[0]['disk_mib'] == 4
+    assert results[0]['disk_total_mib'] is None
+
+
+@pytest.mark.parametrize('container_size,scale', [(12, 'log'), (0, 'symlog')])
+def test_disk_render_keeps_small_values_and_genuine_zero_visible(tmp_path, monkeypatch,
+                                                               container_size, scale):
+    pytest.importorskip('matplotlib')
+    from matplotlib.figure import Figure
+
+    captured = {}
+
+    def savefig(figure, path, **_kwargs):
+        if path.stem.startswith('disk_usage'):
+            ax = figure.axes[0]
+            captured[path.stem] = (ax.get_yscale(), [text.get_text() for text in ax.texts],
+                                   ax.get_ylim())
+
+    monkeypatch.setattr(Figure, 'savefig', savefig)
+    scenarios = [dict(kind=kind, count=32, disk_mib=size, disk_total_mib=size)
+                 for kind, size in [('vm', 4269), ('container', container_size)]]
+    PLOT['render'](scenarios, tmp_path, 'test')
+    assert set(captured) == {'disk_usage', 'disk_usage_private'}
+    for actual_scale, annotations, limits in captured.values():
+        assert actual_scale == scale
+        assert f'{container_size:.2f} MiB' in annotations
+        assert limits[0] <= container_size < limits[1]
 
 
 @pytest.mark.parametrize('size', ['-1', 'nan', 'inf'])

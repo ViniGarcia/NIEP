@@ -36,7 +36,8 @@ HOST_MEMORY_COUNTERS = {'MemTotal': 'mem_total_bytes', 'MemAvailable': 'mem_avai
                         'MemFree': 'mem_free_bytes', 'Buffers': 'buffers_bytes', 'Cached': 'cached_bytes'}
 HOST_MEMORY_FIELDS = ('run_id', 'scenario_id', 'kind', 'count', 'repeat', 'phase',
                       'sample_timestamp', *HOST_MEMORY_COUNTERS.values(), 'status', 'error')
-DISK_FIELDS = COMMON_FIELDS + ('sample_timestamp', 'disk_bytes', 'file_bytes', 'source', 'status', 'error')
+DISK_FIELDS = COMMON_FIELDS + ('sample_timestamp', 'disk_bytes', 'file_bytes', 'source', 'status', 'error',
+                              'image_id', 'image_bytes', 'image_source', 'image_error')
 SCHEMAS = {'startup': STARTUP_FIELDS, 'usage': USAGE_FIELDS, 'runtime_startup': RUNTIME_FIELDS,
            'host_memory': HOST_MEMORY_FIELDS, 'disk_usage': DISK_FIELDS}
 
@@ -300,7 +301,8 @@ def disk_rows(client, instances, kind, count, repeat):
         resources = {}
         for resource in snapshot['resources']:
             resources.setdefault((resource['kind'], resource['id']), []).append(resource)
-        expected_source = {'vm': 'host_allocated_blocks', 'container': 'docker_writable_layer'}[kind]
+        expected_sources = {'vm': {'host_allocated_blocks'},
+                            'container': {'host_allocated_blocks', 'docker_writable_layer'}}[kind]
         for row in rows:
             row['sample_timestamp'] = timestamp
             matches = resources.get((kind, row['instance']), [])
@@ -308,9 +310,19 @@ def disk_rows(client, instances, kind, count, repeat):
                 row.update(status='metrics_error', error='Missing or duplicate disk usage resource')
                 continue
             source = matches[0]
+            if kind == 'container':
+                image_id, image_size = source.get('image_id'), source.get('image_bytes')
+                image_source = source.get('image_source')
+                image_valid = (isinstance(image_id, str) and bool(image_id)
+                               and type(image_size) is int and image_size >= 0
+                               and image_source == 'docker_image_size')
+                if source.get('image_error') or not image_valid:
+                    row['image_error'] = source.get('image_error') or 'Image size unavailable or invalid'
+                else:
+                    row.update(image_id=image_id, image_bytes=image_size, image_source=image_source)
             size, file_size = source.get('disk_bytes'), source.get('file_bytes')
             row['source'] = source.get('source') or ''
-            valid = (type(size) is int and size >= 0 and row['source'] == expected_source
+            valid = (type(size) is int and size >= 0 and row['source'] in expected_sources
                      and (file_size is None or (type(file_size) is int and file_size >= 0)))
             if source.get('error') or not valid:
                 row.update(status='metrics_error', error=source.get('error') or 'Invalid disk usage counters/source')
@@ -629,7 +641,8 @@ def execute(args, plans, files):
             success = all(row['status'] == 'ready' for row in rows)
             timing_failed = any(row['status'] != 'ready' for row in runtime_records)
             host_failed = any(row['status'] != 'sampled' for row in host_records)
-            disk_failed = any(row['status'] != 'sampled' for row in disk_records)
+            disk_failed = any(row['status'] != 'sampled' or row.get('image_error')
+                              for row in disk_records)
             if disk_failed:
                 print(f'{label}: disk usage collection incomplete' +
                       (' (warmup results discarded)' if warmup else '; see disk_usage.csv'), file=sys.stderr)

@@ -63,13 +63,32 @@ def host_memory_delta(records, scenario):
 
 
 def disk_total(records, scenario, instances):
-    expected_source = {'vm': 'host_allocated_blocks', 'container': 'docker_writable_layer'}[scenario['kind']]
+    expected_sources = {'vm': {'host_allocated_blocks'},
+                        'container': {'host_allocated_blocks', 'docker_writable_layer'}}[scenario['kind']]
     if (len(records) != len(instances) or {r['instance'] for r in records} != instances
-            or any(r['status'] != 'sampled' or r.get('source') != expected_source
+            or any(r['status'] != 'sampled' or r.get('source') not in expected_sources
                    or any(r[field] != scenario[field] for field in ('kind', 'count', 'repeat'))
                    or r.get('disk_bytes') in ('', None) for r in records)):
         return None
     return sum(number(row, 'disk_bytes') for row in records) / 1048576
+
+
+def disk_with_images(records, scenario, instances):
+    """VM copies already contain the base; container images are shared by ID."""
+    private = disk_total(records, scenario, instances)
+    if private is None or scenario['kind'] == 'vm':
+        return private
+    images = {}
+    for row in records:
+        image_id = row.get('image_id')
+        if (not image_id or row.get('image_bytes') in ('', None)
+                or row.get('image_source') != 'docker_image_size' or row.get('image_error')):
+            return None
+        size = number(row, 'image_bytes')
+        if image_id in images and images[image_id] != size:
+            return None
+        images[image_id] = size
+    return private + sum(images.values()) / 1048576
 
 
 def aggregate(startup, usage, run_ids, runtime=(), host_memory=(), disk_usage=()):
@@ -108,6 +127,7 @@ def aggregate(startup, usage, run_ids, runtime=(), host_memory=(), disk_usage=()
                       memory_mib=None, cpu_percent=None, topoup_seconds=None,
                       host_memory_delta_mib=host_memory_delta(host_groups[key], first),
                       disk_mib=disk_total(disk_groups[key], first, instances),
+                      disk_total_mib=disk_with_images(disk_groups[key], first, instances),
                       runtime_start_call_ms=None, runtime_http_ready_ms=None)
         topoup_values = {number(row, 'topoup_ms') for row in rows if row.get('topoup_ms') not in ('', None)}
         if len(topoup_values) > 1:
@@ -184,6 +204,7 @@ def render(scenarios, output, selection, language='en'):
         'memory_mib': ('Uso médio de memória do cenário', 'Uso agregado de memória (MiB)'),
         'host_memory_delta_mib': ('Variação estimada de memória usada do host', 'Delta de memória usada do host (MiB)'),
         'disk_mib': ('Uso de disco privado ao final do cenário', 'Disco privado agregado (MiB)'),
+        'disk_total_mib': ('Uso estimado de disco incluindo imagens', 'Disco do cenário incluindo imagens (MiB)'),
         'runtime_start_call_ms': ('Duração média da chamada de start por instância', 'Duração da chamada ao runtime (ms)'),
         'runtime_http_ready_ms': ('Tempo médio de start até HTTP por instância', 'Tempo do start do runtime até HTTP pronto (ms)'),
     }
@@ -194,12 +215,16 @@ def render(scenarios, output, selection, language='en'):
 
     def save(fig, name):
         caption = footer
-        if name == 'disk_usage':
-            caption = ('VM: blocos alocados; contêiner: camada gravável. Exclui imagens compartilhadas, volumes e logs do runtime.'
+        if name == 'disk_usage_private':
+            caption = ('VM: blocos alocados; contêiner: blocos da camada gravável ou estimativa Docker. Exclui imagens compartilhadas, volumes e logs externos.'
                        if portuguese else
-                       'VM: allocated blocks; container: writable layer. Excludes shared images, volumes and runtime logs.') + '\n' + footer
+                       'VM: allocated blocks; container: writable-layer blocks or Docker estimate. Excludes shared images, volumes and external logs.') + '\n' + footer
+        elif name == 'disk_usage':
+            caption = ('VM: cópias privadas completas; contêiner: camada gravável + imagem Docker uma vez por ID. Exclui volumes e logs externos.'
+                       if portuguese else
+                       'VM: full private copies; container: writable layers + Docker image once per ID. Excludes volumes and external logs.') + '\n' + footer
         fig.text(.5, .015, caption, ha='center', fontsize=8)
-        fig.tight_layout(rect=(0, .085 if name == 'disk_usage' else .055, 1, 1))
+        fig.tight_layout(rect=(0, .085 if name.startswith('disk_usage') else .055, 1, 1))
         fig.savefig(output / f'{name}.png', dpi=180, bbox_inches='tight')
         plt.close(fig)
 
@@ -209,7 +234,8 @@ def render(scenarios, output, selection, language='en'):
         ('cpu_percent', 'cpu_mean', 'Mean scenario CPU usage', 'Aggregate CPU usage (%) — 100% per core'),
         ('memory_mib', 'memory_mean', 'Mean scenario memory usage', 'Aggregate memory usage (MiB)'),
         ('host_memory_delta_mib', 'host_memory_delta', 'Estimated host used-memory change', 'Host used-memory delta (MiB)'),
-        ('disk_mib', 'disk_usage', 'Private disk usage at scenario end', 'Aggregate private disk usage (MiB)'),
+        ('disk_mib', 'disk_usage_private', 'Private disk usage at scenario end', 'Aggregate private disk usage (MiB)'),
+        ('disk_total_mib', 'disk_usage', 'Estimated disk usage including images', 'Scenario disk usage including images (MiB)'),
         ('runtime_start_call_ms', 'runtime_start_call', 'Mean start API duration per instance', 'Runtime start API duration (ms)'),
         ('runtime_http_ready_ms', 'runtime_http_ready', 'Mean runtime start-to-HTTP time per instance', 'Runtime start to HTTP readiness (ms)'),
     ):
@@ -218,6 +244,7 @@ def render(scenarios, output, selection, language='en'):
         fig, ax = plt.subplots(figsize=(8, 5))
         counts = set()
         plotted = False
+        disk_values = []
         for kind, marker in zip(KINDS, ('o', 's')):
             points = curve_points(scenarios, kind, metric)
             if not points:
@@ -228,6 +255,12 @@ def render(scenarios, output, selection, language='en'):
             errors = None if all(n == 1 for n in ns) else [sd if n > 1 else math.nan for sd, n in zip(deviations, ns)]
             ax.errorbar(x, means, yerr=errors, label=labels[kind], color=COLORS[kind],
                         marker=marker, capsize=4, linewidth=1.7)
+            if metric in ('disk_mib', 'disk_total_mib'):
+                disk_values.extend(means)
+                for count, mean in zip(x, means):
+                    ax.annotate(f'{mean:.2f} MiB', (count, mean), xytext=(0, 9),
+                                textcoords='offset points', ha='center', fontsize=8,
+                                color=COLORS[kind])
         if counts:
             ax.set_xscale('log', base=2)
             ax.set_xticks(sorted(counts), labels=[str(n) for n in sorted(counts)])
@@ -236,6 +269,14 @@ def render(scenarios, output, selection, language='en'):
         else:
             ax.text(.5, .5, no_data, transform=ax.transAxes, ha='center')
         ax.set(title=title, xlabel=xlabel, ylabel=ylabel)
+        if disk_values:
+            # Private container layers can be thousands of times smaller than
+            # full VM copies. Keep both visible; preserve genuine zero values.
+            if min(disk_values) > 0:
+                ax.set_yscale('log')
+            else:
+                ax.set_yscale('symlog', linthresh=1 / 1024)
+            ax.margins(y=.2)
         if metric == 'host_memory_delta_mib':
             ax.axhline(0, color='gray', linewidth=.8, linestyle='--')
         ax.grid(alpha=.25)
@@ -303,6 +344,8 @@ def main():
     print(f'Host memory delta scenarios: {captured_host}/{len(scenarios)}')
     captured_disk = sum(row['disk_mib'] is not None for row in scenarios)
     print(f'Disk usage scenarios: {captured_disk}/{len(scenarios)}')
+    captured_total = sum(row['disk_total_mib'] is not None for row in scenarios)
+    print(f'Disk usage including images: {captured_total}/{len(scenarios)}')
     for kind in KINDS:
         for count, mean, sd, n in curve_points(scenarios, kind, 'startup_seconds'):
             deviation = f'{sd:.3f}s' if n > 1 else 'n/a (one trial)'

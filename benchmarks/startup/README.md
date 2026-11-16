@@ -173,7 +173,7 @@ Each execution appends measured-trial raw measurements to five CSVs in
 | `runtime_startup.csv` | One per instance per scenario/repetition | `start_call_ms`, `runtime_ready_ms`, `probe_path`, `status`, `error` |
 | `usage.csv` | One per instance per poll | `sample_index`, `sample_timestamp`, `elapsed_seconds`, `memory_bytes`, `cpu_percent`, `status`, `error` |
 | `host_memory.csv` | Two per scenario/repetition | `phase`, `sample_timestamp`, `mem_total_bytes`, `mem_available_bytes`, `mem_free_bytes`, `buffers_bytes`, `cached_bytes`, `status`, `error` |
-| `disk_usage.csv` | One per instance at scenario end | `sample_timestamp`, `disk_bytes`, `file_bytes`, `source`, `status`, `error` |
+| `disk_usage.csv` | One per instance at scenario end | `sample_timestamp`, `disk_bytes`, `file_bytes`, `source`, `status`, `error`, `image_id`, `image_bytes`, `image_source`, `image_error` |
 
 All five files include `run_id`, `scenario_id`, `kind` (`vm` or `container`), `count`
 (number of instances in the scenario), and `repeat`. The instance-level files also
@@ -299,13 +299,30 @@ Warmup runs perform the same collection but discard the results.
 - VMs: `disk_bytes` is allocated blocks of the private QCOW2 file (`st_blocks * 512`),
   with `source=host_allocated_blocks`. `file_bytes` is the host file's logical length,
   not guest virtual disk capacity.
-- Containers: `disk_bytes` is Docker's `SizeRw`, the writable-layer size, with
-  `source=docker_writable_layer`. `file_bytes` is empty.
+- Containers on a local Unix-socket Engine: prefer allocated blocks of the private
+  writable layer (`source=host_allocated_blocks`), including directories and
+  counting hardlinks once without following symlinks. The layer is located from
+  `GraphDriver.Data.UpperDir`, or the running container's root OverlayFS mount
+  in `/proc/PID/mountinfo` for containerd image stores.
+- When that directory is unavailable, inaccessible, or the Engine is remote, use
+  Docker's `SizeRw` (`source=docker_writable_layer`). This is a driver-accounted
+  content-size estimate, not allocated host blocks. `file_bytes` is empty for
+  containers with either method. Check `source` before comparing historical runs
+  or combining runs from different hosts; the plot accepts both methods.
 
-These are different storage-accounting methods, reported as private instance
-storage rather than total platform disk cost. Shared base images, volumes, bind
-mounts, runtime/container logs outside the instance disk, and runtime metadata are
-excluded. The measurements are read while running, without forcing a disk flush;
+`disk_bytes` remains private instance storage. VM instances are full QCOW2
+copies, so their measured allocation already includes the base content once per
+instance; never add or multiply the base image again. Container rows additionally
+record `image_id`, `image_bytes`, `image_source=docker_image_size` and `image_error`.
+The daemon inspects the immutable image used by each container, caching its
+Docker `Size` once per snapshot; this estimates image content size rather than
+allocated host blocks. The plot adds that size once per distinct image ID to the
+sum of writable layers. Aliases of the same image are counted once. The benchmark
+uses one image for all containers; for scenarios with different images, common
+layers between different image IDs are not deduplicated, so the sum can overestimate.
+Volumes, bind mounts, runtime/container logs outside the instance disk, and runtime
+metadata remain excluded. The stored VM source template is also excluded; the
+comparison counts the copies required to run the instances. The measurements are read while running, without forcing a disk flush;
 the daemon collects resources sequentially, so the snapshot is not atomic.
 
 Values are flushed after cleanup. Missing instances, unavailable storage counters
@@ -316,9 +333,14 @@ run exit nonzero; `--keep-going` continues after ordinary failures. Failed start
 or interrupted trials attempt collection before cleanup but are excluded from the
 comparison plot. A failure before attempting `topoup` produces no disk rows.
 
-No existing CSV headers change. The new file is created automatically, including
-with `--skip-runtime-timing`. Historical runs without it still render their other
-plots; missing disk observations are never replaced with zero.
+The image fields extend `disk_usage.csv`; use a new `--output` directory when
+collecting after this update. The runner rejects incompatible existing headers
+without modifying them. The file is created even with `--skip-runtime-timing`.
+Historical files remain readable by the plotter: they retain the private-storage
+curve, but container observations without image metadata are omitted from the
+including-images curve rather than presenting private storage as the total.
+Image collection errors are kept in `image_error`, preserve private counters and
+startup timings, and make the benchmark exit nonzero.
 
 By default the first failed trial stops the series and prints its diagnostic;
 `--keep-going` continues after ordinary failures. Nonzero exit means a trial failed.
@@ -389,7 +411,7 @@ Previously recorded timeout rows are retained; rerun affected scenarios, e.g.:
   --output /tmp/niep-figures
 ```
 
-Ten figures are generated in each language (twenty PNGs total). Portuguese titles,
+Eleven figures are generated in each language (twenty-two PNGs total). Portuguese titles,
 axes and legends are under `plots/pt/`; English versions are under `plots/en/`.
 Only PNG is generated:
 
@@ -401,8 +423,11 @@ Only PNG is generated:
 - `memory_mean`: mean aggregate memory versus instance count.
 - `host_memory_delta`: estimated host used-memory change between the two snapshots
   versus instance count, comparing VMs and containers (MiB).
-- `disk_usage`: aggregate private instance disk usage at scenario end versus
-  instance count (MiB), with the accounting scope noted in the figure.
+- `disk_usage`: estimated scenario disk usage including images versus instance
+  count (MiB): full private VM copies, or container writable layers plus each
+  distinct Docker image once.
+- `disk_usage_private`: private instance disks/writable layers only, preserving
+  the previous comparison and showing where container growth comes from.
 - `cpu_per_instance`: VM/container bars normalized to usage per instance,
   pooling the selected scenario sizes.
 - `memory_per_instance`: the analogous normalized memory bars.
@@ -421,11 +446,17 @@ poll count. It shows the mean and ±1 sample standard deviation across repetitio
 at each size. A zero reference line makes negative deltas visible. Historical runs
 without host snapshots retain all other plots and show no host delta observations.
 
-The disk curve reads `disk_usage.csv` when present, requires exactly one successful
-measurement for each expected instance and validates its kind, count, repeat and
-accounting source. It sums raw `disk_bytes` once per scenario, then plots mean and
-±1 sample standard deviation across rounds at each size. It does not use logical
-`file_bytes`, sum shared image sizes, or count instances as independent repetitions.
+Both disk curves read `disk_usage.csv` when present and require exactly one
+successful private measurement for each expected instance, validating kind, count,
+repeat and source. The private curve sums `disk_bytes`; the including-images curve
+also requires valid, consistent container image metadata and adds each image once
+per scenario. Both plot mean and ±1 sample standard deviation across repetitions
+at each size. Neither uses logical `file_bytes` or treats instances as independent
+repetitions. Missing image data never becomes a zero-byte image.
+The disk charts use a logarithmic Y axis and label the point values in MiB so
+small container layers remain visible alongside full VM disk copies. When a
+scenario has a genuine zero, a symmetric logarithmic axis with a linear region
+below 1 KiB preserves that zero instead of dropping or replacing it.
 
 `topoup_time` takes exactly one `topoup_ms` value per scenario/repetition,
 converted to seconds. The repeated copies in instance rows do not count as

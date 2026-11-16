@@ -256,14 +256,28 @@ explicit topology VMs and containers, excluding VNF/SFC-owned VMs.
 
 VM `disk_bytes` counts allocated host blocks (`st_blocks * 512`) in the instance's
 QCOW2 file, respecting sparse allocation; `file_bytes` is the host file length,
-not the guest disk capacity. Docker `disk_bytes` is the Engine's `SizeRw` for
-that container's writable layer. Docker reports driver-accounted content size,
-which is not the same as filesystem allocated blocks. The combined total is an
-estimate across those two accounting methods. Compression, reflinks, filesystem
-metadata and shared extents can affect physical storage consumption.
+not the guest disk capacity. For a local Unix-socket Docker Engine, container
+`disk_bytes` prefers allocated blocks in its private writable directory, with
+`source=host_allocated_blocks`. This includes directory blocks, counts hardlinks
+once and does not follow symlinks. Both classic `UpperDir` and running containerd
+OverlayFS snapshots are supported. When the directory cannot be located or read,
+or the Engine is remote, the fallback is `SizeRw` with
+`source=docker_writable_layer`: driver-accounted content size rather than allocated
+blocks. Check the source when comparing runs. The combined total remains an
+estimate: compression, reflinks, metadata and shared extents affect physical
+storage consumption. Scans are not atomic; traversal errors fall back to `SizeRw`
+rather than returning a partial allocation count.
 
-Shared base images and Docker image layers are excluded to avoid counting shared
-assets once per instance. Container logs, volumes, bind mounts, VM XML, host
+The `disk_bytes` counters and CLI totals exclude shared image storage. For
+containers, JSON additionally reports `image_id`, `image_bytes`,
+`image_source=docker_image_size` and `image_error`. The immutable image ID is taken
+from the actual container; its `Size` is cached once per snapshot. To estimate
+scenario storage including images, sum private counters and add each distinct
+container image once. VM disks are full private copies and already include the
+base content: adding their template again would double-count it. Different image
+IDs may share layers, so summing their content sizes can overestimate storage;
+the startup benchmark uses a single image. Image errors preserve private counters
+and are reported separately. Container logs, volumes, bind mounts, VM XML, host
 networking and daemon logs are also excluded. Stopped instances remain measurable
 while their files/layers exist. An uncreated instance reports zero; unavailable
 storage reports null and an error. JSON totals include `partial` and

@@ -90,11 +90,17 @@ the command envelope. `niepctl --json stats` emits JSON Lines while polling.
 `disk-usage` accepts no arguments and returns a `disk_usage` result with
 `timestamp`, `resources`, `totals`, and `scope`. Each instance contains `kind`,
 `id`, `disk_bytes`, `source`, and `error`; VM rows also include `file_bytes`.
-Sources are host allocated blocks for private VM disks and Docker `SizeRw` for
-container writable layers. Totals contain `disk_bytes`, `resources`,
+`source=host_allocated_blocks` measures private VM disks or accessible local
+container writable layers. Containers fall back to Docker `SizeRw` with
+`source=docker_writable_layer` when host allocation is unavailable. Totals contain
+`disk_bytes`, `resources`,
 `measured_resources`, and `partial`. The known-value sum is an estimate because
-the storage backends use different accounting. Shared images, volumes, bind
-mounts and logs are excluded. See the service tutorial for details.
+the storage backends use different accounting. Those totals exclude shared
+images, volumes, bind mounts and logs. Container rows separately include
+`image_id`, `image_bytes`, `image_source=docker_image_size` and `image_error`.
+Consumers can add the Docker image estimate once per distinct immutable image ID;
+VM private copies already include their base content. Image failures preserve
+private counters and are reported separately. See the service tutorial for details.
 
 ### Runtime startup capture
 

@@ -37,6 +37,7 @@ class Client:
         if args[0] == 'disk-usage':
             return dict(timestamp='now', resources=[
                 dict(kind=kind, id=ident, disk_bytes=1024, error=None,
+                     image_id='sha256:shared', image_bytes=8192, image_source='docker_image_size',
                      source='host_allocated_blocks' if kind == 'vm' else 'docker_writable_layer')
                 for kind, ident in [('vm', 'vm1'), ('vm', 'vm2'),
                                     ('container', 'st-container01'), ('container', 'c1')]])
@@ -201,6 +202,8 @@ def test_repeated_runs_append_joinable_raw_csvs(tmp_path, monkeypatch):
     for row, startup_row in zip(disk, tables['startup']):
         assert all(row[key] == startup_row[key] for key in BENCH['COMMON_FIELDS'])
         assert row['disk_bytes'] == '1024' and row['source'] == 'docker_writable_layer'
+        assert row['image_id'] == 'sha256:shared' and row['image_bytes'] == '8192'
+        assert not row['image_error']
     assert {p.name for p in tmp_path.iterdir()} == {'startup.csv', 'usage.csv', 'host_memory.csv', 'disk_usage.csv'}
 
 
@@ -727,16 +730,17 @@ def test_schedule_seed_is_reproducible_and_independent_of_global_random_state():
     assert list(BENCH['experiment_schedule'](plans, 3, random.Random(43))) != first
 
 
-def test_disk_rows_join_by_kind_and_instance_and_preserve_raw_sizes():
+@pytest.mark.parametrize('kind', ['vm', 'container'])
+def test_disk_rows_join_by_kind_and_instance_and_preserve_raw_sizes(kind):
     class DiskClient:
         def call(self, command):
             assert command == 'disk-usage'
             return dict(timestamp='now', resources=[
-                dict(kind='container', id='vm1', disk_bytes=999, source='docker_writable_layer'),
-                dict(kind='vm', id='vm2', disk_bytes=4096, file_bytes=8192, source='host_allocated_blocks'),
-                dict(kind='vm', id='vm1', disk_bytes=0, file_bytes=8192, source='host_allocated_blocks')])
+                dict(kind='other', id='vm1', disk_bytes=999, source='docker_writable_layer'),
+                dict(kind=kind, id='vm2', disk_bytes=4096, file_bytes=8192, source='host_allocated_blocks'),
+                dict(kind=kind, id='vm1', disk_bytes=0, file_bytes=8192, source='host_allocated_blocks')])
 
-    rows = BENCH['disk_rows'](DiskClient(), ['vm1', 'vm2'], 'vm', 2, 3)
+    rows = BENCH['disk_rows'](DiskClient(), ['vm1', 'vm2'], kind, 2, 3)
     assert [r['instance'] for r in rows] == ['vm1', 'vm2']
     assert [r['disk_bytes'] for r in rows] == [0, 4096]
     assert all(r['file_bytes'] == 8192 and r['source'] == 'host_allocated_blocks' for r in rows)
@@ -775,6 +779,24 @@ def test_disk_collection_failure_preserves_readiness_and_cleanup(tmp_path):
     assert client.calls[-2:] == ['topodown', 'topodestroy']
 
 
+@pytest.mark.parametrize('image_bytes', [8192, None, -1, True, 1.5])
+def test_disk_rows_keep_image_measurement_separate_from_private_size(image_bytes):
+    class DiskClient:
+        def call(self, *_):
+            return dict(timestamp='now', resources=[dict(
+                kind='container', id='c1', disk_bytes=1024, source='docker_writable_layer',
+                image_id='sha256:actual', image_bytes=image_bytes, image_source='docker_image_size')])
+
+    row = BENCH['disk_rows'](DiskClient(), ['c1'], 'container', 1, 1)[0]
+    assert row['status'] == 'sampled' and row['disk_bytes'] == 1024
+    if type(image_bytes) is int and image_bytes >= 0:
+        assert row['image_bytes'] == image_bytes
+        assert row['image_id'] == 'sha256:actual'
+        assert not row['image_error']
+    else:
+        assert row['image_bytes'] == '' and row['image_error']
+
+
 def test_interrupt_during_disk_collection_still_cleans_and_retains_startup_times(tmp_path):
     class InterruptedDiskClient(Client):
         def call(self, *args):
@@ -790,7 +812,8 @@ def test_interrupt_during_disk_collection_still_cleans_and_retains_startup_times
     assert client.calls[-2:] == ['topodown', 'topodestroy']
 
 
-def test_disk_failure_is_reported_without_polluting_other_csvs(tmp_path, monkeypatch):
+@pytest.mark.parametrize('failure', ['private', 'image'])
+def test_disk_failure_is_reported_without_polluting_other_csvs(tmp_path, monkeypatch, failure):
     import csv
     from types import SimpleNamespace
 
@@ -805,7 +828,12 @@ def test_disk_failure_is_reported_without_polluting_other_csvs(tmp_path, monkeyp
             if args[0] == 'disk-usage':
                 self.disk_calls += 1
                 if self.disk_calls > 1:  # Preflight succeeds; warmup and measurement fail collection.
-                    raise RuntimeError('disk collection failed')
+                    if failure == 'private':
+                        raise RuntimeError('disk collection failed')
+                    response = super().call(*args)
+                    for row in response['resources']:
+                        row.update(image_error='image unavailable')
+                    return response
             return super().call(*args)
 
     client = DiskFailureClient()
@@ -822,6 +850,11 @@ def test_disk_failure_is_reported_without_polluting_other_csvs(tmp_path, monkeyp
         assert len(rows) == 1 and rows[0]['status'] == 'ready'
     with (tmp_path / 'disk_usage.csv').open() as source:
         rows = list(csv.DictReader(source))
-        assert len(rows) == 1 and rows[0]['status'] == 'collection_failed' and rows[0]['disk_bytes'] == ''
+        assert len(rows) == 1
+        if failure == 'private':
+            assert rows[0]['status'] == 'collection_failed' and rows[0]['disk_bytes'] == ''
+        else:
+            assert rows[0]['status'] == 'sampled' and rows[0]['disk_bytes'] == '1024'
+            assert rows[0]['image_error'] == 'image unavailable'
     assert client.disk_calls == 3
     assert client.calls.count('topodestroy') == 2
